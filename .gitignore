@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.example
+/codearts_proof/
+/ppt/
+/video/

@@ -1,0 +1,32 @@
+# AI-JOB Python AI 服务：Conda + Python 3.11
+# 创建与配置环境（已有 ai-job 环境时跳过 create）：
+# conda create -n ai-job python=3.11 -y
+# conda env config vars set -n ai-job PYTHONNOUSERSITE=1
+# conda activate ai-job
+# python -m pip install -r requirements.txt
+# python -m pip check
+# 已激活环境时需重新激活，才能使 PYTHONNOUSERSITE 生效。
+# 以下为当前 ai-job 环境验证过的直接依赖版本，间接依赖未锁定。
+
+# Internal API, configuration and service authentication
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+PyJWT[crypto]==2.15.1
+httpx==0.28.1
+sse-starlette==3.0.3
+
+# Agent workflows and Qwen/Bailian OpenAI-compatible model API
+langgraph==1.2.18
+langchain-openai==1.7.3
+openai==2.54.0
+
+# AI run storage and vector retrieval (services must be deployed separately)
+SQLAlchemy==2.1.6
+aiomysql==0.3.2
+qdrant-client==1.20.0
+
+# Extract text from resume files
+pypdf==6.21.3
+python-docx==1.2.0
