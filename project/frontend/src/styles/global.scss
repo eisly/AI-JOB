@@ -1,0 +1,46 @@
+@use 'variables.scss' as *;
+@use 'reset.scss';
+
+body {
+  background-color: $ai-bg-page;
+  color: $ai-text-primary;
+  font-size: 14px;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+}
+
+// Element Plus 主题覆盖
+:root {
+  --el-color-primary: #{$ai-primary};
+  --el-color-primary-light-3: #{$ai-primary-hover};
+  --el-color-primary-light-9: #{$ai-primary-light};
+  --el-border-radius-base: #{$ai-radius-sm};
+}
+
+// 通用工具类
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text-primary {
+  color: $ai-text-primary;
+}
+
+.text-secondary {
+  color: $ai-text-secondary;
+}
