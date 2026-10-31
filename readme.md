@@ -88,9 +88,30 @@ docker compose logs mysql   # 查看启动日志
 
 数据保存在 Docker 命名卷中，普通停止或重建容器不会自动删除数据。不要使用 `docker compose down -v`：该命令会删除项目持久化卷及其中的数据。命名卷不等于备份，重要数据仍需另行备份。
 
+### 3.4 启动 Redis
+
+项目 Compose 同时提供 Redis 7.4.12，用于本地后端开发。默认地址为 `127.0.0.1:6379`，仅绑定本机，无密码；此配置不用于共享或生产环境。已有 `.env` 无需覆盖，默认值即可使用；若 6379 被占用，在 `.env` 中设置 `REDIS_PORT`，Compose 和本机 Java 后端会读取同一个端口。
+
+在项目根目录执行：
+
+```powershell
+docker compose up -d --wait mysql redis
+docker compose ps
+docker compose exec -T redis redis-cli ping
+```
+
+两个容器均应显示 `healthy`，Redis 检查应返回 `PONG`。Redis 启用 AOF 持久化，数据保存在 `redis_data` 命名卷中。停止和再次启动可分别执行：
+
+```powershell
+docker compose stop redis
+docker compose up -d --wait redis
+```
+
+Java 后端在宿主机运行时使用上述本机地址；若以后将后端放入同一个 Compose 网络，Redis 地址应改为服务名 `redis`、端口 `6379`。`REDIS_PASSWORD` 用于连接另行配置了认证的 Redis，单独设置该变量不会为当前 Compose Redis 开启认证。
+
 ## 4. 启动 Java 基础后端
 
-确认 MySQL 容器已健康启动，然后从项目根目录进入后端目录：
+确认 MySQL 和 Redis 容器已健康启动，然后从项目根目录进入后端目录：
 
 ```powershell
 cd project\backend
@@ -101,7 +122,7 @@ mvn spring-boot:run
 
 默认后端端口为 `8080`。终端出现 `Started BackendApplication` 表示基础服务已启动；按 `Ctrl+C` 停止。当前项目只有工程骨架和依赖配置，业务接口、正式 JWT 登录认证及 Agent 通信尚未实现。运行时提供的是 Spring Security 默认保护，不等同于项目设计中的登录功能。
 
-当前 Compose **只启动 MySQL**；后端的 Redis 配置默认为 `localhost:6379`，需要开发相关功能时另行准备 Redis。Python Agent、Qdrant 和前端也不会由该 Compose 自动启动。
+当前 Compose 提供 **MySQL 和 Redis**；执行 `docker compose up -d --wait mysql redis` 可启动两者，单独执行 `docker compose up -d mysql` 则只启动 MySQL。Python Agent、Qdrant 和前端不会由该 Compose 自动启动。
 
 ## 5. 演示数据与协作约定
 
@@ -123,4 +144,4 @@ mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3307 -u aijob -p career_bu
 mvn test
 ```
 
-当前启动测试使用 H2 内存数据库并关闭 Flyway，不会验证真实 MySQL、Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。
+`BackendApplicationTest` 使用 H2 内存数据库并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。现有测试不会验证 Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。

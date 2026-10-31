@@ -6,7 +6,9 @@
 
 准备 MySQL 8，创建 `career_business` 数据库，并启动 Redis。数据库可以通过 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖配置；Redis 可通过 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 配置，服务端口通过 `SERVER_PORT` 配置。`.env` 仅保存在本地，不要提交密码。
 
-项目根目录提供 `docker-compose.yml` 和 `.env.example`；首次使用时复制模板为 `.env` 并设置自己的密码，执行 `docker compose up -d mysql` 可启动持久化 MySQL。首次初始化后的账号、密码由数据库保存，修改 `.env` 不会自动修改数据库账号密码。`MYSQL_BIND_ADDRESS` 默认为 `127.0.0.1`，主机端口默认 3307。勿向公网直接暴露数据库。
+项目根目录提供 `docker-compose.yml` 和 `.env.example`；首次使用时复制模板为 `.env` 并设置自己的 MySQL 密码，执行 `docker compose up -d --wait mysql redis` 可启动持久化 MySQL 和 Redis。首次初始化后的 MySQL 账号、密码由数据库保存，修改 `.env` 不会自动修改数据库账号密码。`MYSQL_BIND_ADDRESS` 默认为 `127.0.0.1`，MySQL 主机端口默认 3307。勿向公网直接暴露数据库。
+
+Compose Redis 使用固定版本 `7.4.12-alpine`，默认仅绑定 `127.0.0.1:6379`，本地开发不启用密码；数据通过 AOF 和 `redis_data` 命名卷持久化。`REDIS_PORT` 可同时调整 Compose 映射端口和本机后端连接端口。执行 `docker compose exec -T redis redis-cli ping` 应返回 `PONG`。`REDIS_PASSWORD` 是后端客户端配置，单独设置它不会给 Compose Redis 开启认证。共享或生产环境需要另行配置认证。
 
 从项目根目录或 `project/backend` 启动时，Spring Boot 会自动读取项目根目录的 `.env`，用于连接本机 Docker MySQL。无需手动复制密码到 `application.yml`。在 `project/backend` 目录执行：
 
@@ -14,7 +16,7 @@
 mvn spring-boot:run
 ```
 
-每位成员在本机启动独立 MySQL，使用相同配置，但数据不会自动同步。团队应协调 Flyway 版本，避免产生冲突的表结构。关闭容器可执行 `docker compose stop mysql`，再次启动使用 `docker compose up -d mysql`；不要使用 `docker compose down -v`，它会删除持久化卷。
+每位成员在本机启动独立 MySQL 和 Redis，使用相同配置，但数据不会自动同步。团队应协调 Flyway 版本，避免产生冲突的表结构。关闭容器可执行 `docker compose stop mysql redis`，再次启动使用 `docker compose up -d --wait mysql redis`；不要使用 `docker compose down -v`，它会删除持久化卷。
 
 首次启动需要数据库存在；Flyway 自动执行 `src/main/resources/db/migration/V1__init_business_schema.sql`，创建 Java 业务库的 P0 表。脚本不创建 Python Agent 独占的运行库。应用数据库账号需要具备迁移所需的建表和修改表权限；已有非空数据库不要直接当作新库执行，应先确认迁移策略。
 
@@ -26,4 +28,4 @@ mysql --default-character-set=utf8mb4 -u 你的数据库用户 -p career_busines
 
 演示账号已禁用，岗位和公司均为虚构；脚本不是可重复导入的迁移，不要在生产环境运行。
 
-使用 `mvn test` 运行启动测试；测试使用内存 H2 并关闭 Flyway，不会验证真实 MySQL 或 Redis。当前仅保留 Spring Security 默认保护，JWT 签发与校验、CSRF、角色和业务权限仍需按接口设计实现。
+使用 `mvn test` 运行测试。`BackendApplicationTest` 使用内存 H2 并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。现有测试不验证 Redis。当前仅保留 Spring Security 默认保护，JWT 签发与校验、CSRF、角色和业务权限仍需按接口设计实现。
