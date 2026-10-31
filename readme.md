@@ -120,7 +120,7 @@ mvn spring-boot:run
 
 从 `project/backend` 或项目根目录作为工作目录启动时，Spring Boot 会读取项目根目录的 `.env`，自动连接对应 MySQL。首次启动时，Flyway 会执行 `src/main/resources/db/migration/V1__init_business_schema.sql`，创建 Java 业务库的 31 张表及 Flyway 迁移记录表。
 
-默认后端端口为 `8080`。终端出现 `Started BackendApplication` 表示基础服务已启动；按 `Ctrl+C` 停止。当前项目只有工程骨架和依赖配置，业务接口、正式 JWT 登录认证及 Agent 通信尚未实现。运行时提供的是 Spring Security 默认保护，不等同于项目设计中的登录功能。
+默认后端端口为 `8080`，可通过 `.env` 中的 `SERVER_PORT` 修改。终端出现 `Started BackendApplication` 表示基础服务已启动；按 `Ctrl+C` 停止。当前已实现投递进度的新增、分页查询、详情、修改、删除和状态统计接口；首次启动会通过新增的 Flyway V2 创建 `application_record` 表。正式 JWT 登录认证及 Agent 通信尚未实现，投递进度的真实用户认证仍需与认证模块对接；详情见 `project/backend/README.md`。
 
 当前 Compose 提供 **MySQL 和 Redis**；执行 `docker compose up -d --wait mysql redis` 可启动两者，单独执行 `docker compose up -d mysql` 则只启动 MySQL。Python Agent、Qdrant 和前端不会由该 Compose 自动启动。
 
@@ -144,4 +144,4 @@ mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3307 -u aijob -p career_bu
 mvn test
 ```
 
-`BackendApplicationTest` 使用 H2 内存数据库并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。现有测试不会验证 Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。
+`BackendApplicationTest` 使用 H2 内存数据库并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。投递进度集成测试使用独立的 `career_business_test` 数据库，需提前建库并向当前数据库用户授权。默认 `integration-tests=auto` 在测试库不可达时跳过该组测试；正式验收必须执行 `mvn clean test -Dintegration-tests=true`，要求数据库不可达时失败，并检查没有跳过项。现有测试不会验证 Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。

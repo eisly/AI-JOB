@@ -20,6 +20,10 @@
     <properties>
         <java.version>21</java.version>
         <mybatis-spring-boot.version>4.0.0</mybatis-spring-boot.version>
+        <!-- 集成测试执行模式（经 surefire systemPropertyVariables 桥接传入测试 JVM）：
+             auto（默认）= 测试库可达才执行；true = 强制执行，数据库不可达时测试必须失败（验收/CI 用）；
+             false = 显式禁用。命令行覆盖：mvn test -Dintegration-tests=true -->
+        <integration-tests>auto</integration-tests>
     </properties>
 
     <dependencies>
@@ -44,6 +48,7 @@
             <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
         <dependency>
+
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter</artifactId>
             <version>${mybatis-spring-boot.version}</version>
@@ -72,6 +77,16 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>test</scope>
@@ -83,6 +98,16 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- 命令行 -Dintegration-tests=... 默认不会传入 surefire fork 的 JVM，需显式桥接 -->
+                        <integration-tests>${integration-tests}</integration-tests>
+                    </systemPropertyVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>

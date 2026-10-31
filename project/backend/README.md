@@ -28,4 +28,14 @@ mysql --default-character-set=utf8mb4 -u 你的数据库用户 -p career_busines
 
 演示账号已禁用，岗位和公司均为虚构；脚本不是可重复导入的迁移，不要在生产环境运行。
 
-使用 `mvn test` 运行测试。`BackendApplicationTest` 使用内存 H2 并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。现有测试不验证 Redis。当前仅保留 Spring Security 默认保护，JWT 签发与校验、CSRF、角色和业务权限仍需按接口设计实现。
+使用 `mvn test` 运行测试。`BackendApplicationTest` 使用内存 H2 并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。投递进度集成测试连接独立的 `career_business_test`，需提前创建数据库并授予当前数据库用户该库权限；测试会执行 Flyway V1、V2，自行准备和清理测试用户、岗位及投递记录。现有测试不验证 Redis。
+
+投递进度已实现 `/api/v1/applications` 下的新增、分页筛选、详情、部分修改、物理删除和状态统计，包含用户归属隔离、字段校验、版本冲突检测及 PATCH 字段省略/null 的区分。新增表由 `V2__add_application_record.sql` 创建，未修改已执行的 V1。正式认证尚待对接：当前 `SecurityConfig` 为演示放行配置，投递进度接口另行通过 `CurrentUserResolver` 要求已认证的 JWT 用户身份；本地请求头模拟仅在 `local` profile 和显式开关同时启用时生效，默认关闭，不能替代正式登录。
+
+集成测试支持 `integration-tests=auto/true/false`：默认 auto 在测试库不可达时跳过；true 强制执行、连接失败即失败；false 显式跳过。正式验收在本目录执行：
+
+```powershell
+mvn clean test -Dintegration-tests=true
+```
+
+Windows 也可使用本目录的 `mvn-run.bat`，在 PowerShell 中执行 `./mvn-run.bat clean test -Dintegration-tests=true`。脚本优先使用已有 `JAVA_HOME` 和 PATH 中的 Maven，可通过 `AIJOB_JAVA_HOME`、`AIJOB_MVN`、`AIJOB_SETTINGS`、`AIJOB_M2_REPO` 显式指定配置；团队验收使用 JDK 21，并确认没有跳过测试。

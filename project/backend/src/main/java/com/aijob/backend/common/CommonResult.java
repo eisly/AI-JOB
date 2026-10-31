@@ -1,8 +1,10 @@
 package com.aijob.backend.common;
 
+import java.util.UUID;
+
 /**
- * 统一返回体，对齐接口文档中的 CommonResult 约定（code/msg/data/traceId）。
- * 这是一个最小 demo 实现，仅用于跑通分层链路。
+ * 统一返回体，对齐接口文档中的 CommonResult 约定（code/msg/data/traceId）。 traceId 取自
+ * TraceIdFilter 写入的 MDC；无请求上下文时兜底生成。
  */
 public class CommonResult<T> {
 
@@ -58,5 +60,10 @@ public class CommonResult<T> {
 
     public void setTraceId(String traceId) {
         this.traceId = traceId;
+    }
+
+    public CommonResult<T> withTraceId(String traceId) {
+        this.traceId = traceId != null ? traceId : UUID.randomUUID().toString();
+        return this;
     }
 }

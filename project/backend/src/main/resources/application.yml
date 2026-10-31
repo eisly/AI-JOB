@@ -20,3 +20,10 @@ mybatis:
 
 server:
   port: ${SERVER_PORT:8080}
+app:
+  auth:
+    # 本地联调降级认证开关：默认关闭，且仅当激活 profile 包含 local 时才可能生效（双条件缺一不可）。
+    # 其他环境（默认/生产）即使误设该开关为 true 也不会启用，任何请求头伪造均得到 401。
+    # 开启时仅接受 app_user 中 status=ACTIVE 的真实用户；正常与生产运行只认
+    # SecurityContext 中已验证的非匿名认证身份。建议在 application-local.yml 中显式开启。
+    dev-user-header-enabled: ${APP_AUTH_DEV_USER_HEADER_ENABLED:false}
