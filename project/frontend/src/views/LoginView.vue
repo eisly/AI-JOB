@@ -70,7 +70,7 @@ async function submit(): Promise<void> {
       localStorage.removeItem(REMEMBER_KEY)
     }
     ElMessage.success('登录成功')
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/home'
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.push(redirect)
   } catch (error) {
     ElMessage.error(errorMessage(error))

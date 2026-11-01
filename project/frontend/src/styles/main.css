@@ -152,7 +152,7 @@ a {
 }
 
 .home-page {
-  min-height: 100vh;
+  min-height: 100%;
   padding: 56px clamp(24px, 6vw, 96px);
   background:
     radial-gradient(circle at top right, rgba(99, 102, 241, 0.12), transparent 45%),

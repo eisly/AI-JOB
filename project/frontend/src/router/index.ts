@@ -1,40 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { routes } from './routes'
+import './types'
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [
-    { path: '/', redirect: '/login' },
-    {
-      path: '/login',
-      name: 'login',
-      component: () => import('@/views/LoginView.vue'),
-      meta: { public: true }
-    },
-    {
-      path: '/register',
-      name: 'register',
-      component: () => import('@/views/RegisterView.vue'),
-      meta: { public: true }
-    },
-    {
-      path: '/forgot-password',
-      name: 'forgot-password',
-      component: () => import('@/views/ForgotPasswordView.vue'),
-      meta: { public: true }
-    },
-    {
-      path: '/reset-password',
-      name: 'reset-password',
-      component: () => import('@/views/ResetPasswordView.vue'),
-      meta: { public: true }
-    },
-    {
-      path: '/home',
-      name: 'home',
-      component: () => import('@/views/HomeView.vue')
-    }
-  ]
+  routes,
 })
 
 router.beforeEach(async (to) => {
