@@ -1,15 +1,17 @@
 package com.aijob.backend.common;
 
-/**
- * 统一返回体，对齐接口文档中的 CommonResult 约定（code/msg/data/traceId）。
- * 这是一个最小 demo 实现，仅用于跑通分层链路。
- */
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.util.Map;
+
+
 public class CommonResult<T> {
 
     private Integer code;
     private String msg;
     private T data;
     private String traceId;
+    private ErrorBody error;
 
     public CommonResult() {
     }
@@ -18,14 +20,32 @@ public class CommonResult<T> {
         this.code = code;
         this.msg = msg;
         this.data = data;
+        this.traceId = TraceIdFilter.currentTraceId();
     }
 
     public static <T> CommonResult<T> success(T data) {
         return new CommonResult<>(200, "操作成功", data);
     }
 
+    public static <T> CommonResult<T> accepted(T data) {
+        return new CommonResult<>(202, "已受理", data);
+    }
+
     public static <T> CommonResult<T> notFound(String msg) {
-        return new CommonResult<>(404, msg, null);
+        return failure(ApiErrorCode.RESOURCE_NOT_FOUND, msg, null);
+    }
+
+    public static <T> CommonResult<T> failure(ApiErrorCode errorCode) {
+        return failure(errorCode, errorCode.getDefaultMessage(), null);
+    }
+
+    public static <T> CommonResult<T> failure(ApiErrorCode errorCode, String msg, Map<String, Object> details) {
+        CommonResult<T> result = new CommonResult<>();
+        result.code = errorCode.getCode();
+        result.msg = msg == null || msg.isBlank() ? errorCode.getDefaultMessage() : msg;
+        result.traceId = TraceIdFilter.currentTraceId();
+        result.error = new ErrorBody(errorCode.getKey(), errorCode.isRetryable(), details);
+        return result;
     }
 
     public Integer getCode() {
@@ -58,5 +78,14 @@ public class CommonResult<T> {
 
     public void setTraceId(String traceId) {
         this.traceId = traceId;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public ErrorBody getError() {
+        return error;
+    }
+
+    public void setError(ErrorBody error) {
+        this.error = error;
     }
 }

@@ -1,5 +1,8 @@
 package com.aijob.backend.user.service.impl;
 
+import com.aijob.backend.auth.vo.UserVO;
+import com.aijob.backend.common.ApiErrorCode;
+import com.aijob.backend.common.BusinessException;
 import com.aijob.backend.user.entity.AppUser;
 import com.aijob.backend.user.mapper.AppUserMapper;
 import com.aijob.backend.user.service.AppUserService;
@@ -7,9 +10,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/**
- * 用户查询服务实现，直连 MyBatis Mapper。
- */
 @Service
 public class AppUserServiceImpl implements AppUserService {
 
@@ -27,5 +27,27 @@ public class AppUserServiceImpl implements AppUserService {
     @Override
     public AppUser getUserById(String id) {
         return appUserMapper.selectById(id);
+    }
+
+    @Override
+    public UserVO getCurrentUser(String userId) {
+        AppUser user = appUserMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ApiErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
+        }
+        return toUserVO(user);
+    }
+
+    @Override
+    public UserVO updateNickname(String userId, String nickname) {
+        int updated = appUserMapper.updateNickname(userId, nickname.trim());
+        if (updated == 0) {
+            throw new BusinessException(ApiErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
+        }
+        return getCurrentUser(userId);
+    }
+
+    private static UserVO toUserVO(AppUser user) {
+        return new UserVO(user.getId(), user.getEmail(), user.getNickname(), user.getRole(), user.getCreatedAt());
     }
 }

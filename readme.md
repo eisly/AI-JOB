@@ -58,11 +58,11 @@ MySQL 用户和密码只在**全新数据卷的首次初始化**时创建；后�
 ### 3.2 启动并检查
 
 ```powershell
-docker compose up -d mysql
+docker compose up -d
 docker compose ps
 ```
 
-第一次运行会下载 MySQL 8.0.42 镜像，等待状态变为 `healthy`。Compose 会创建 `career_business` 数据库和持久化卷，但**不会自动创建业务表**；业务表由下一步启动后端时的 Flyway 创建。
+第一次运行会下载 MySQL 8.0.42、Redis 7.4 和 Mailpit 镜像，等待 `mysql`、`redis` 状态变为 `healthy`。Compose 会创建 `career_business` 数据库和持久化卷，但**不会自动创建业务表**；业务表由下一步启动后端时的 Flyway 创建。Mailpit 的 Web 收件箱在 `http://localhost:8025`。
 
 使用 IDEA、DataGrip 或 Navicat 连接时选择普通 **MySQL** 驱动，填写：
 
@@ -99,11 +99,23 @@ mvn spring-boot:run
 
 从 `project/backend` 或项目根目录作为工作目录启动时，Spring Boot 会读取项目根目录的 `.env`，自动连接对应 MySQL。首次启动时，Flyway 会执行 `src/main/resources/db/migration/V1__init_business_schema.sql`，创建 Java 业务库的 31 张表及 Flyway 迁移记录表。
 
-默认后端端口为 `8080`。终端出现 `Started BackendApplication` 表示基础服务已启动；按 `Ctrl+C` 停止。当前项目只有工程骨架和依赖配置，业务接口、正式 JWT 登录认证及 Agent 通信尚未实现。运行时提供的是 Spring Security 默认保护，不等同于项目设计中的登录功能。
+默认后端端口为 `8080`。终端出现 `Started BackendApplication` 表示服务已启动；按 `Ctrl+C` 停止。登录、注册、刷新、退出、领取 CSRF、密码找回以及 `GET/PATCH /api/v1/users/me` 已实现（JWT accessToken + HttpOnly 刷新 Cookie 轮换 + CSRF 双提交 + Redis 限流与撤销）；Agent 通信尚未实现。
 
-当前 Compose **只启动 MySQL**；后端的 Redis 配置默认为 `localhost:6379`，需要开发相关功能时另行准备 Redis。Python Agent、Qdrant 和前端也不会由该 Compose 自动启动。
+`docker compose up -d` 会同时启动 MySQL、Redis（6379）和 Mailpit（SMTP 1025 / Web 8025）。Python Agent、Qdrant 和前端不由该 Compose 启动，前端按下一节在本机运行。
 
-## 5. 演示数据与协作约定
+## 5. 启动前端
+
+```powershell
+cd project\frontend
+npm install
+npm run dev
+```
+
+前端使用 Vue 3 + TypeScript + Vite，dev server 监听 `http://localhost:5173`，并将 `/api` 代理到 `http://localhost:8080`。请用 `localhost` 而不是 `127.0.0.1` 访问页面：后端刷新 Cookie 为 host-only，混用两个主机名会导致刷新令牌不被发送。
+
+密码找回邮件可在 Mailpit 收件箱 `http://localhost:8025` 查看。若要在演示时跳过邮箱，可在 `.env` 中设置 `APP_MAIL_EXPOSE_CODE=true`，验证码会同时写入后端日志。
+
+## 6. 演示数据与协作约定
 
 表结构创建成功后，如需统一的测试样本，可在**空的开发库**手动导入 `project/backend/src/main/resources/db/demo/demo_data.sql`。例如已安装 MySQL 命令行客户端时，在项目根目录执行：
 
@@ -111,11 +123,11 @@ mvn spring-boot:run
 mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3307 -u aijob -p career_business -e "source project/backend/src/main/resources/db/demo/demo_data.sql"
 ```
 
-输入自己 `.env` 中的 `MYSQL_PASSWORD`；如果主机、端口或用户名不同，替换命令中的对应值。脚本只用于开发库，不会自动运行，也不是可重复导入脚本。演示账号已禁用，岗位和公司均为虚构。
+输入自己 `.env` 中的 `MYSQL_PASSWORD`；如果主机、端口或用户名不同，替换命令中的对应值。脚本只用于开发库，不会自动运行，也不是可重复导入脚本。演示账号已禁用，岗位和公司均为虚构；登录演示请直接调用注册接口创建账号。
 
 团队通过 Git 同步 Compose、依赖文件和 Flyway 迁移；各自的 Docker 数据不会自动同步。共享同一批数据时，应提前约定演示数据或使用专门的共享联调库。Flyway 的 `V1` 执行后不要直接修改；表结构调整应新增版本迁移，并由团队协调版本号。
 
-## 6. 后端测试
+## 7. 后端测试
 
 在 `project/backend` 目录执行：
 
@@ -123,4 +135,16 @@ mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3307 -u aijob -p career_bu
 mvn test
 ```
 
-当前启动测试使用 H2 内存数据库并关闭 Flyway，不会验证真实 MySQL、Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。
+`AuthFlowIntegrationTest` 使用真实 MySQL、Redis 与 Mailpit，覆盖注册、重复邮箱、弱密码、登录失败、当前用户、改昵称、刷新轮换、重放吊销、错误 CSRF、退出、限流、验证码重置与账号枚举防护。首次运行前需创建独立测试库并授权：
+
+```powershell
+docker exec ai-job-mysql-1 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS career_business_test CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci; GRANT ALL PRIVILEGES ON career_business_test.* TO 'aijob'@'%'; FLUSH PRIVILEGES;"
+```
+
+只跑启动测试（不依赖数据库）：
+
+```powershell
+mvn -Dtest=BackendApplicationTest test
+```
+
+`DatabaseQueryTest` 直连 `career_business`，需要已导入演示数据。更多后端说明见 `project/backend/README.md`。
