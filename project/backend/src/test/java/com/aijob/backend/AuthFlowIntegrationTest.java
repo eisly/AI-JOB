@@ -34,6 +34,7 @@ class AuthFlowIntegrationTest {
 
     private static final String PASSWORD = "StrongPass_123";
     private static final String WRONG_PASSWORD = "WrongPass_999";
+    private static final String FRONTEND_ORIGIN = "http://localhost:5173";
 
     @LocalServerPort
     private int port;
@@ -44,7 +45,7 @@ class AuthFlowIntegrationTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private HttpClient client;
 
-    private record Resp(int status, String body, List<String> setCookies, String csrfHeader) {
+    private record Resp(int status, String body, List<String> setCookies, String csrfHeader, String retryAfter) {
         JsonNode json(ObjectMapper mapper) throws Exception {
             return mapper.readTree(body);
         }
@@ -75,7 +76,8 @@ class AuthFlowIntegrationTest {
         HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         return new Resp(response.statusCode(), response.body(),
                 response.headers().allValues("set-cookie"),
-                response.headers().firstValue("X-CSRF-Token").orElse(null));
+                response.headers().firstValue("X-CSRF-Token").orElse(null),
+                response.headers().firstValue("Retry-After").orElse(null));
     }
 
     private static String refreshTokenOf(Resp resp) {
@@ -119,7 +121,7 @@ class AuthFlowIntegrationTest {
     }
 
     private static Map<String, String> withCookie(String refreshToken) {
-        return Map.of("Cookie", "refresh_token=" + refreshToken);
+        return Map.of("Cookie", "refresh_token=" + refreshToken, "Origin", FRONTEND_ORIGIN);
     }
 
     @Test
@@ -147,15 +149,15 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
-    void rejectsShortPasswordWithFieldDetails() throws Exception {
+    void rejectsWeakPasswordWithDedicatedCode() throws Exception {
         Resp resp = send("POST", "/api/v1/auth/register",
                 """
                         {"email":"%s","password":"short","nickname":"弱密码"}
                         """.formatted(uniqueEmail()), Map.of());
         assertThat(resp.status()).isEqualTo(400);
         JsonNode node = resp.json(objectMapper);
-        assertThat(node.at("/code").asInt()).isEqualTo(40001);
-        assertThat(node.at("/error/details/fields/0/field").asText()).isEqualTo("password");
+        assertThat(node.at("/code").asInt()).isEqualTo(40002);
+        assertThat(node.at("/error/key").asText()).isEqualTo("WEAK_PASSWORD");
     }
 
     @Test
@@ -201,6 +203,7 @@ class AuthFlowIntegrationTest {
         Session session = registerAndLogin();
 
         Resp refreshed = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", session.csrfToken(),
                 "Cookie", "refresh_token=" + session.refreshToken()));
         assertThat(refreshed.status()).isEqualTo(200);
@@ -210,11 +213,13 @@ class AuthFlowIntegrationTest {
         assertThat(rotatedCsrf).isNotBlank();
 
         Resp replay = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", session.csrfToken(),
                 "Cookie", "refresh_token=" + session.refreshToken()));
         assertThat(replay.status()).isEqualTo(401);
 
         Resp afterFamilyRevoked = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", rotatedCsrf,
                 "Cookie", "refresh_token=" + rotatedRefresh));
         assertThat(afterFamilyRevoked.status()).isEqualTo(401);
@@ -224,6 +229,7 @@ class AuthFlowIntegrationTest {
     void rejectsRefreshWithWrongCsrfToken() throws Exception {
         Session session = registerAndLogin();
         Resp resp = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", "not-the-token",
                 "Cookie", "refresh_token=" + session.refreshToken()));
         assertThat(resp.status()).isEqualTo(401);
@@ -234,6 +240,7 @@ class AuthFlowIntegrationTest {
         Session session = registerAndLogin();
         Resp logout = send("POST", "/api/v1/auth/logout", "{}", Map.of(
                 "Authorization", "Bearer " + session.accessToken(),
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", session.csrfToken(),
                 "Cookie", "refresh_token=" + session.refreshToken()));
         assertThat(logout.status()).isEqualTo(200);
@@ -245,6 +252,7 @@ class AuthFlowIntegrationTest {
         assertThat(me.status()).isEqualTo(401);
 
         Resp refresh = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", FRONTEND_ORIGIN,
                 "X-CSRF-Token", session.csrfToken(),
                 "Cookie", "refresh_token=" + session.refreshToken()));
         assertThat(refresh.status()).isEqualTo(401);
@@ -324,6 +332,27 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
+    void includesRetryAfterWhenResetCodeIsCoolingDown() throws Exception {
+        String email = uniqueEmail();
+        Resp first = send("POST", "/api/v1/auth/password/forgot",
+                """
+                        {"email":"%s"}
+                        """.formatted(email), Map.of());
+        assertThat(first.status()).isEqualTo(200);
+
+        Resp second = send("POST", "/api/v1/auth/password/forgot",
+                """
+                        {"email":"%s"}
+                        """.formatted(email), Map.of());
+        assertThat(second.status()).isEqualTo(429);
+        JsonNode node = second.json(objectMapper);
+        assertThat(node.at("/code").asInt()).isEqualTo(42902);
+        assertThat(node.at("/error/key").asText()).isEqualTo("CODE_SEND_TOO_FREQUENT");
+        assertThat(second.retryAfter()).isNotBlank();
+        assertThat(Long.parseLong(second.retryAfter())).isBetween(1L, 60L);
+    }
+
+    @Test
     void rejectsInvalidVerificationCode() throws Exception {
         Session session = registerAndLogin();
         Resp resp = send("POST", "/api/v1/auth/password/reset",
@@ -332,5 +361,47 @@ class AuthFlowIntegrationTest {
                         """.formatted(session.email()), Map.of());
         assertThat(resp.status()).isEqualTo(400);
         assertThat(resp.json(objectMapper).at("/code").asInt()).isEqualTo(40003);
+    }
+
+    @Test
+    void rejectsRefreshFromUntrustedOrigin() throws Exception {
+        Session session = registerAndLogin();
+        Resp resp = send("POST", "/api/v1/auth/refresh", "{}", Map.of(
+                "Origin", "http://evil.example",
+                "X-CSRF-Token", session.csrfToken(),
+                "Cookie", "refresh_token=" + session.refreshToken()));
+        assertThat(resp.status()).isEqualTo(403);
+        assertThat(resp.json(objectMapper).at("/code").asInt()).isEqualTo(40301);
+    }
+
+    @Test
+    void rejectsCsrfRequestWithoutOriginOrReferer() throws Exception {
+        Session session = registerAndLogin();
+        Resp resp = send("GET", "/api/v1/auth/csrf", null,
+                Map.of("Cookie", "refresh_token=" + session.refreshToken()));
+        assertThat(resp.status()).isEqualTo(403);
+        assertThat(resp.json(objectMapper).at("/code").asInt()).isEqualTo(40301);
+    }
+
+    @Test
+    void usersEndpointsRequireAuthentication() throws Exception {
+        Resp list = send("GET", "/api/v1/users", null, Map.of());
+        assertThat(list.status()).isEqualTo(401);
+        assertThat(list.json(objectMapper).at("/code").asInt()).isEqualTo(40101);
+
+        Resp detail = send("GET", "/api/v1/users/10000000-0000-4000-8000-000000000001", null, Map.of());
+        assertThat(detail.status()).isEqualTo(401);
+        assertThat(detail.json(objectMapper).at("/code").asInt()).isEqualTo(40101);
+
+        Session session = registerAndLogin();
+        Resp forbiddenList = send("GET", "/api/v1/users", null,
+                Map.of("Authorization", "Bearer " + session.accessToken()));
+        assertThat(forbiddenList.status()).isEqualTo(403);
+        assertThat(forbiddenList.json(objectMapper).at("/code").asInt()).isEqualTo(40301);
+
+        Resp forbiddenDetail = send("GET", "/api/v1/users/10000000-0000-4000-8000-000000000001", null,
+                Map.of("Authorization", "Bearer " + session.accessToken()));
+        assertThat(forbiddenDetail.status()).isEqualTo(403);
+        assertThat(forbiddenDetail.json(objectMapper).at("/code").asInt()).isEqualTo(40301);
     }
 }

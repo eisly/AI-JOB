@@ -1,0 +1,172 @@
+:root {
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  color: $ai-text-primary;
+  background-color: $ai-bg-page;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-eyebrow {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: $ai-primary;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.form-card .el-form-item {
+  margin-bottom: 16px;
+}
+
+.form-card .el-form-item.is-error {
+  margin-bottom: 26px;
+}
+
+.submit-button {
+  width: 100%;
+  height: 42px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.form-footer {
+  margin: 24px 0 0;
+  text-align: center;
+  font-size: 14px;
+  color: $ai-text-secondary;
+}
+
+.form-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 12px;
+  font-size: 14px;
+  color: $ai-text-secondary;
+}
+
+.form-divider::before,
+.form-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: $ai-border;
+}
+
+.ghost-button {
+  display: block;
+  width: 100%;
+  height: 42px;
+  line-height: 42px;
+  text-align: center;
+  border: 1px solid $ai-primary;
+  border-radius: $ai-radius;
+  background: $ai-bg-card;
+  color: $ai-primary;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ghost-button:hover {
+  background: $ai-primary-light;
+}
+
+.field-hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: $ai-text-tertiary;
+}
+
+.link {
+  color: $ai-primary;
+  font-weight: 500;
+}
+
+.link:hover {
+  color: $ai-primary-hover;
+}
+
+.home-page {
+  min-height: 100%;
+  padding: 56px clamp(24px, 6vw, 96px);
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 45%),
+    $ai-bg-page;
+}
+
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.home-header h1 {
+  margin: 6px 0 8px;
+  font-size: 32px;
+  font-weight: 650;
+}
+
+.home-subtitle {
+  margin: 0;
+  color: $ai-text-secondary;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.home-card {
+  padding: 32px;
+  border-radius: 18px;
+  background: $ai-bg-card;
+  box-shadow: $ai-shadow-hover;
+}
+
+.home-card h2 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.home-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  row-gap: 14px;
+  font-size: 14px;
+}
+
+.home-facts dt {
+  color: $ai-text-tertiary;
+}
+
+.home-facts dd {
+  margin: 0;
+  color: #1e293b;
+  word-break: break-all;
+}

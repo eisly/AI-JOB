@@ -70,6 +70,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public UserVO register(RegisterRequest request) {
         String email = normalizeEmail(request.email());
+        validatePassword(request.password());
         if (appUserMapper.selectAuthByEmail(email) != null) {
             throw new BusinessException(ApiErrorCode.EMAIL_ALREADY_EXISTS);
         }
@@ -155,6 +156,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         String email = normalizeEmail(request.email());
+        validatePassword(request.newPassword());
         VerificationCodeService.VerifyResult result = verificationCodeService.verifyAndConsume(email, request.code());
         if (result != VerificationCodeService.VerifyResult.OK) {
             throw new BusinessException(ApiErrorCode.INVALID_VERIFICATION_CODE);
@@ -169,6 +171,16 @@ public class AuthServiceImpl implements AuthService {
 
     private static UserVO toUserVO(AppUserAuth user) {
         return new UserVO(user.getId(), user.getEmail(), user.getNickname(), user.getRole(), user.getCreatedAt());
+    }
+
+    private static void validatePassword(String password) {
+        if (password == null) {
+            throw new BusinessException(ApiErrorCode.WEAK_PASSWORD);
+        }
+        int length = password.codePointCount(0, password.length());
+        if (length < 10 || length > 72) {
+            throw new BusinessException(ApiErrorCode.WEAK_PASSWORD);
+        }
     }
 
     private static String normalizeEmail(String email) {

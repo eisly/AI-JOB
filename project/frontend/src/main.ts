@@ -7,7 +7,7 @@ import App from './App.vue'
 import router from './router'
 import { setUnauthorizedHandler } from './api/http'
 import './styles/index.scss'
-import './styles/main.css'
+import './styles/main.scss'
 
 const app = createApp(App)
 

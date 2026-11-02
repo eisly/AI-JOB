@@ -9,6 +9,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AuthShell: typeof import('./components/AuthShell.vue')['default']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
+    ElBadge: typeof import('element-plus/es')['ElBadge']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']

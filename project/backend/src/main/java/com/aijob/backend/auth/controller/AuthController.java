@@ -4,6 +4,7 @@ import com.aijob.backend.auth.dto.ForgotPasswordRequest;
 import com.aijob.backend.auth.dto.LoginRequest;
 import com.aijob.backend.auth.dto.RegisterRequest;
 import com.aijob.backend.auth.dto.ResetPasswordRequest;
+
 import com.aijob.backend.auth.security.UserPrincipal;
 import com.aijob.backend.auth.service.AuthService;
 import com.aijob.backend.auth.vo.CsrfVO;
@@ -60,12 +61,14 @@ public class AuthController {
     public ResponseEntity<CommonResult<TokenVO>> refresh(
             @RequestHeader(name = CSRF_HEADER, required = false) String csrfToken,
             HttpServletRequest httpRequest) {
+
         AuthService.LoginOutcome outcome = authService.refresh(readRefreshCookie(httpRequest), csrfToken);
         return tokenResponse(outcome);
     }
 
     @GetMapping("/csrf")
     public ResponseEntity<CommonResult<CsrfVO>> csrf(HttpServletRequest httpRequest) {
+
         String csrfToken = authService.csrf(readRefreshCookie(httpRequest));
         return ResponseEntity.ok()
                 .header(CSRF_HEADER, csrfToken)
@@ -77,6 +80,7 @@ public class AuthController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestHeader(name = CSRF_HEADER, required = false) String csrfToken,
             HttpServletRequest httpRequest) {
+
         authService.logout(readRefreshCookie(httpRequest), csrfToken, principal);
         ResponseCookie cleared = buildRefreshCookie("", Instant.EPOCH);
         return ResponseEntity.ok()

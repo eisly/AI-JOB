@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class VerificationCodeService {
@@ -35,7 +36,11 @@ public class VerificationCodeService {
         try {
             Boolean cooling = redisTemplate.hasKey(COOLDOWN_KEY + normalized);
             if (Boolean.TRUE.equals(cooling)) {
-                throw new BusinessException(ApiErrorCode.CODE_SEND_TOO_FREQUENT);
+                Long ttl = redisTemplate.getExpire(COOLDOWN_KEY + normalized, TimeUnit.SECONDS);
+                long retryAfter = ttl == null || ttl <= 0
+                        ? properties.resetCode().cooldownSeconds() : ttl;
+                throw new BusinessException(ApiErrorCode.CODE_SEND_TOO_FREQUENT,
+                        ApiErrorCode.CODE_SEND_TOO_FREQUENT.getDefaultMessage(), retryAfter);
             }
             String code = String.format("%06d", RANDOM.nextInt(1_000_000));
             redisTemplate.opsForValue().set(CODE_KEY + normalized, code,

@@ -1,6 +1,8 @@
 package com.aijob.backend.config;
 
 import com.aijob.backend.auth.security.JwtAuthenticationFilter;
+import com.aijob.backend.auth.security.OriginGuard;
+import com.aijob.backend.auth.security.OriginValidationFilter;
 import com.aijob.backend.common.ApiErrorCode;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
@@ -15,6 +17,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.filter.CorsFilter;
 
 import java.io.IOException;
 
@@ -23,9 +26,11 @@ import java.io.IOException;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final OriginGuard originGuard;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, OriginGuard originGuard) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.originGuard = originGuard;
     }
 
     @Bean
@@ -50,13 +55,14 @@ public class SecurityConfig {
                                 "/api/v1/auth/csrf",
                                 "/api/v1/auth/password/**").permitAll()
                         .requestMatchers("/api/v1/users/me").authenticated()
-                        .requestMatchers("/api/v1/users", "/api/v1/users/*").permitAll()
+                        .requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, exception) ->
                                 writeError(response, ApiErrorCode.UNAUTHENTICATED))
                         .accessDeniedHandler((request, response, exception) ->
                                 writeError(response, ApiErrorCode.FORBIDDEN)))
+                .addFilterBefore(new OriginValidationFilter(originGuard), CorsFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
