@@ -4,7 +4,7 @@
 
 ## 运行
 
-准备 MySQL 8，创建 `career_business` 数据库，并启动 Redis。数据库可以通过 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 覆盖配置；Redis 可通过 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 配置，服务端口通过 `SERVER_PORT` 配置。`.env` 仅保存在本地，不要提交密码。
+准备 MySQL 8，创建 `career_business` 数据库，并启动 Redis。数据库默认读取根目录 `.env` 的 `MYSQL_*`；如需覆盖，可使用 `AIJOB_DB_USERNAME`、`AIJOB_DB_PASSWORD`、`DB_URL`，系统环境变量 `DB_USERNAME`/`DB_PASSWORD` 仅在 `.env` 未提供时作为兜底。Redis 可通过 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 配置，服务端口通过 `SERVER_PORT` 配置。`.env` 仅保存在本地，不要提交密码。
 
 项目根目录提供 `docker-compose.yml` 和 `.env.example`；首次使用时复制模板为 `.env` 并设置自己的密码，执行 `docker compose up -d mysql` 可启动持久化 MySQL。首次初始化后的账号、密码由数据库保存，修改 `.env` 不会自动修改数据库账号密码。`MYSQL_BIND_ADDRESS` 默认为 `127.0.0.1`，主机端口默认 3307。勿向公网直接暴露数据库。
 

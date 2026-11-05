@@ -66,13 +66,13 @@ docker compose ps
 
 使用 IDEA、DataGrip 或 Navicat 连接时选择普通 **MySQL** 驱动，填写：
 
-| 配置项 | 本机默认值 |
-| --- | --- |
-| 主机 | `127.0.0.1` |
-| 端口 | `3307`，或 `.env` 中的 `MYSQL_PORT` |
-| 数据库 | `career_business` |
-| 用户名 | `.env` 中的 `MYSQL_USER` |
-| 密码 | `.env` 中的 `MYSQL_PASSWORD` |
+| 配置项 | 本机默认值                                |
+| ------ | ----------------------------------------- |
+| 主机   | `127.0.0.1`                             |
+| 端口   | `3307`，或 `.env` 中的 `MYSQL_PORT` |
+| 数据库 | `career_business`                       |
+| 用户名 | `.env` 中的 `MYSQL_USER`              |
+| 密码   | `.env` 中的 `MYSQL_PASSWORD`          |
 
 以上主机和端口须与本机 `.env` 配置一致。例如已有环境若绑定了局域网 IP，应使用该 IP 而不是 `127.0.0.1`。
 
