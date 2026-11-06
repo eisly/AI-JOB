@@ -21,6 +21,9 @@ export const routes: RouteRecordRaw[] = [
     component: LoginView,
     meta: { title: '登录' },
   },
+  { path: '/forgot-password', name: 'forgot-password', component: () => import('@/views/login/ForgotPasswordView.vue'), meta: { title: '找回密码' } },
+  { path: '/reset-password', name: 'reset-password', component: () => import('@/views/login/ResetPasswordView.vue'), meta: { title: '重置密码' } },
+  { path: '/register', name: 'register', component: () => import('@/views/login/RegisterView.vue'), meta: { title: '注册' } },
   {
     path: '/',
     component: MainLayout,

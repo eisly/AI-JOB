@@ -5,5 +5,6 @@ declare module 'vue-router' {
     title?: string
     icon?: string
     badge?: string
+    public?: boolean
   }
 }

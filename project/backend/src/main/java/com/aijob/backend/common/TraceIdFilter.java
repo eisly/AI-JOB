@@ -1,41 +1,54 @@
 package com.aijob.backend.common;
 
-import java.io.IOException;
-import java.util.UUID;
-
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.UUID;
 
-/**
- * 为每个请求生成 traceId 并写入 MDC，供 CommonResult / CommonError / 日志统一引用。
- */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class TraceIdFilter extends OncePerRequestFilter {
 
-    public static final String TRACE_ID_KEY = "traceId";
+    public static final String TRACE_ID_ATTR = "traceId";
+    public static final String TRACE_ID_HEADER = "X-Trace-Id";
+    public static final String MDC_KEY = "traceId";
+    public static final String TRACE_ID_KEY = MDC_KEY;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String traceId = request.getHeader("X-Trace-Id");
-        if (traceId == null || traceId.isBlank() || traceId.length() > 64) {
-            traceId = UUID.randomUUID().toString();
-        }
-        MDC.put(TRACE_ID_KEY, traceId);
-        response.setHeader("X-Trace-Id", traceId);
+        String incoming = request.getHeader(TRACE_ID_HEADER);
+        String traceId = incoming == null || incoming.isBlank()
+                ? UUID.randomUUID().toString().replace("-", "")
+                : sanitize(incoming);
+        request.setAttribute(TRACE_ID_ATTR, traceId);
+        response.setHeader(TRACE_ID_HEADER, traceId);
+        MDC.put(MDC_KEY, traceId);
         try {
-            filterChain.doFilter(request, response);
+            chain.doFilter(request, response);
         } finally {
-            MDC.remove(TRACE_ID_KEY);
+            MDC.remove(MDC_KEY);
         }
+    }
+
+    static String currentTraceId() {
+        String traceId = MDC.get(MDC_KEY);
+        return traceId == null ? "" : traceId;
+    }
+
+    private static String sanitize(String value) {
+        String trimmed = value.trim();
+        if (trimmed.length() > 64) {
+            return trimmed.substring(0, 64);
+        }
+        return trimmed;
     }
 }

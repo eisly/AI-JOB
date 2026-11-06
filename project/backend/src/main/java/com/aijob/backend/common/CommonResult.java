@@ -1,17 +1,17 @@
 package com.aijob.backend.common;
 
-import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
-/**
- * 统一返回体，对齐接口文档中的 CommonResult 约定（code/msg/data/traceId）。 traceId 取自
- * TraceIdFilter 写入的 MDC；无请求上下文时兜底生成。
- */
+import java.util.Map;
+
+
 public class CommonResult<T> {
 
     private Integer code;
     private String msg;
     private T data;
     private String traceId;
+    private ErrorBody error;
 
     public CommonResult() {
     }
@@ -20,14 +20,32 @@ public class CommonResult<T> {
         this.code = code;
         this.msg = msg;
         this.data = data;
+        this.traceId = TraceIdFilter.currentTraceId();
     }
 
     public static <T> CommonResult<T> success(T data) {
         return new CommonResult<>(200, "操作成功", data);
     }
 
+    public static <T> CommonResult<T> accepted(T data) {
+        return new CommonResult<>(202, "已受理", data);
+    }
+
     public static <T> CommonResult<T> notFound(String msg) {
-        return new CommonResult<>(404, msg, null);
+        return failure(ApiErrorCode.RESOURCE_NOT_FOUND, msg, null);
+    }
+
+    public static <T> CommonResult<T> failure(ApiErrorCode errorCode) {
+        return failure(errorCode, errorCode.getDefaultMessage(), null);
+    }
+
+    public static <T> CommonResult<T> failure(ApiErrorCode errorCode, String msg, Map<String, Object> details) {
+        CommonResult<T> result = new CommonResult<>();
+        result.code = errorCode.getCode();
+        result.msg = msg == null || msg.isBlank() ? errorCode.getDefaultMessage() : msg;
+        result.traceId = TraceIdFilter.currentTraceId();
+        result.error = new ErrorBody(errorCode.getKey(), errorCode.isRetryable(), details);
+        return result;
     }
 
     public Integer getCode() {
@@ -62,8 +80,17 @@ public class CommonResult<T> {
         this.traceId = traceId;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public ErrorBody getError() {
+        return error;
+    }
+
+    public void setError(ErrorBody error) {
+        this.error = error;
+    }
     public CommonResult<T> withTraceId(String traceId) {
-        this.traceId = traceId != null ? traceId : UUID.randomUUID().toString();
+        this.traceId = traceId != null ? traceId : java.util.UUID.randomUUID().toString();
         return this;
     }
+
 }

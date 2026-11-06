@@ -66,6 +66,9 @@ public class CurrentUserResolver {
         if (authentication != null && authentication.isAuthenticated()
                 && !(authentication instanceof AnonymousAuthenticationToken)) {
             Object principal = authentication.getPrincipal();
+            if (principal instanceof com.aijob.backend.auth.security.UserPrincipal user && isUuid(user.getUserId())) {
+                return user.getUserId();
+            }
             if (principal instanceof Jwt jwt) {
                 String subject = jwt.getSubject();
                 if (isUuid(subject)) {

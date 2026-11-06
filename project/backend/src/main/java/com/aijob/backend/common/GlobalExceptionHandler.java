@@ -43,7 +43,9 @@ public class GlobalExceptionHandler {
         CommonError body = CommonError.of(ex.getCode(), ex.getMessage(), ex.getErrorKey(), ex.getRetryable(),
                 ex.getDetails());
         body.setTraceId(traceId());
-        return ResponseEntity.status(ex.getHttpStatus()).body(body);
+        var response = ResponseEntity.status(ex.getHttpStatus());
+        if (ex.getRetryAfterSeconds() != null) response.header("Retry-After", ex.getRetryAfterSeconds().toString());
+        return response.body(body);
     }
 
     /** @Valid 请求体校验失败 */

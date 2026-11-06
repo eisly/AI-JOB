@@ -1,60 +1,90 @@
 package com.aijob.backend.config;
 
-import java.nio.charset.StandardCharsets;
-
-import javax.crypto.spec.SecretKeySpec;
-
-import org.springframework.beans.factory.annotation.Value;
+import com.aijob.backend.auth.security.JwtAuthenticationFilter;
+import com.aijob.backend.auth.security.OriginGuard;
+import com.aijob.backend.auth.security.OriginValidationFilter;
+import com.aijob.backend.common.ApiErrorCode;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2Error;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtValidators;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.filter.CorsFilter;
+
+import java.io.IOException;
 
 @Configuration
+@EnableWebSecurity
 public class SecurityConfig {
 
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final OriginGuard originGuard;
+
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, OriginGuard originGuard) {
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.originGuard = originGuard;
+    }
+
     @Bean
-    @Order(1)
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    @org.springframework.core.annotation.Order(1)
     public SecurityFilterChain internalTaskSecurityFilterChain(HttpSecurity http) throws Exception {
         http.securityMatcher("/internal/business/v1/ai-tasks/**")
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+            .csrf(AbstractHttpConfigurer::disable)
+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         return http.build();
     }
 
+    @org.springframework.core.annotation.Order(2)
     @Bean
-    @Order(2)
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-                .oauth2ResourceServer(resource -> resource.jwt(jwt -> { }));
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults())
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/refresh",
+                                "/api/v1/auth/csrf",
+                                "/api/v1/auth/password/**").permitAll()
+                        .requestMatchers("/api/v1/users/me").authenticated()
+                        .requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN")
+                        .anyRequest().authenticated())
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, exception) ->
+                                writeError(response, ApiErrorCode.UNAUTHENTICATED))
+                        .accessDeniedHandler((request, response, exception) ->
+                                writeError(response, ApiErrorCode.FORBIDDEN)))
+                .addFilterBefore(new OriginValidationFilter(originGuard), CorsFilter.class)
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
-    @Bean
-    public JwtDecoder jwtDecoder(@Value("${app.auth.user-jwt-secret}") String secret,
-                                 @Value("${app.auth.user-jwt-issuer}") String issuer,
-                                 @Value("${app.auth.user-jwt-audience}") String audience) {
-        SecretKeySpec key = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
-        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> {
-            if (jwt.getAudience().contains(audience)) {
-                return OAuth2TokenValidatorResult.success();
-            }
-            return OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "Invalid audience", null));
-        };
-        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
-                JwtValidators.createDefaultWithIssuer(issuer), audienceValidator));
-        return decoder;
+    private void writeError(HttpServletResponse response, ApiErrorCode errorCode) throws IOException {
+        response.setStatus(errorCode.getHttpStatus());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        String traceId = response.getHeader("X-Trace-Id");
+        String body = "{\"code\":%d,\"msg\":\"%s\",\"data\":null,\"traceId\":\"%s\",\"error\":{\"key\":\"%s\",\"retryable\":%b}}"
+                .formatted(errorCode.getCode(), errorCode.getDefaultMessage(),
+                        traceId == null ? "" : traceId, errorCode.getKey(), errorCode.isRetryable());
+        response.getWriter().write(body);
     }
 }

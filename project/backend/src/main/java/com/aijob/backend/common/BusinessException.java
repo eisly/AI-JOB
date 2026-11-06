@@ -26,6 +26,23 @@ public class BusinessException extends RuntimeException {
         this.details = details;
     }
 
+    private Long retryAfterSeconds;
+
+    public BusinessException(ApiErrorCode errorCode) {
+        this(errorCode, errorCode.getDefaultMessage(), null);
+    }
+
+    public BusinessException(ApiErrorCode errorCode, String message) {
+        this(errorCode, message, null);
+    }
+
+    public BusinessException(ApiErrorCode errorCode, String message, Long retryAfterSeconds) {
+        this(errorCode.getHttpStatus(), errorCode.getCode(), message, errorCode.getKey(), errorCode.isRetryable(), null);
+        this.retryAfterSeconds = retryAfterSeconds;
+    }
+
+    public Long getRetryAfterSeconds() { return retryAfterSeconds; }
+
     /** 400 VALIDATION_ERROR，details.fields=[{field,message}] */
     public static BusinessException validation(String field, String message) {
         Map<String, Object> details = new HashMap<>();
