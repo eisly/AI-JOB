@@ -9,6 +9,9 @@ export class ApiError extends Error {
   retryable: boolean
   details?: Record<string, unknown>
 
+  get httpStatus() { return this.status }
+  get isVersionConflict() { return this.status === 409 && this.key === 'VERSION_CONFLICT' }
+
   constructor(message: string, options: { status?: number; code?: number | string; key?: string; traceId?: string; retryable?: boolean; details?: Record<string, unknown> } = {}) {
     super(message)
     this.name = 'ApiError'

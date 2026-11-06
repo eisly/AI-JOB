@@ -1,340 +1,462 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { applicationApi } from '@/api/applications'
-import { jobApi } from '@/api/jobs'
+import { ElMessage } from 'element-plus'
+import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ApiError } from '@/api/request'
-import type { ApplicationCreateInput, ApplicationStatus, ApplicationSummaryVO, ApplicationVO, JobVO, Page } from '@/api/types'
-import AsyncState from '@/components/AsyncState.vue'
-import { cityLabels, educationLabels, errorMessage, formatDate, formatSalary } from '@/utils/format'
+import {
+  deleteApplication,
+  getApplicationDetail,
+  getApplicationSummary,
+  listApplications,
+} from '@/api/application'
+import {
+  APPLICATION_STATUSES,
+  APPLICATION_STATUS_LABELS,
+  type ApplicationPage,
+  type ApplicationStatus,
+  type ApplicationSummary,
+  type ApplicationVO,
+} from '@/types/application'
+import ApplicationForm from './ApplicationForm.vue'
+import ApplicationDetail from './ApplicationDetail.vue'
+import ApplicationDeleteConfirm from './ApplicationDeleteConfirm.vue'
 
-interface ApplicationFormModel {
-  jobId: string
-  companyName: string
-  jobTitle: string
-  cityCode: string
-  education: string
-  salaryText: string
-  description: string
-  status: ApplicationStatus
-  plannedDate: string | null
-  appliedDate: string | null
-  interviewDate: string | null
-  closedDate: string | null
-  note: string
-}
+/**
+ * 投递进度页面：统计卡片 + 分页表格（沿用现有布局与 Element Plus 风格；
+ * 与原型 15-投递进度.png 的四列看板布局有意不同，交付说明中注明）。
+ *
+ * 稳定性设计：
+ * - listSeq / summarySeq / detailSeq 自增序号：成功回调、catch、finally 三处均检查，
+ *   过期请求不渲染数据、不复位 loading、不写错误态
+ * - 详情弹层快速切换记录、关闭弹层时 ++detailSeq 作废在途请求，迟到响应零接触状态
+ * - 筛选变化重置页码；删除当前页最后一条且非第一页时回退一页
+ * - 统计与列表为独立请求，全部状态查询完全省略 status 参数
+ */
 
-const router = useRouter()
-const statusLabels: Record<ApplicationStatus, string> = { PLANNED: '待投递', APPLIED: '已投递', INTERVIEWING: '面试中', CLOSED: '已结束' }
-const statusTypes: Record<ApplicationStatus, 'info' | 'primary' | 'success' | 'warning'> = { PLANNED: 'info', APPLIED: 'primary', INTERVIEWING: 'warning', CLOSED: 'success' }
-const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value: value as ApplicationStatus, label }))
-const cityOptions = Object.entries(cityLabels).map(([value, label]) => ({ value, label }))
-const page = ref<Page<ApplicationVO>>({ total: 0, records: [], current: 1, size: 10 })
-const summary = ref<ApplicationSummaryVO | null>(null)
-const jobs = ref<JobVO[]>([])
+type StatusFilter = ApplicationStatus | ''
+
+const page = reactive({
+  current: 1,
+  size: 20,
+  total: 0,
+})
+const statusFilter = ref<StatusFilter>('')
+const records = ref<ApplicationVO[]>([])
 const listLoading = ref(false)
+const listError = ref<string | null>(null)
+
+const summary = ref<ApplicationSummary>({ total: 0, counts: { PLANNED: 0, APPLIED: 0, INTERVIEWING: 0, CLOSED: 0 } })
 const summaryLoading = ref(false)
-const jobsLoading = ref(false)
-const listError = ref<unknown>(null)
-const summaryError = ref<unknown>(null)
-const jobsError = ref<unknown>(null)
-const actionError = ref<unknown>(null)
-const statusFilter = ref('')
-const editorVisible = ref(false)
-const editingId = ref('')
-const editingVersion = ref(1)
+const summaryError = ref<string | null>(null)
+
+/** 请求竞争序号 */
+let listSeq = 0
+let summarySeq = 0
+let detailSeq = 0
+
+/** 新增/编辑表单 */
+const formVisible = ref(false)
+const formMode = ref<'create' | 'edit'>('create')
+const formBaseline = ref<ApplicationVO | null>(null)
+
+/** 详情弹层 */
+const detailVisible = ref(false)
 const detailLoading = ref(false)
-const saving = ref(false)
-const deletingId = ref('')
-const formRef = ref<FormInstance>()
-const form = reactive<ApplicationFormModel>(emptyForm())
-const rules: FormRules = {
-  companyName: [{ required: true, whitespace: true, message: '请输入公司名称', trigger: 'blur' }, { max: 100, message: '公司名称不能超过100字符', trigger: 'blur' }],
-  jobTitle: [{ required: true, whitespace: true, message: '请输入岗位名称', trigger: 'blur' }, { max: 100, message: '岗位名称不能超过100字符', trigger: 'blur' }],
-  status: [{ required: true, message: '请选择投递状态', trigger: 'change' }],
-}
+const detailRecord = ref<ApplicationVO | null>(null)
+/** 详情弹层打开时的记录 ID（用于断言迟到响应归属） */
+let detailTargetId: string | null = null
 
-function emptyForm(): ApplicationFormModel {
-  return { jobId: '', companyName: '', jobTitle: '', cityCode: '', education: '', salaryText: '', description: '', status: 'PLANNED', plannedDate: null, appliedDate: null, interviewDate: null, closedDate: null, note: '' }
-}
+/** 删除确认 */
+const deleteVisible = ref(false)
+const deleteTarget = ref<ApplicationVO | null>(null)
+const deleting = ref(false)
 
-function assignForm(value: ApplicationFormModel) {
-  Object.assign(form, value)
-}
-
-function nullable(value: string) {
-  const normalized = value.trim()
-  return normalized || null
-}
-
-async function loadApplications() {
+async function loadList(): Promise<void> {
+  const seq = ++listSeq
   listLoading.value = true
   listError.value = null
   try {
-    page.value = await applicationApi.list({ current: page.value.current, size: page.value.size, status: statusFilter.value || undefined })
-  } catch (reason) {
-    listError.value = reason
+    const data: ApplicationPage = await listApplications({
+      // 全部状态查询完全省略 status 参数（空串/空白会被后端 400 拒绝；
+      // el-select clearable 清空后值为 undefined，与空串统一按“查全部”处理）
+      status: !statusFilter.value ? null : statusFilter.value,
+      current: page.current,
+      size: page.size,
+    })
+    if (seq !== listSeq) return // 过期响应：不渲染、不复位（由最新请求管理状态）
+    records.value = data.records
+    page.total = data.total
+  } catch (e) {
+    if (seq !== listSeq) return // 过期请求的失败不覆盖新请求状态
+    records.value = []
+    page.total = 0
+    listError.value = e instanceof ApiError ? e.message : '加载投递列表失败，请稍后重试'
   } finally {
-    listLoading.value = false
+    if (seq === listSeq) listLoading.value = false
   }
 }
 
-async function loadSummary() {
+async function loadSummary(): Promise<void> {
+  const seq = ++summarySeq
   summaryLoading.value = true
   summaryError.value = null
   try {
-    summary.value = await applicationApi.summary()
-  } catch (reason) {
-    summaryError.value = reason
+    const data = await getApplicationSummary()
+    if (seq !== summarySeq) return
+    summary.value = data
+  } catch (e) {
+    if (seq !== summarySeq) return
+    summaryError.value = e instanceof ApiError ? e.message : '加载统计数据失败，请稍后重试'
   } finally {
-    summaryLoading.value = false
+    if (seq === summarySeq) summaryLoading.value = false
   }
 }
 
-async function loadJobs() {
-  jobsLoading.value = true
-  jobsError.value = null
-  try {
-    const [publicPage, personalPage] = await Promise.all([jobApi.list({ current: 1, size: 100 }), jobApi.imports({ current: 1, size: 100 })])
-    const values = new Map<string, JobVO>()
-    ;[...publicPage.records, ...personalPage.records].forEach(job => values.set(job.id, job))
-    jobs.value = [...values.values()]
-  } catch (reason) {
-    jobsError.value = reason
-  } finally {
-    jobsLoading.value = false
+function refreshAll(): void {
+  loadList()
+  loadSummary()
+}
+
+/** 筛选变化：重置页码后重查（旧请求自动被序号作废） */
+function handleFilterChange(): void {
+  page.current = 1
+  loadList()
+}
+
+function handlePageChange(current: number): void {
+  page.current = current
+  loadList()
+}
+
+function handleSizeChange(size: number): void {
+  page.size = size
+  page.current = 1
+  loadList()
+}
+
+/**
+ * 删除当前页最后一条时的页码调整：非第一页则回退一页再查询。
+ * 注意调用时机：删除成功后立即调用（此时 records.value 仍是删除前的旧列表，
+ * 旧列表恰好只剩被删的这一条 → length === 1），在 refreshAll 刷新列表之前。
+ */
+function adjustPageAfterRemoval(): void {
+  if (records.value.length === 1 && page.current > 1) {
+    page.current -= 1
   }
 }
 
-function refreshAll() {
-  return Promise.all([loadApplications(), loadSummary()])
+// ---------- 表单（新增/编辑） ----------
+
+function openCreate(): void {
+  formMode.value = 'create'
+  formBaseline.value = null
+  formVisible.value = true
 }
 
-function applyFilter() {
-  page.value.current = 1
-  void loadApplications()
+function openEdit(record: ApplicationVO): void {
+  formMode.value = 'edit'
+  formBaseline.value = record
+  formVisible.value = true
 }
 
-function changePage(current: number) {
-  page.value.current = current
-  void loadApplications()
+function handleFormSuccess(): void {
+  refreshAll()
 }
 
-function changeSize(size: number) {
-  page.value.size = size
-  page.value.current = 1
-  void loadApplications()
-}
+// ---------- 详情 ----------
 
-function fillJob(jobId: string) {
-  if (editingId.value || !jobId) return
-  const job = jobs.value.find(item => item.id === jobId)
-  if (!job) return
-  form.companyName = job.companyName
-  form.jobTitle = job.title
-  form.cityCode = job.cityCode || ''
-  form.education = job.requirements?.educationMin ? educationLabels[job.requirements.educationMin] : ''
-  form.salaryText = job.minMonthlySalaryCents !== null && job.maxMonthlySalaryCents !== null ? formatSalary(job.minMonthlySalaryCents, job.maxMonthlySalaryCents) : ''
-  form.description = job.jdText.slice(0, 1000)
-}
-
-function openCreate() {
-  editingId.value = ''
-  editingVersion.value = 1
-  assignForm(emptyForm())
-  actionError.value = null
-  editorVisible.value = true
-  formRef.value?.clearValidate()
-  if (!jobs.value.length && !jobsLoading.value) void loadJobs()
-}
-
-async function openEdit(record: ApplicationVO) {
-  editingId.value = record.id
-  editingVersion.value = record.version
-  actionError.value = null
+async function openDetail(record: ApplicationVO): Promise<void> {
+  const seq = ++detailSeq
+  detailTargetId = record.id
+  detailRecord.value = null
   detailLoading.value = true
-  editorVisible.value = true
+  detailVisible.value = true
   try {
-    const latest = await applicationApi.get(record.id)
-    editingVersion.value = latest.version
-    assignForm({
-      jobId: latest.jobId || '', companyName: latest.companyName, jobTitle: latest.jobTitle,
-      cityCode: latest.cityCode || '', education: latest.education || '', salaryText: latest.salaryText || '',
-      description: latest.description || '', status: latest.status, plannedDate: latest.plannedDate,
-      appliedDate: latest.appliedDate, interviewDate: latest.interviewDate, closedDate: latest.closedDate, note: latest.note || '',
-    })
-    formRef.value?.clearValidate()
-  } catch (reason) {
-    actionError.value = reason
+    const data = await getApplicationDetail(record.id)
+    // 弹层已关闭 / 已切换到其他记录：迟到响应丢弃
+    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== record.id) return
+    detailRecord.value = data
+  } catch (e) {
+    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== record.id) return
+    detailRecord.value = null
+    const message = e instanceof ApiError ? e.message : '加载详情失败'
+    ElMessage.error(message)
   } finally {
-    detailLoading.value = false
+    if (seq === detailSeq) detailLoading.value = false
   }
 }
 
-async function save() {
-  if (saving.value || detailLoading.value) return
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  saving.value = true
-  actionError.value = null
-  const fields = {
-    companyName: form.companyName.trim(), jobTitle: form.jobTitle.trim(), cityCode: nullable(form.cityCode),
-    education: nullable(form.education), salaryText: nullable(form.salaryText), description: nullable(form.description),
-    status: form.status, plannedDate: form.plannedDate, appliedDate: form.appliedDate,
-    interviewDate: form.interviewDate, closedDate: form.closedDate, note: nullable(form.note),
-  }
+/** 关闭详情弹层：作废在途请求，迟到响应（含 404）零接触状态 */
+function handleDetailClose(): void {
+  detailSeq++
+  detailTargetId = null
+}
+
+// ---------- 删除 ----------
+
+function openDelete(record: ApplicationVO): void {
+  deleteTarget.value = record
+  deleteVisible.value = true
+}
+
+async function handleDeleteConfirm(): Promise<void> {
+  const target = deleteTarget.value
+  if (!target || deleting.value) return
+  deleting.value = true
   try {
-    if (editingId.value) {
-      await applicationApi.update(editingId.value, { ...fields, expectedVersion: editingVersion.value })
-      ElMessage.success('投递记录已更新')
+    await deleteApplication(target.id, target.version)
+    ElMessage.success('删除成功')
+    deleteVisible.value = false
+    deleteTarget.value = null
+    adjustPageAfterRemoval()
+    refreshAll()
+  } catch (e) {
+    if (e instanceof ApiError) {
+      if (e.isVersionConflict) {
+        ElMessage.error('数据已被其他操作修改，请刷新后重试')
+        deleteVisible.value = false
+        refreshAll()
+      } else if (e.httpStatus === 404) {
+        // 记录已被其他操作删除（如另一窗口）：关闭弹窗并刷新列表与统计，
+        // 移除页面上已失效的行，否则旧记录会一直残留
+        ElMessage.info('该记录已被删除，列表已刷新')
+        deleteVisible.value = false
+        deleteTarget.value = null
+        adjustPageAfterRemoval()
+        refreshAll()
+      } else {
+        ElMessage.error(e.message)
+      }
     } else {
-      const body: ApplicationCreateInput = { ...fields, jobId: form.jobId || null }
-      await applicationApi.create(body)
-      ElMessage.success('投递记录已创建')
-    }
-    editorVisible.value = false
-    await refreshAll()
-  } catch (reason) {
-    actionError.value = reason
-    if (reason instanceof ApiError && reason.status === 409 && editingId.value) {
-      const current = page.value.records.find(item => item.id === editingId.value)
-      if (current) await openEdit(current)
-      actionError.value = new Error('记录版本已变化，已重新读取服务端内容，请核对后再次保存')
+      ElMessage.error('删除失败，请稍后重试')
     }
   } finally {
-    saving.value = false
+    deleting.value = false
   }
-}
-
-async function remove(record: ApplicationVO) {
-  if (deletingId.value) return
-  try {
-    await ElMessageBox.confirm(`确定删除“${record.companyName} · ${record.jobTitle}”的投递记录吗？`, '删除投递记录', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
-  } catch {
-    return
-  }
-  deletingId.value = record.id
-  actionError.value = null
-  try {
-    await applicationApi.remove(record.id, record.version)
-    if (page.value.records.length === 1 && page.value.current > 1) page.value.current -= 1
-    await refreshAll()
-    ElMessage.success('投递记录已删除')
-  } catch (reason) {
-    actionError.value = reason
-    if (reason instanceof ApiError && reason.status === 409) await loadApplications()
-  } finally {
-    deletingId.value = ''
-  }
-}
-
-function applicationRow(row: unknown) {
-  return row as ApplicationVO
-}
-
-function openJob(jobId: string | null) {
-  if (jobId) void router.push({ path: '/job-match', query: { jobId } })
 }
 
 onMounted(() => {
-  void refreshAll()
-  void loadJobs()
+  refreshAll()
 })
+
+const summaryCards = [
+  { key: 'total', label: '总投递', accent: 'primary' },
+  { key: 'PLANNED', label: '待投递', accent: 'info' },
+  { key: 'APPLIED', label: '已投递', accent: 'applied' },
+  { key: 'INTERVIEWING', label: '面试中', accent: 'warning' },
+  { key: 'CLOSED', label: '已结束', accent: 'success' },
+] as const
+
+function cardValue(key: string): number {
+  if (key === 'total') return summary.value.total
+  return summary.value.counts[key as ApplicationStatus] ?? 0
+}
+
+/** el-table 插槽的 row 为宽泛的 DefaultRow 类型，入口处收窄为 ApplicationVO */
+function asRecord(row: unknown): ApplicationVO {
+  return row as ApplicationVO
+}
+
+function statusTagType(status: ApplicationStatus): 'info' | 'primary' | 'warning' | 'success' {
+  switch (status) {
+    case 'PLANNED':
+      return 'info'
+    case 'APPLIED':
+      return 'primary'
+    case 'INTERVIEWING':
+      return 'warning'
+    case 'CLOSED':
+      return 'success'
+  }
+}
+
+function formatDate(value: string | null): string {
+  return value ?? '—'
+}
+
+function formatDateTime(value: string): string {
+  return value.replace('T', ' ').replace('Z', ' UTC')
+}
 </script>
 
 <template>
-  <div class="page application-page">
-    <header class="page-header">
-      <div><h1>投递进度</h1><p>手动记录真实投递状态与日期；关联岗位只用于带入快照，后续岗位变化不会改写历史记录。</p></div>
-      <div class="page-header__actions"><el-button :loading="listLoading || summaryLoading" @click="refreshAll">刷新</el-button><el-button type="primary" @click="openCreate">新增投递记录</el-button></div>
-    </header>
-
-    <el-alert v-if="actionError && !editorVisible" class="action-alert" :title="errorMessage(actionError)" type="error" show-icon :closable="false" />
-
-    <section class="summary-section">
-      <AsyncState :loading="summaryLoading && !summary" :error="summaryError" @retry="loadSummary">
-        <div class="summary-grid">
-          <article class="summary-card summary-card--total"><span>全部记录</span><strong>{{ summary?.total ?? 0 }}</strong></article>
-          <article v-for="option in statusOptions" :key="option.value" class="summary-card"><span>{{ option.label }}</span><strong>{{ summary?.counts[option.value] ?? 0 }}</strong></article>
-        </div>
-      </AsyncState>
-    </section>
-
-    <section class="panel">
-      <div class="panel__heading">
-        <div><h2>投递记录</h2><span class="muted">按创建时间倒序展示本人记录</span></div>
-        <el-radio-group v-model="statusFilter" @change="applyFilter">
-          <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
-        </el-radio-group>
+  <div class="application-page">
+    <!-- 统计卡片（独立请求，失败可独立重试） -->
+    <section v-loading="summaryLoading" class="summary-row">
+      <div v-for="card in summaryCards" :key="card.key" class="summary-card" :data-accent="card.accent">
+        <span class="summary-card__value">{{ cardValue(card.key) }}</span>
+        <span class="summary-card__label">{{ card.label }}</span>
       </div>
-      <AsyncState :loading="listLoading" :error="listError" :empty="!page.records.length" empty-text="当前筛选条件下暂无投递记录" @retry="loadApplications">
-        <template #empty><el-button type="primary" @click="openCreate">新增第一条记录</el-button></template>
-        <div class="application-table-wrap">
-          <el-table :data="page.records" row-key="id" class="application-table">
-            <el-table-column label="公司与岗位" min-width="230">
-              <template #default="{ row }"><div class="job-cell"><strong>{{ row.companyName }}</strong><span>{{ row.jobTitle }}</span><small>{{ row.id }}</small></div></template>
-            </el-table-column>
-            <el-table-column label="城市 / 学历" min-width="130"><template #default="{ row }">{{ cityLabels[row.cityCode || ''] || row.cityCode || '未填写' }}<br><span class="muted">{{ row.education || '学历未填写' }}</span></template></el-table-column>
-            <el-table-column prop="salaryText" label="薪资" min-width="120"><template #default="{ row }">{{ row.salaryText || '未填写' }}</template></el-table-column>
-            <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="statusTypes[row.status as ApplicationStatus]">{{ statusLabels[row.status as ApplicationStatus] }}</el-tag></template></el-table-column>
-            <el-table-column label="阶段日期" min-width="190"><template #default="{ row }"><div class="date-cell"><span>计划：{{ row.plannedDate || '—' }}</span><span>投递：{{ row.appliedDate || '—' }}</span><span>面试：{{ row.interviewDate || '—' }}</span><span>结束：{{ row.closedDate || '—' }}</span></div></template></el-table-column>
-            <el-table-column label="更新时间" min-width="160"><template #default="{ row }">{{ formatDate(row.updatedAt) }}</template></el-table-column>
-            <el-table-column label="操作" fixed="right" min-width="250"><template #default="{ row }"><div class="row-actions"><el-button size="small" @click="openEdit(applicationRow(row))">查看 / 编辑</el-button><el-button v-if="row.jobId" size="small" @click="openJob(row.jobId)">关联岗位</el-button><el-button size="small" type="danger" plain :loading="deletingId === row.id" @click="remove(applicationRow(row))">删除</el-button></div></template></el-table-column>
-          </el-table>
+    </section>
+    <el-alert
+      v-if="summaryError"
+      :title="summaryError"
+      type="error"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 12px"
+    >
+      <el-button size="small" @click="loadSummary">重试</el-button>
+    </el-alert>
+
+    <!-- 列表 -->
+    <section class="panel">
+      <div class="panel__toolbar">
+        <div class="panel__filters">
+          <el-select
+            v-model="statusFilter"
+            placeholder="全部状态"
+            clearable
+            style="width: 160px"
+            @change="handleFilterChange"
+          >
+            <el-option
+              v-for="status in APPLICATION_STATUSES"
+              :key="status"
+              :label="APPLICATION_STATUS_LABELS[status]"
+              :value="status"
+            />
+          </el-select>
+          <el-button :icon="Refresh" :disabled="listLoading" @click="refreshAll">刷新</el-button>
         </div>
-        <el-pagination class="pagination" background layout="total, sizes, prev, pager, next" :total="page.total" :current-page="page.current" :page-size="page.size" :page-sizes="[10, 20, 50]" @current-change="changePage" @size-change="changeSize" />
-      </AsyncState>
+        <el-button type="primary" :icon="Plus" @click="openCreate">新增投递记录</el-button>
+      </div>
+
+      <el-alert v-if="listError" :title="listError" type="error" show-icon :closable="false" style="margin-bottom: 12px">
+        <el-button size="small" @click="loadList">重试</el-button>
+      </el-alert>
+
+      <el-table v-else v-loading="listLoading" :data="records" stripe style="width: 100%">
+        <el-table-column prop="companyName" label="公司" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="jobTitle" label="岗位" min-width="170" show-overflow-tooltip />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" effect="light">
+              {{ APPLICATION_STATUS_LABELS[row.status as ApplicationStatus] ?? row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="计划投递" width="110">
+          <template #default="{ row }">{{ formatDate(row.plannedDate) }}</template>
+        </el-table-column>
+        <el-table-column label="实际投递" width="110">
+          <template #default="{ row }">{{ formatDate(row.appliedDate) }}</template>
+        </el-table-column>
+        <el-table-column label="面试日期" width="110">
+          <template #default="{ row }">{{ formatDate(row.interviewDate) }}</template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="200">
+          <template #default="{ row }">{{ formatDateTime(row.updatedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openDetail(asRecord(row))">详情</el-button>
+            <el-button link type="primary" @click="openEdit(asRecord(row))">编辑</el-button>
+            <el-button link type="danger" @click="openDelete(asRecord(row))">删除</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无投递记录，点击右上角新增" />
+        </template>
+      </el-table>
+
+      <div class="panel__pagination">
+        <el-pagination
+          v-model:current-page="page.current"
+          v-model:page-size="page.size"
+          :total="page.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
+        />
+      </div>
     </section>
 
-    <el-dialog v-model="editorVisible" :title="editingId ? '查看并编辑投递记录' : '新增投递记录'" width="min(860px, 94vw)" :close-on-click-modal="false">
-      <el-alert v-if="actionError" class="dialog-alert" :title="errorMessage(actionError)" type="error" show-icon :closable="false" />
-      <el-alert v-if="jobsError" class="dialog-alert" type="warning" :closable="false" show-icon><template #title>岗位列表加载失败：{{ errorMessage(jobsError) }}</template><el-button size="small" @click="loadJobs">重试</el-button></el-alert>
-      <el-form ref="formRef" v-loading="detailLoading" :model="form" :rules="rules" label-position="top">
-        <el-form-item label="关联岗位（可选）">
-          <el-select v-model="form.jobId" class="full-width" filterable clearable :loading="jobsLoading" :disabled="!!editingId" placeholder="手动录入或选择岗位带入信息" @change="fillJob">
-            <el-option label="手动录入（不关联岗位）" value="" />
-            <el-option v-for="job in jobs" :key="job.id" :value="job.id" :label="`${job.companyName} · ${job.title}`" />
-          </el-select>
-        </el-form-item>
-        <div class="form-grid">
-          <el-form-item label="公司名称" prop="companyName" required><el-input v-model="form.companyName" maxlength="100" show-word-limit /></el-form-item>
-          <el-form-item label="岗位名称" prop="jobTitle" required><el-input v-model="form.jobTitle" maxlength="100" show-word-limit /></el-form-item>
-          <el-form-item label="城市"><el-select v-model="form.cityCode" class="full-width" clearable filterable placeholder="请选择城市"><el-option v-for="option in cityOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-          <el-form-item label="学历展示文本"><el-input v-model="form.education" maxlength="50" placeholder="例如：本科" /></el-form-item>
-          <el-form-item label="薪资展示文本"><el-input v-model="form.salaryText" maxlength="100" placeholder="例如：10–16K" /></el-form-item>
-          <el-form-item label="投递状态" prop="status" required><el-select v-model="form.status" class="full-width"><el-option v-for="option in statusOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-          <el-form-item label="计划投递日期"><el-date-picker v-model="form.plannedDate" class="full-width" type="date" value-format="YYYY-MM-DD" placeholder="可不填" /></el-form-item>
-          <el-form-item label="实际投递日期"><el-date-picker v-model="form.appliedDate" class="full-width" type="date" value-format="YYYY-MM-DD" placeholder="可不填" /></el-form-item>
-          <el-form-item label="面试日期"><el-date-picker v-model="form.interviewDate" class="full-width" type="date" value-format="YYYY-MM-DD" placeholder="可不填" /></el-form-item>
-          <el-form-item label="结束日期"><el-date-picker v-model="form.closedDate" class="full-width" type="date" value-format="YYYY-MM-DD" placeholder="可不填" /></el-form-item>
-        </div>
-        <el-form-item label="岗位简述"><el-input v-model="form.description" type="textarea" :rows="4" maxlength="1000" show-word-limit /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.note" type="textarea" :rows="4" maxlength="2000" show-word-limit placeholder="记录反馈、联系人或下一步安排" /></el-form-item>
-        <el-descriptions v-if="editingId" :column="2" border size="small"><el-descriptions-item label="记录版本">v{{ editingVersion }}</el-descriptions-item><el-descriptions-item label="记录ID"><span class="break-all">{{ editingId }}</span></el-descriptions-item></el-descriptions>
-      </el-form>
-      <template #footer><el-button :disabled="saving" @click="editorVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="detailLoading" @click="save">{{ editingId ? '保存修改' : '创建记录' }}</el-button></template>
-    </el-dialog>
+    <!-- 新增/编辑表单（含 409 重新加载流程） -->
+    <ApplicationForm v-model:visible="formVisible" :mode="formMode" :baseline="formBaseline" @success="handleFormSuccess" />
+
+    <!-- 详情弹层（迟到响应由 detailSeq 丢弃） -->
+    <ApplicationDetail v-model:visible="detailVisible" :loading="detailLoading" :record="detailRecord" @update:visible="handleDetailClose" />
+
+    <!-- 删除确认 -->
+    <ApplicationDeleteConfirm v-model:visible="deleteVisible" :record="deleteTarget" :deleting="deleting" @confirm="handleDeleteConfirm" />
   </div>
 </template>
 
 <style scoped lang="scss">
-.application-page { padding-bottom: 24px; }
-.action-alert, .dialog-alert { margin-bottom: 14px; }
-.summary-section { margin-bottom: 14px; }
-.summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.summary-card { display: grid; gap: 10px; padding: 18px; border: 1px solid $ai-border; border-radius: $ai-radius; background: $ai-bg-card; }
-.summary-card span { color: $ai-text-secondary; }
-.summary-card strong { color: $ai-primary; font-size: 28px; }
-.summary-card--total { background: $ai-primary-light; }
-.application-table-wrap { overflow-x: auto; }
-.application-table { min-width: 1200px; }
-.job-cell, .date-cell { display: grid; gap: 4px; }
-.job-cell small { color: $ai-text-tertiary; overflow-wrap: anywhere; }
-.row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.row-actions .el-button { margin: 0; }
-.break-all { word-break: break-all; }
-@media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 700px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .summary-card--total { grid-column: 1 / -1; } .page-header__actions { width: 100%; } .page-header__actions .el-button { flex: 1; margin: 0; } }
+.application-page {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.summary-card {
+  background: $ai-bg-card;
+  border: 1px solid $ai-border-light;
+  border-radius: $ai-radius-lg;
+  box-shadow: $ai-shadow-card;
+  padding: 18px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 3px solid transparent;
+
+  &[data-accent='primary'] { border-top-color: $ai-primary; }
+  &[data-accent='info'] { border-top-color: $ai-text-tertiary; }
+  &[data-accent='applied'] { border-top-color: #2563eb; }
+  &[data-accent='warning'] { border-top-color: $ai-warning; }
+  &[data-accent='success'] { border-top-color: $ai-success; }
+
+  &__value {
+    font-size: 28px;
+    font-weight: 700;
+    color: $ai-text-primary;
+  }
+
+  &__label {
+    font-size: 13px;
+    color: $ai-text-secondary;
+  }
+}
+
+.panel {
+  background: $ai-bg-card;
+  border: 1px solid #e8f0fa;
+  border-radius: $ai-radius-lg;
+  padding: 16px 18px;
+}
+
+.panel__toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.panel__filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.panel__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .summary-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 </style>
