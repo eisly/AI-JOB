@@ -54,7 +54,7 @@ public class ProfileService {
         }
         String role = Data.text(body, "targetRole", true, 32);
         String candidate = Data.text(body, "candidateType", true, 32);
-        if (!ROLES.contains(role) || !CANDIDATES.contains(candidate)) {
+        if (!CANDIDATES.contains(candidate)) {
             throw BusinessException.validation("body", "岗位方向或求职类型非法");
         }
         List<Object> rawCities = Data.list(body, "cities", true, 5);
@@ -80,6 +80,14 @@ public class ProfileService {
 
     public List<Map<String, Object>> skillCatalog() {
         return mapper.skills().stream().map(view::map).toList();
+    }
+
+    public List<Map<String, Object>> skillCatalog(String query) {
+        String q = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        if (q.length() > 50) throw BusinessException.validation("q", "q 长度不能超过 50");
+        return skillCatalog().stream().filter(item -> q.isEmpty()
+                || String.valueOf(item.get("name")).toLowerCase(java.util.Locale.ROOT).contains(q)
+                || String.valueOf(item.get("code")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();
     }
 
     public List<Map<String, Object>> agentSkillCatalog() {

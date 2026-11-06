@@ -94,6 +94,7 @@ async function handleRegister() {
           <el-form-item prop="password"><el-input v-model="form.password" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password autocomplete="current-password" @keyup.enter="handleLogin" /></el-form-item>
           <el-button type="primary" native-type="submit" class="login__submit" :loading="loading">登录</el-button>
         </el-form>
+        <router-link to="/forgot-password">忘记密码？</router-link>
         <el-divider>还没有账号？</el-divider>
         <el-button class="login__register" plain @click="registerVisible = true">注册账号</el-button>
       </div>

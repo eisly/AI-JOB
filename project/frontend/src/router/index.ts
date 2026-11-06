@@ -1,10 +1,23 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { routes } from './routes'
 import './types'
+import { useUserStore } from '@/stores/user'
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+let restoreAttempted = false
+router.beforeEach(async to => {
+  if (['login', 'register', 'forgot-password', 'reset-password'].includes(String(to.name))) return true
+  const user = useUserStore()
+  if (!restoreAttempted && !user.isAuthenticated) {
+    restoreAttempted = true
+    await user.restoreSession()
+  }
+  if (!user.isAuthenticated) return { name: 'login', query: { redirect: to.fullPath } }
+  return true
 })
 
 router.afterEach(to => {

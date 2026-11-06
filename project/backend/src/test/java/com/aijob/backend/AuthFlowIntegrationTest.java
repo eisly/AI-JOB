@@ -404,4 +404,23 @@ class AuthFlowIntegrationTest {
         assertThat(forbiddenDetail.status()).isEqualTo(403);
         assertThat(forbiddenDetail.json(objectMapper).at("/code").asInt()).isEqualTo(40301);
     }
+    @Test
+    void loginTokenAccessesProfileAndApplicationsWithoutTrustingUserHeader() throws Exception {
+        Session session = registerAndLogin();
+        Map<String, String> auth = Map.of("Authorization", "Bearer " + session.accessToken());
+        Resp profile = send("GET", "/api/v1/profile", null, auth);
+        assertThat(profile.status()).isEqualTo(200);
+        long version = profile.json(objectMapper).at("/data/profileVersion").asLong();
+        Resp updated = send("PUT", "/api/v1/profile/preferences", """
+                {"expectedProfileVersion":%d,"targetRole":"AI_AGENT_DEVELOPER","candidateType":"CAMPUS",
+                 "cities":["330100"],"minMonthlySalaryCents":null,"maxMonthlySalaryCents":null}
+                """.formatted(version), auth);
+        assertThat(updated.status()).withFailMessage(updated.body()).isEqualTo(200);
+        assertThat(updated.json(objectMapper).at("/data/targetRole").asText()).isEqualTo("AI_AGENT_DEVELOPER");
+        assertThat(send("GET", "/api/v1/applications", null, auth).status()).isEqualTo(200);
+        Resp forged = send("GET", "/api/v1/profile", null,
+                Map.of("X-User-Id", "10000000-0000-4000-8000-00000000000a"));
+        assertThat(forged.status()).isEqualTo(401);
+    }
+
 }

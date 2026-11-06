@@ -38,6 +38,21 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  async function restoreSession() {
+    if (isAuthenticated.value) return true
+    try {
+      await restoreCsrf()
+      const result = await authApi.refresh()
+      applyToken(result.accessToken, result.user)
+      return true
+    } catch {
+      accessToken.value = ''
+      userInfo.value = null
+      clearSessionToken()
+      return false
+    }
+  }
+
   async function logout() {
     try {
       if (accessToken.value) await authApi.logout()
@@ -48,5 +63,5 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  return { userInfo, accessToken, isAuthenticated, login, logout, fetchMe, restoreCsrf }
+  return { userInfo, accessToken, isAuthenticated, login, logout, fetchMe, restoreCsrf, restoreSession }
 })

@@ -1,5 +1,8 @@
 import { request } from './request'
 import type { ProfilePreferencesInput, ProfileVO, SkillVO } from './types'
+export type { ProfileVO, SkillVO } from './types'
+export type CandidateType = ProfileVO['candidateType']
+export type ProfilePreferencesRequest = ProfilePreferencesInput
 
 export const profileApi = {
   get() {
@@ -12,3 +15,7 @@ export const profileApi = {
     return request<SkillVO[]>('/api/v1/skills', { query: { q } })
   },
 }
+
+export const getProfile = profileApi.get
+export const savePreferences = profileApi.savePreferences
+export const listSkills = profileApi.skills

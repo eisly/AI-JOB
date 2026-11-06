@@ -115,7 +115,7 @@ export interface DownloadVO {
 export interface ProfileVO {
   userId: string
   profileVersion: number
-  targetRole: 'JAVA_BACKEND' | 'FRONTEND' | 'ALGORITHM' | 'TEST' | 'DATA'
+  targetRole: string
   candidateType: 'INTERNSHIP' | 'CAMPUS' | 'EXPERIENCED'
   cities: string[]
   minMonthlySalaryCents: number | null

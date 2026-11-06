@@ -1,43 +1,107 @@
-# AGENTS.md — AI-JOB
 
-AI 一站式求职平台（比赛项目）。设计上是 Vue 3 + Spring Boot 4（业务）+ FastAPI/LangGraph（Agent）双后端；**当前仓库只有 Java 后端骨架**，`project/agent/hello.py`、`project/frontend/hello.html` 是占位文件，`docs/` 全部是设计资料而非已实现功能。
+# AI Agent 开发过程记录规范
 
-## 现状与真实性
-- 唯一真实接口：`GET /api/v1/users`、`GET /api/v1/users/{id}`（demo，用户列表/详情）。
-- `SecurityConfig` 当前 `permitAll` + 关闭 CSRF，是 demo 放行规则；**认证/JWT 尚未实现**，pom 里的 oauth2-resource-server 依赖不代表已有登录。
-- `mvn test` 中 `BackendApplicationTest` 只是上下文加载；根 `readme.md` 说“测试用 H2”仅对这一个类成立。
+你是一名专业的软件开发 Agent。在执行任何开发任务时，必须遵守以下开发过程记录规范。
 
-## 技术栈与结构
-- JDK 21 + Spring Boot 4.0.4 + MyBatis（注解式 Mapper）+ MySQL 8 + Flyway；无 `mvnw`，用本机 Maven。
-- 包结构按业务域：`com.aijob.backend.<domain>` 下 `controller / service / service.impl / mapper / entity`，公共返回体在 `common.CommonResult`。新增功能沿用此分层，勿引入 Controller 直连 Mapper 的写法。
-- 响应统一 `CommonResult{code,msg,data,traceId}`（200 成功 / 202 受理），接口前缀 `/api/v1`；契约以 `docs/功能资料/业务后端接口文档.md` 为准，错误码/枚举/字段约定见 `docs/功能资料/数据说明.md`。
-- 字段约定：DB `snake_case` ↔ Java `camelCase`，依赖 `application.yml` 的 `map-underscore-to-camel-case: true`；时间 UTC ISO 8601，薪资为月薪整数分，ID 为 36 字符 UUID。不要查询/映射 `password_hash` 等敏感列。
+## 1. 核心要求
 
-## 常用命令
-```bash
-cp .env.example .env            # 先设置 MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD
-docker compose up -d mysql      # 仅 MySQL(3307, 库 career_business)，Redis/Qdrant/Python 需另备
-cd project/backend && mvn spring-boot:run   # 8080，自动读仓库根 .env
-cd project/backend && mvn test
-cd project/backend && mvn -Dtest=BackendApplicationTest test   # 单测，不依赖数据库
-```
-- **JDK 版本陷阱**：pom `java.version=21`，若 `mvn -version` 显示 17/18（本机默认 `JAVA_HOME` 指向 18），编译会报 `release version 21 not supported`，需先切到 JDK 21。
+在所要开发的D:\vscode\AI-JOB\docs\功能资料，目录下维护一个 xxx_process.md文件，用于持续记录 Agent 的开发行为。
 
-## 数据库与迁移
-- `docker compose` 只建库不建表；首次启动后端时 Flyway 执行 `V1__init_business_schema.sql` 建 31 张表。
-- **V1 已提交运行，禁止修改**；表结构变更新增 `V2__*.sql`（团队需协调版本号）。
-- `db/demo/demo_data.sql` 仅供空的开发库**手动导入一次**，非可重复导入脚本；演示账号已禁用。导入后 `DatabaseQueryTest` 才会通过。
-- 不要 `docker compose down -v`（删除持久化卷）。修改 `.env` 不会改已初始化数据库的账号密码。
+- 如果 xxx_process.md 不存在，则自动创建。
+- 如果文件已经存在，必须保留原有内容，在末尾追加新记录。
+- 每完成一个具有实际影响的开发步骤，必须及时更新 xxx_process.md，而不是仅在整个任务结束时统一记录。
+- 记录必须真实、具体、可追溯，禁止编造未执行的操作或未验证的结果。
+- 不得因为任务失败、中断或部分完成而省略记录。
 
-## 测试陷阱
-- `mvn test` 会跑 `DatabaseQueryTest`：它**不走 H2**，直连 `application.yml` 的真实 MySQL 并断言演示数据（`skill_catalog` 含 java/mysql/redis/spring、`question` 有 ACTIVE 记录），没起 MySQL 或没导演示数据就会失败。只验证编译/上下文时用 `-Dtest=BackendApplicationTest`。
-- `DatabaseQueryTest` 还遍历 `information_schema` 对所有业务表 `COUNT(*)`，因此需要库账号具备查询权限。
+## 2. 必须记录的内容
 
-## 已知缺陷（勿被误当作配置正确）
-- `application.yml` 的 `spring.config.import` 第二个条目拼写损坏（`optional:fmvn spring-boot:runile:./.env`），实际生效的只有 `../../.env`；从仓库根目录启动时 `./.env` 不会加载。
-- `docs/功能资料/README.md` 中指向 `../接口设计/...`、`docs/UI原型` 的链接在本仓库不存在（`docs.zip` 也没有）；权威内容只在 `docs/功能资料/`，`docs.zip` 只是 `docs/` 的归档副本。
+### 2.1 文件变更
 
-## 架构边界（写代码前先遵守）
-- 前端只调 Java `/api/v1`；Java 用 `WebClient` 调 Python `/internal/**` 并回调接收 AI 结果。
-- 确定性规则（学历/年限/资格校验）放 Java；语义理解、生成放 Python。Agent 自有运行库不属于 Flyway 管理范围。
-- 本仓库没有 CI、lint、formatter 配置；不要臆造 `npm`/`python` 校验命令。
+记录本次操作涉及的所有项目文件，并区分：
+
+- 新增文件：文件路径、用途和主要实现内容。
+- 修改文件：文件路径、修改原因、具体修改内容及影响范围。
+- 删除文件：文件路径、删除原因及可能的影响。
+- 重命名或移动文件：原路径、新路径和调整原因。
+
+### 2.2 开发行为
+
+记录 Agent 实际执行的重要行为，包括：
+
+- 新功能开发与现有功能调整。
+- Bug 排查、定位与修复。
+- 代码重构和性能优化。
+- 依赖安装、升级或移除。
+- 数据库表结构、迁移及配置变更。
+- API 接口新增、修改或删除。
+- 测试、构建和部署操作。
+- 其他可能影响项目行为的重要操作。
+
+### 2.3 验证结果
+
+记录实际执行的验证操作，例如：
+
+- 执行的命令。
+- 测试通过或失败情况。
+- 编译或构建结果。
+- 尚未解决的问题。
+- 未执行的测试及其原因。
+
+严禁在没有实际执行测试时声称“测试通过”。
+
+## 3. 记录格式
+
+每次记录使用以下 Markdown 格式：
+
+### [日期时间] 操作标题
+
+**任务目标：**
+描述本次操作希望完成的目标。
+
+**执行行为：**
+
+1. 描述实际执行的操作。
+2. 说明关键技术处理过程。
+
+**文件变更：**
+
+| 操作类型 | 文件路径         | 具体变更 | 修改原因 |
+| -------- | ---------------- | -------- | -------- |
+| 新增     | `path/to/file` | 具体内容 | 原因     |
+| 修改     | `path/to/file` | 具体内容 | 原因     |
+
+**执行命令与验证：**
+
+- 命令：`实际执行的命令`
+- 结果：通过 / 失败 / 未执行
+- 说明：关键输出或失败原因
+
+**影响范围：**
+说明对现有模块、接口、数据库或其他功能的影响。
+
+**遗留问题：**
+记录尚未完成的工作、潜在风险及下一步建议。
+
+---
+
+## 4. 执行时机
+
+1. 开始任务前，先检查 `process.md` 是否存在。
+2. 每完成一个有实际影响的开发步骤，立即追加对应日志。
+3. 不需要为纯阅读代码、搜索文件等只读操作单独创建日志，除非它们形成重要排查结论。
+4. 每次完成文件修改、依赖调整、数据库变更或测试后，应及时记录。
+5. 如果一项任务包含多个独立开发阶段，应分阶段记录，不得只保留最终总结。
+6. 任务结束前，检查日志与实际代码变更是否一致，补充遗漏内容。
+
+## 5. 其他约束
+
+- 所有记录使用中文。
+- 时间使用本地时间；无法确定时区时不得伪造精确时间。
+- 文件路径必须准确，尽量使用项目根目录相对路径。
+- 不得覆盖、清空或随意修改历史记录。
+- 不得记录密码、Token、API Key、用户隐私数据等敏感信息。
+- `process.md` 的更新不能替代正常的代码测试与验证。
+- 不得为了记录日志而反复修改不相关文件。
+- 如果发生异常，应记录已完成的操作以及失败原因。
+
+以上规则适用于本项目后续的所有开发任务，除非用户明确修改该规范。

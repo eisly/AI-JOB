@@ -8,8 +8,8 @@ import org.apache.ibatis.annotations.Param;
 public interface UserProfileMapper {
 
     @Insert("""
-            INSERT INTO user_profile (user_id, cities_json, confirmed_facts_json)
-            VALUES (#{userId}, '[]', '{}')
+            INSERT INTO user_profile (user_id, profile_version, cities_json, confirmed_facts_json)
+            VALUES (#{userId}, 1, '[]', '{}')
             """)
     int insertEmpty(@Param("userId") String userId);
 }

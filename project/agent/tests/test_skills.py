@@ -24,7 +24,8 @@ from app.skills.tools import build_model_input, validate_result_contract
 def test_registry_loads_all_skills_with_normalized_metadata():
     registry = get_registry()
     skills = registry.all()
-    assert len(skills) == len(OPERATIONS) == 13
+    assert {skill.operation for skill in skills} == set(OPERATIONS)
+    assert "JOB_SEARCH" in OPERATIONS
     for skill in skills:
         assert skill.description
         assert skill.prompt_file.name == f"{skill.operation.lower()}.md"

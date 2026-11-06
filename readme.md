@@ -31,7 +31,7 @@ python -m pip check
 
 如果 `ai-job` 环境已经存在，跳过 `conda create`。若是在该环境已激活时才设置 `PYTHONNOUSERSITE`，执行 `conda deactivate` 后重新 `conda activate ai-job`，再安装和检查。
 
-目前依赖文件中的**直接依赖**固定了版本，间接依赖没有完全锁定；完成安装也不代表 AI 服务已实现或启动。
+目前依赖文件中的直接依赖固定了版本，间接依赖没有完全锁定；Python Agent 位于 `project/agent`，需要独立启动。
 
 ## 3. 使用 Docker 配置 MySQL
 
@@ -43,7 +43,7 @@ python -m pip check
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-编辑 `.env`，设置自己的 `MYSQL_PASSWORD` 和 `MYSQL_ROOT_PASSWORD`，不要沿用模板中的占位值。
+编辑 `.env`，设置自己的 `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`REDIS_PASSWORD` 和足够长的 `APP_JWT_SECRET`，不要沿用模板中的占位值。
 
 默认绑定本机地址：
 
@@ -66,13 +66,13 @@ docker compose ps
 
 使用 IDEA、DataGrip 或 Navicat 连接时选择普通 **MySQL** 驱动，填写：
 
-| 配置项 | 本机默认值 |
-| --- | --- |
-| 主机 | `127.0.0.1` |
-| 端口 | `3307`，或 `.env` 中的 `MYSQL_PORT` |
-| 数据库 | `career_business` |
-| 用户名 | `.env` 中的 `MYSQL_USER` |
-| 密码 | `.env` 中的 `MYSQL_PASSWORD` |
+| 配置项 | 本机默认值                                |
+| ------ | ----------------------------------------- |
+| 主机   | `127.0.0.1`                             |
+| 端口   | `3307`，或 `.env` 中的 `MYSQL_PORT` |
+| 数据库 | `career_business`                       |
+| 用户名 | `.env` 中的 `MYSQL_USER`              |
+| 密码   | `.env` 中的 `MYSQL_PASSWORD`          |
 
 以上主机和端口须与本机 `.env` 配置一致。例如已有环境若绑定了局域网 IP，应使用该 IP 而不是 `127.0.0.1`。
 
@@ -90,14 +90,14 @@ docker compose logs mysql   # 查看启动日志
 
 ### 3.4 启动 Redis
 
-项目 Compose 同时提供 Redis 7.4.12，用于本地后端开发。默认地址为 `127.0.0.1:6379`，仅绑定本机，无密码；此配置不用于共享或生产环境。已有 `.env` 无需覆盖，默认值即可使用；若 6379 被占用，在 `.env` 中设置 `REDIS_PORT`，Compose 和本机 Java 后端会读取同一个端口。
+项目 Compose 提供带密码的 Redis，默认仅绑定 `127.0.0.1:6379`。在 `.env` 中设置 `REDIS_PASSWORD`；若端口被占用，可修改 `REDIS_PORT`。
 
 在项目根目录执行：
 
 ```powershell
 docker compose up -d --wait mysql redis
 docker compose ps
-docker compose exec -T redis redis-cli ping
+docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping'
 ```
 
 两个容器均应显示 `healthy`，Redis 检查应返回 `PONG`。Redis 启用 AOF 持久化，数据保存在 `redis_data` 命名卷中。停止和再次启动可分别执行：
@@ -107,7 +107,7 @@ docker compose stop redis
 docker compose up -d --wait redis
 ```
 
-Java 后端在宿主机运行时使用上述本机地址；若以后将后端放入同一个 Compose 网络，Redis 地址应改为服务名 `redis`、端口 `6379`。`REDIS_PASSWORD` 用于连接另行配置了认证的 Redis，单独设置该变量不会为当前 Compose Redis 开启认证。
+Java 后端在宿主机运行时使用上述本机地址和 `.env` 中的 `REDIS_PASSWORD`；若后端位于 Compose 网络，主机应改为 `redis`。
 
 ## 4. 启动 Java 基础后端
 
@@ -120,9 +120,11 @@ mvn spring-boot:run
 
 从 `project/backend` 或项目根目录作为工作目录启动时，Spring Boot 会读取项目根目录的 `.env`，自动连接对应 MySQL。首次启动时，Flyway 会执行 `src/main/resources/db/migration/V1__init_business_schema.sql`，创建 Java 业务库的 31 张表及 Flyway 迁移记录表。
 
-默认后端端口为 `8080`，可通过 `.env` 中的 `SERVER_PORT` 修改。终端出现 `Started BackendApplication` 表示基础服务已启动；按 `Ctrl+C` 停止。当前已实现投递进度的新增、分页查询、详情、修改、删除和状态统计接口；首次启动会通过新增的 Flyway V2 创建 `application_record` 表。正式 JWT 登录认证及 Agent 通信尚未实现，投递进度的真实用户认证仍需与认证模块对接；详情见 `project/backend/README.md`。
+默认后端端口为 `8080`。已接入登录注册、JWT 认证、画像、投递进度和 Agent 任务等业务；启动时 Flyway 会按顺序执行未应用的迁移。V6 会将已有零版本画像更新为版本 1，已缓存旧版本的客户端需要刷新。
 
-当前 Compose 提供 **MySQL 和 Redis**；执行 `docker compose up -d --wait mysql redis` 可启动两者，单独执行 `docker compose up -d mysql` 则只启动 MySQL。Python Agent、Qdrant 和前端不会由该 Compose 自动启动。
+Compose 提供 MySQL、Redis 和 Mailpit；`docker compose up -d` 启动这三个服务。Mailpit 的本地收件箱默认在 `http://localhost:8025`，Python Agent、Qdrant 和前端需单独启动。
+
+前端：在 `project/frontend` 目录执行 `npm ci` 和 `npm run dev`。Agent：激活 `ai-job` 环境后在项目根目录执行 `python project/agent/run.py`。
 
 ## 5. 演示数据与协作约定
 
@@ -144,4 +146,4 @@ mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3307 -u aijob -p career_bu
 mvn test
 ```
 
-`BackendApplicationTest` 使用 H2 内存数据库并关闭 Flyway；`DatabaseQueryTest` 连接配置的真实 MySQL，要求先完成 Flyway 建表并准备演示数据。投递进度集成测试使用独立的 `career_business_test` 数据库，需提前建库并向当前数据库用户授权。默认 `integration-tests=auto` 在测试库不可达时跳过该组测试；正式验收必须执行 `mvn clean test -Dintegration-tests=true`，要求数据库不可达时失败，并检查没有跳过项。现有测试不会验证 Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。
+`BackendApplicationTest` 使用 H2；`DatabaseQueryTest` 需要真实 MySQL 和演示数据。投递与登录集成测试需要独立 `career_business_test` 数据库，登录测试还需要隔离 Redis 与 SMTP 测试服务；投递测试可用 `-Dintegration-tests=true` 强制执行。测试会写入测试库和 Redis，请勿指向共享或生产服务。

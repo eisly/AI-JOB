@@ -12,6 +12,9 @@ export const authApi = {
   csrf() {
     return request<{ csrfToken: string }>('/api/v1/auth/csrf', { auth: false })
   },
+  refresh() {
+    return request<TokenVO>('/api/v1/auth/refresh', { method: 'POST', body: {}, auth: false })
+  },
   logout() {
     return request<boolean>('/api/v1/auth/logout', { method: 'POST', body: {} })
   },

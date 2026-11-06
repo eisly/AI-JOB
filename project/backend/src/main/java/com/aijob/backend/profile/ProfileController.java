@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.aijob.backend.common.CommonResult;
@@ -36,8 +37,8 @@ public class ProfileController {
     }
 
     @GetMapping("/skills")
-    public CommonResult<List<Map<String, Object>>> skills() {
+    public CommonResult<List<Map<String, Object>>> skills(@RequestParam(required = false) String q) {
         users.resolveCurrentUserId();
-        return Responses.ok(profiles.skillCatalog());
+        return Responses.ok(profiles.skillCatalog(q));
     }
 }
