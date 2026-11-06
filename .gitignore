@@ -5,3 +5,5 @@
 /ppt/
 /video/
 /project/frontend/node_modules/
+/project/frontend/.workbench-verify/
+.local-dev-env/

@@ -27,3 +27,14 @@ mysql --default-character-set=utf8mb4 -u 你的数据库用户 -p career_busines
 演示账号已禁用，岗位和公司均为虚构；脚本不是可重复导入的迁移，不要在生产环境运行。
 
 使用 `mvn test` 运行启动测试；测试使用内存 H2 并关闭 Flyway，不会验证真实 MySQL 或 Redis。当前仅保留 Spring Security 默认保护，JWT 签发与校验、CSRF、角色和业务权限仍需按接口设计实现。
+## 测试隔离
+
+- 默认 `mvn test` 只执行 `BackendApplicationTest`（H2 内存库、`spring.flyway.enabled=false`），不需要启动 Docker、MySQL 或 Redis。
+- `DatabaseQueryTest` 通过 `@EnabledIfSystemProperty(named = "mysqlIt", matches = "true")` 条件执行，默认整类跳过；它保留对真实 `career_business` 库的 6 个只读查询用例。
+- 真实库验证需先让 MySQL 容器达到 `healthy` 并完成后端首次 Flyway 迁移，再执行：
+
+```powershell
+mvn test -DmysqlIt=true
+```
+
+未覆盖范围：Redis、服务间联调、JWT 签发与校验、业务接口行为。

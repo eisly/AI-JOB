@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "verify:models": "tsc -p scripts/tsconfig.workbench-verify.json && node -e \"require('fs').writeFileSync('.workbench-verify/package.json', JSON.stringify({ type: 'commonjs' }))\" && node scripts/verify-workbench-models.cjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

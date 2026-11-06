@@ -1,6 +1,7 @@
 package com.aijob.backend;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 连接 application.yml 中配置的 career_business MySQL 库，
  * 对已建数据表做只读查询验证（demo_data.sql 已导入的前提下数据可断言）。
  */
+@EnabledIfSystemProperty(named = "mysqlIt", matches = "true")
 @SpringBootTest(properties = "spring.flyway.enabled=false")
 class DatabaseQueryTest {
 

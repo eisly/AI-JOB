@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "rootDir": "../src",
+    "outDir": "../.workbench-verify",
+    "types": []
+  },
+  "include": [
+    "../src/api/request.ts",
+    "../src/features/workbench/constants.ts",
+    "../src/features/workbench/model/**/*.ts",
+    "../src/types/**/*.ts"
+  ]
+}

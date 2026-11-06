@@ -103,6 +103,31 @@ mvn spring-boot:run
 
 当前 Compose **只启动 MySQL**；后端的 Redis 配置默认为 `localhost:6379`，需要开发相关功能时另行准备 Redis。Python Agent、Qdrant 和前端也不会由该 Compose 自动启动。
 
+### 4.1 启动前端与求职工作台
+
+工作台是前端只读聚合页，数据来自画像、岗位匹配、学习计划、模拟面试、成长中心、任务中心与简历等既有接口，不新增后端聚合接口。
+
+```powershell
+cd project\frontend
+npm ci
+npm run dev
+```
+
+后端九个只读接口尚未实现、登录鉴权也未落地时，可在开发期启用 Mock：
+
+1. 复制 `project/frontend/.env.example` 为 `project/frontend/.env.development.local`。
+2. 设置 `VITE_WORKBENCH_MOCK=true`。
+3. 通过 `VITE_WORKBENCH_MOCK_SCENARIO` 选择场景：`empty`（新用户空数据）、`normal`（完整数据）、`partial-error`（任务与岗位服务失败）。
+
+Mock 仅在开发环境且显式开启时加载，生产构建不会启用。工作台常用命令：
+
+```powershell
+npm run type-check       # 类型检查
+npm run verify:models    # 聚合规则验证（下一项任务/岗位/进度/动态/时间）
+```
+
+切换到真实接口前需具备：`/api/v1/users/me`、`/api/v1/profile`、`/api/v1/job-matches`、`/api/v1/job-matches/{id}`、`/api/v1/learning/plans`、`/api/v1/interviews`、`/api/v1/growth`、`/api/v1/tasks`、`/api/v1/resumes` 九个只读接口，以及登录态与 `CommonResult.traceId` 填充。投递进度在 P0 未开放，工作台只展示“投递进度功能未开放”，不调用投递接口。
+
 ## 5. 演示数据与协作约定
 
 表结构创建成功后，如需统一的测试样本，可在**空的开发库**手动导入 `project/backend/src/main/resources/db/demo/demo_data.sql`。例如已安装 MySQL 命令行客户端时，在项目根目录执行：
@@ -124,3 +149,44 @@ mvn test
 ```
 
 当前启动测试使用 H2 内存数据库并关闭 Flyway，不会验证真实 MySQL、Redis 或服务间联调。更多后端说明见 `project/backend/README.md`。
+## 7. 一键脚本（可选）
+
+手工命令仍可单独使用；脚本按本文步骤编排，并输出 `.local-dev-env/report.json`。详细说明、退出码与权限申请单见 `scripts/dev-env/README.md`。
+
+```powershell
+# PowerShell：先只读核验，再全流程
+.\scripts\dev-env\setup.ps1 -Command check -DryRun
+.\scripts\dev-env\setup.ps1 -Command all
+
+# 只做局部阶段
+.\scripts\dev-env\setup.ps1 -Command check
+.\scripts\dev-env\setup.ps1 -Command env
+.\scripts\dev-env\setup.ps1 -Command db
+.\scripts\dev-env\setup.ps1 -Command backend
+.\scripts\dev-env\setup.ps1 -Command test
+```
+
+```bash
+# git-bash：等效调用，退出码原样透传
+./scripts/dev-env/setup.sh all
+echo $?
+```
+
+```bat
+:: cmd：等效调用
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev-env\setup.ps1 -Command all
+```
+
+**权限申请清单（P1–P13）**：P1 项目目录读写、P2 进程级执行策略豁免、P3 安装软件、P4 修改系统 `JAVA_HOME`/`PATH`、P5 启动 Docker Desktop、P6 拉取镜像、P7 结束占用端口的进程、P8 绑定非回环地址、P9 创建/删除 Conda 环境、P10 创建/停止容器与卷、P11 删除数据卷、P12 执行数据库 DDL/DML、P13 修改仓库代码。脚本默认只申请当前阶段必需的权限，不整体请求管理员权限。
+
+**回滚路径**：
+
+```powershell
+.\scripts\dev-env\setup.ps1 -Command stop       # 停后端与 MySQL，保留数据卷
+.\scripts\dev-env\setup.ps1 -Command rollback   # 分级回滚；默认不删环境、.env 和数据卷
+.\scripts\dev-env\setup.ps1 -Command purge -ConfirmDataLoss AI-JOB   # 删除数据卷，数据不可恢复
+```
+
+默认流程不会执行 `docker compose down -v`。`.env`、`.local-dev-env/` 均已加入 Git 忽略列表，不要把密码或运行期产物提交到仓库。
+
+**故障排查**：按退出码定位——11 工作目录错误、12 JDK 不是 21、13 Maven 使用的 JDK 不一致、14 Docker 不可用、20 Conda 不可用、31 `.env` 规则不通过、32 `.env` 编码/重复键、42 端口占用、43 数据库健康超时、44 数据库认证失败、51 Flyway 迁移失败、70–73 测试失败。完整表见 `scripts/dev-env/README.md`。
