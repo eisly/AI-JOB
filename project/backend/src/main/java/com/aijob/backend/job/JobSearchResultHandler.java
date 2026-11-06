@@ -1,0 +1,883 @@
+package com.aijob.backend.job;
+
+import java.math.BigDecimal;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Component;
+
+import com.aijob.backend.ability.AbilityService;
+import com.aijob.backend.common.BusinessException;
+import com.aijob.backend.common.JsonService;
+import com.aijob.backend.profile.ProfileService;
+import com.aijob.backend.task.AiTask;
+import com.aijob.backend.task.TaskResultHandler;
+
+import tools.jackson.databind.JsonNode;
+
+@Component
+public class JobSearchResultHandler implements TaskResultHandler {
+
+    private static final Set<String> CANDIDATE_TYPES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
+    private static final Set<String> EDUCATION = Set.of("HIGH_SCHOOL", "ASSOCIATE", "BACHELOR", "MASTER", "DOCTOR");
+    private static final Set<String> SOURCE_TYPES = Set.of("OFFICIAL", "AUTHORIZED", "PUBLIC_SEARCH", "USER_INPUT");
+    private static final Set<String> QUOTE_KEYS = Set.of("educationMin", "graduationYearMin",
+            "graduationYearMax", "experienceMonthsMin");
+    private static final Map<String, String> OFFSITE_NAMES = Map.of(
+            "tencent", "腾讯招聘官网",
+            "greenhouse", "公司招聘官网（Greenhouse ATS）",
+            "liepin", "猎聘",
+            "boss", "BOSS直聘",
+            "zhaopin", "智联招聘");
+
+    private final JobSearchMapper mapper;
+    private final JobMapper jobs;
+    private final JobService jobService;
+    private final JsonService json;
+    private final EligibilityService eligibility;
+    private final MatchScoreService scores;
+    private final AbilityService ability;
+    private final ProfileService profiles;
+
+    public JobSearchResultHandler(JobSearchMapper mapper, JobMapper jobs, JobService jobService, JsonService json,
+                                  EligibilityService eligibility, MatchScoreService scores, AbilityService ability,
+                                  ProfileService profiles) {
+        this.mapper = mapper;
+        this.jobs = jobs;
+        this.jobService = jobService;
+        this.json = json;
+        this.eligibility = eligibility;
+        this.scores = scores;
+        this.ability = ability;
+        this.profiles = profiles;
+    }
+
+    @Override
+    public Set<String> operations() {
+        return Set.of("JOB_SEARCH");
+    }
+
+    @Override
+    public int success(AiTask task, JsonNode result) {
+        return search(task, result);
+    }
+
+    @Override
+    public void failure(AiTask task, JsonNode error) {
+        mapper.updateStatus(task.getResourceId(), "FAILED");
+        Map<String, Object> batch = jobs.batch(task.getResourceId(), task.getUserId());
+        if (batch != null) {
+            jobs.updateBatch(task.getResourceId(), "FAILED", task.getId());
+        }
+    }
+
+    @Override
+    public void prepareRetry(AiTask original, String newTaskId) {
+        mapper.prepareRetry(original.getResourceId(), newTaskId);
+        jobs.updateBatch(original.getResourceId(), "GENERATING", newTaskId);
+    }
+
+    @SuppressWarnings("unchecked")
+    private int search(AiTask task, JsonNode result) {
+        Map<String, Object> batch = jobs.lockBatch(task.getResourceId(), task.getUserId());
+        if (batch == null || !"GENERATING".equals(String.valueOf(batch.get("status")))) {
+            throw BusinessException.conflict("搜索任务状态已变化", "INVALID_STATE");
+        }
+        Map<String, Object> payload = json.map(task.getInputSnapshotJson());
+        Map<String, Object> profile = (Map<String, Object>) payload.get("profile");
+        Map<String, Object> facts = (Map<String, Object>) profile.getOrDefault("facts", Map.of());
+        Map<String, Object> root = json.map(result);
+        List<Map<String, Object>> rawItems = root.get("items") instanceof List<?> list
+                ? (List<Map<String, Object>>) list : null;
+        if (rawItems == null) {
+            throw BusinessException.aiSchema("搜索结果缺少 items");
+        }
+        Set<String> catalog = profiles.agentSkillCatalog().stream()
+                .map(item -> String.valueOf(item.get("code"))).collect(Collectors.toSet());
+        Map<String, Map<String, Object>> snapshots = ability.snapshots(task.getUserId()).stream().map(row -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("skill_code", row.get("skill_code"));
+            item.put("score", row.get("score"));
+            item.put("sample_count", row.get("sample_count"));
+            return item;
+        }).collect(Collectors.toMap(item -> String.valueOf(item.get("skill_code")), Function.identity()));
+
+        Map<String, SearchCandidate> unique = new LinkedHashMap<>();
+        Map<String, Integer> bySource = new LinkedHashMap<>();
+        int dropped = 0;
+        int valid = 0;
+        for (Map<String, Object> raw : rawItems) {
+            SearchCandidate candidate = normalize(raw, catalog);
+            if (candidate == null) {
+                dropped++;
+                continue;
+            }
+            valid++;
+            bySource.merge(candidate.sourceKey, 1, Integer::sum);
+            SearchCandidate existing = unique.get(candidate.fingerprint);
+            if (existing == null) {
+                unique.put(candidate.fingerprint, candidate);
+            } else {
+                existing.merge(candidate);
+            }
+        }
+        List<SearchCandidate> candidates = new ArrayList<>(unique.values());
+        for (SearchCandidate candidate : candidates) {
+            prepare(candidate, profile, facts, snapshots);
+        }
+        candidates.sort(Comparator
+                .comparingInt((SearchCandidate item) -> switch (item.eligibilityStatus) {
+                    case "PASS" -> 0;
+                    case "UNKNOWN" -> 1;
+                    default -> 2;
+                })
+                .thenComparing(item -> item.matchScore, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(item -> item.verification, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(item -> item.aliases.size(), Comparator.reverseOrder())
+                .thenComparing(item -> item.fetchedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(item -> item.fingerprint));
+
+        int rank = 1;
+        int multiSource = 0;
+        int unknownSize = 0;
+        int possiblyExpired = 0;
+        for (SearchCandidate candidate : candidates) {
+            if (candidate.aliases.size() > 1) {
+                multiSource++;
+            }
+            if (CompanySizes.SIZE_UNKNOWN.equals(candidate.companySize)) {
+                unknownSize++;
+            }
+            if (candidate.warnings.contains("POSSIBLY_EXPIRED")) {
+                possiblyExpired++;
+            }
+            persist(task.getUserId(), task.getResourceId(), candidate, rank++);
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("rawCount", rawItems.size());
+        summary.put("validCount", valid);
+        summary.put("uniqueCount", candidates.size());
+        summary.put("droppedCount", dropped);
+        summary.put("mergedCount", valid - candidates.size());
+        summary.put("multiSourceCount", multiSource);
+        summary.put("unknownSizeCount", unknownSize);
+        summary.put("possiblyExpiredCount", possiblyExpired);
+        summary.put("bySource", bySource);
+        summary.put("warnings", root.get("warnings") == null ? List.of() : root.get("warnings"));
+        mapper.complete(task.getResourceId(), "READY", json.stringify(root.get("queryPlan")),
+                json.stringify(root.get("sources")), json.stringify(summary));
+        jobs.updateBatch(task.getResourceId(), "READY", task.getId());
+        return 1;
+    }
+
+    private SearchCandidate normalize(Map<String, Object> raw, Set<String> catalog) {
+        String sourceKey = text(raw.get("sourceKey"));
+        String sourceName = text(raw.get("sourceName"));
+        String sourceUrl = text(raw.get("sourceUrl"));
+        String title = text(raw.get("title"));
+        String company = text(raw.get("companyName"));
+        String jdText = text(raw.get("jdText"));
+        if (sourceKey == null || title == null || company == null || jdText == null || !httpUrl(sourceUrl)) {
+            return null;
+        }
+        if (sourceName == null) {
+            sourceName = OFFSITE_NAMES.getOrDefault(sourceKey, sourceKey);
+        }
+        String sourceType = text(raw.get("sourceType"));
+        if (sourceType == null || !SOURCE_TYPES.contains(sourceType)) {
+            sourceType = "PUBLIC_SEARCH";
+        }
+        String verification = "VERIFIED".equals(text(raw.get("verification"))) ? "VERIFIED" : "UNVERIFIED";
+        SourceDefaults defaults = sourceDefaults(sourceKey, sourceType, verification);
+        sourceType = defaults.type();
+        verification = defaults.verification();
+
+        SearchCandidate candidate = new SearchCandidate();
+        candidate.sourceKey = sourceKey;
+        candidate.sourceName = sourceName;
+        candidate.sourceType = sourceType;
+        candidate.verification = verification;
+        candidate.sourceUrl = sourceUrl;
+        candidate.title = limit(title, 100, candidate.warnings, "TITLE");
+        candidate.companyName = limit(company, 100, candidate.warnings, "COMPANY");
+        candidate.cityCode = cityCode(text(raw.get("cityCode")));
+        candidate.cityName = limitNullable(text(raw.get("cityName")), 100);
+        String rawCandidateType = text(raw.get("candidateType"));
+        candidate.candidateType = rawCandidateType != null && CANDIDATE_TYPES.contains(rawCandidateType)
+                ? rawCandidateType : "EXPERIENCED";
+        candidate.companySize = CompanySizes.normalize(text(raw.get("companySize")));
+        candidate.salaryMin = integer(raw.get("salaryMinMonthlyCents"));
+        candidate.salaryMax = integer(raw.get("salaryMaxMonthlyCents"));
+        if (candidate.salaryMin != null && candidate.salaryMax != null && candidate.salaryMin > candidate.salaryMax) {
+            candidate.salaryMin = null;
+            candidate.salaryMax = null;
+        }
+        candidate.salaryText = limitNullable(text(raw.get("salaryText")), 200);
+        candidate.experienceText = limitNullable(text(raw.get("experienceText")), 200);
+        candidate.experienceMonths = integer(raw.get("experienceMonthsMin"));
+        candidate.educationText = limitNullable(text(raw.get("educationText")), 200);
+        String education = text(raw.get("educationMin"));
+        candidate.educationMin = education != null && EDUCATION.contains(education) ? education : null;
+        candidate.publishedAt = time(raw.get("publishedAt"));
+        candidate.fetchedAt = time(raw.get("fetchedAt"));
+        candidate.jdText = limit(jdText, 30000, candidate.warnings, "JD");
+        candidate.requirements = requirements(raw.get("requirements"), candidate.jdText, catalog, candidate.warnings);
+        candidate.semantic = decimal(raw.get("semanticScore"));
+        if (candidate.semantic != null && (candidate.semantic.compareTo(BigDecimal.ZERO) < 0
+                || candidate.semantic.compareTo(BigDecimal.ONE) > 0)) {
+            candidate.semantic = null;
+        }
+        candidate.reasons = strings(raw.get("reasons"), 5, 500);
+        candidate.gaps = gapSuggestions(raw.get("gaps"), candidate.requirements, 20);
+        candidate.warnings.addAll(strings(raw.get("warnings"), 20, 120));
+        candidate.aliases.addAll(aliases(raw.get("aliases")));
+        candidate.aliases = dedupeAliases(candidate.aliases);
+        if (candidate.aliases.isEmpty()) {
+            candidate.aliases.add(alias(candidate));
+        }
+        annotate(candidate);
+        candidate.fingerprint = fingerprint(candidate.companyName, candidate.title, candidate.cityCode);
+        return candidate;
+    }
+
+    private SourceDefaults sourceDefaults(String key, String type, String verification) {
+        if (Set.of("tencent", "greenhouse").contains(key)) {
+            return new SourceDefaults("OFFICIAL", "VERIFIED");
+        }
+        if (Set.of("liepin", "boss", "zhaopin").contains(key)) {
+            return new SourceDefaults("PUBLIC_SEARCH", "UNVERIFIED");
+        }
+        return new SourceDefaults(type, verification);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> requirements(Object raw, String jdText, Set<String> catalog, List<String> warnings) {
+        Map<String, Object> source = raw instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+        Map<String, Object> result = new LinkedHashMap<>();
+        String education = text(source.get("educationMin"));
+        if (education != null && !EDUCATION.contains(education)) {
+            warnings.add("EDUCATION_DROPPED:INVALID");
+            education = null;
+        }
+        Integer yearMin = integer(source.get("graduationYearMin"));
+        Integer yearMax = integer(source.get("graduationYearMax"));
+        if (yearMin != null && (yearMin < 1900 || yearMin > 2100)) {
+            yearMin = null;
+            warnings.add("GRADUATION_YEAR_DROPPED");
+        }
+        if (yearMax != null && (yearMax < 1900 || yearMax > 2100)) {
+            yearMax = null;
+            warnings.add("GRADUATION_YEAR_DROPPED");
+        }
+        if (yearMin != null && yearMax != null && yearMin > yearMax) {
+            yearMin = null;
+            yearMax = null;
+            warnings.add("GRADUATION_YEAR_DROPPED");
+        }
+        Integer months = integer(source.get("experienceMonthsMin"));
+        if (months != null && (months < 0 || months > 600)) {
+            months = null;
+            warnings.add("EXPERIENCE_DROPPED");
+        }
+        List<String> skills = new ArrayList<>();
+        for (String code : strings(source.get("skills"), 50, 64)) {
+            if (catalog.contains(code)) {
+                if (!skills.contains(code)) {
+                    skills.add(code);
+                }
+            } else {
+                warnings.add("UNKNOWN_SKILL_DROPPED:" + code);
+            }
+        }
+        Map<String, Object> levels = new LinkedHashMap<>();
+        if (source.get("requiredSkillLevels") instanceof Map<?, ?> levelMap) {
+            for (Map.Entry<?, ?> entry : levelMap.entrySet()) {
+                String code = String.valueOf(entry.getKey());
+                Integer level = integer(entry.getValue());
+                if (skills.contains(code) && level != null && level >= 0 && level <= 100) {
+                    levels.put(code, level);
+                }
+            }
+        }
+        Map<String, Object> quotes = new LinkedHashMap<>();
+        if (source.get("quotes") instanceof Map<?, ?> quoteMap) {
+            for (Map.Entry<?, ?> entry : quoteMap.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String quote = text(entry.getValue());
+                if (QUOTE_KEYS.contains(key) && quote != null && jdText.contains(quote)) {
+                    quotes.put(key, quote);
+                }
+            }
+        }
+        if (education != null && !quotes.containsKey("educationMin")) {
+            education = null;
+            warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:educationMin");
+        }
+        if (months != null && !quotes.containsKey("experienceMonthsMin")) {
+            months = null;
+            warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:experienceMonthsMin");
+        }
+        if (yearMin != null && !quotes.containsKey("graduationYearMin")) {
+            yearMin = null;
+            warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:graduationYearMin");
+        }
+        if (yearMax != null && !quotes.containsKey("graduationYearMax")) {
+            yearMax = null;
+            warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:graduationYearMax");
+        }
+        result.put("educationMin", education);
+        result.put("graduationYearMin", yearMin);
+        result.put("graduationYearMax", yearMax);
+        result.put("experienceMonthsMin", months);
+        result.put("skills", skills);
+        result.put("requiredSkillLevels", levels);
+        result.put("quotes", quotes);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> gapSuggestions(Object raw, Map<String, Object> requirements, int limit) {
+        List<String> allowed = (List<String>) requirements.getOrDefault("skills", List.of());
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!(raw instanceof List<?> list)) {
+            return result;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String code = text(map.get("skillCode"));
+            String suggestion = text(map.get("suggestion"));
+            if (code != null && allowed.contains(code) && suggestion != null) {
+                Map<String, Object> value = new LinkedHashMap<>();
+                value.put("skillCode", code);
+                value.put("suggestion", limit(suggestion, 500, new ArrayList<>(), "SUGGESTION"));
+                result.add(value);
+                if (result.size() >= limit) {
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void prepare(SearchCandidate candidate, Map<String, Object> profile, Map<String, Object> facts,
+                         Map<String, Map<String, Object>> snapshots) {
+        candidate.roleCode = jobService.roleCode(candidate.title + " " + candidate.jdText);
+        Map<String, Object> eligibilityResult = eligibility.evaluate(facts, candidate.requirements);
+        if (!hasHardRequirement(candidate.requirements)) {
+            List<Map<String, Object>> checks = new ArrayList<>(
+                    (List<Map<String, Object>>) eligibilityResult.get("checks"));
+            Map<String, Object> check = new LinkedHashMap<>();
+            check.put("field", "requirements");
+            check.put("result", "UNKNOWN");
+            check.put("actual", null);
+            check.put("expected", null);
+            check.put("reason", "JD 未提供可核验的明确硬性要求");
+            check.put("sourceQuote", null);
+            checks.add(check);
+            eligibilityResult = new LinkedHashMap<>(eligibilityResult);
+            eligibilityResult.put("status", "UNKNOWN");
+            eligibilityResult.put("checks", checks);
+        }
+        candidate.eligibilityStatus = String.valueOf(eligibilityResult.get("status"));
+        candidate.eligibility = eligibilityResult;
+        List<String> confirmedSkills = facts.get("skills") instanceof List<?> list
+                ? list.stream().filter(item -> item instanceof Map<?, ?>)
+                    .map(item -> str(((Map<String, Object>) item).get("skillCode"))).toList()
+                : List.of();
+        @SuppressWarnings("unchecked")
+        List<String> requiredSkills = (List<String>) candidate.requirements.getOrDefault("skills", List.of());
+        BigDecimal skill = scores.skill(confirmedSkills, requiredSkills);
+        BigDecimal preference = scores.preference(str(profile.get("targetRole")), candidate.roleCode,
+                profile.get("cities") instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of(),
+                candidate.cityCode);
+        Integer total = scores.score(skill, candidate.semantic, preference);
+        candidate.matchScore = "FAIL".equals(candidate.eligibilityStatus) ? null : total;
+        List<Map<String, Object>> components = new ArrayList<>();
+        components.add(scores.component("skill", skill, BigDecimal.valueOf(0.60), "confirmed-resume-v1"));
+        components.add(scores.component("semantic", candidate.semantic, BigDecimal.valueOf(0.25), "job-search-semantic-v1"));
+        components.add(scores.component("preference", preference, BigDecimal.valueOf(0.15), "profile-preferences-v1"));
+        candidate.components = components;
+        candidate.gaps = buildGaps(requiredSkills, candidate.gaps, candidate.requirements, snapshots);
+    }
+
+    private boolean hasHardRequirement(Map<String, Object> requirements) {
+        return requirements.get("educationMin") != null
+                || requirements.get("experienceMonthsMin") != null
+                || requirements.get("graduationYearMin") != null
+                || requirements.get("graduationYearMax") != null
+                || !((List<?>) requirements.getOrDefault("skills", List.of())).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> buildGaps(List<String> requiredSkills, List<Map<String, Object>> suggestions,
+                                                Map<String, Object> requirements,
+                                                Map<String, Map<String, Object>> snapshots) {
+        Map<String, String> suggestionByCode = new HashMap<>();
+        for (Map<String, Object> item : suggestions) {
+            suggestionByCode.put(String.valueOf(item.get("skillCode")), String.valueOf(item.get("suggestion")));
+        }
+        Map<String, Object> levels = (Map<String, Object>) requirements.getOrDefault("requiredSkillLevels", Map.of());
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (String code : requiredSkills) {
+            Map<String, Object> snapshot = snapshots.get(code);
+            BigDecimal current = snapshot == null || snapshot.get("score") == null ? null : decimal(snapshot.get("score"));
+            BigDecimal target = levels.get(code) instanceof Number number ? decimal(number) : null;
+            BigDecimal gap = current == null || target == null ? null : target.subtract(current).max(BigDecimal.ZERO);
+            int count = snapshot == null ? 0 : ((Number) snapshot.get("sample_count")).intValue();
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("skillCode", code);
+            item.put("currentScore", current);
+            item.put("targetScore", target);
+            item.put("gap", gap);
+            item.put("evidenceStatus", count == 0 ? "MISSING" : count < 3 ? "LIMITED" : "SUFFICIENT");
+            item.put("evidenceIds", List.of());
+            item.put("suggestion", suggestionByCode.getOrDefault(code,
+                    current == null ? "证据不足，建议完成有效评价" : "继续针对岗位要求练习"));
+            result.add(item);
+        }
+        return result;
+    }
+
+    private void persist(String userId, String searchId, SearchCandidate candidate, int rank) {
+        String sourceId = mapper.sourceId(candidate.sourceKey);
+        String baseUrl = origin(candidate.sourceUrl);
+        if (sourceId == null) {
+            mapper.upsertSource(UUID.randomUUID().toString(), candidate.sourceKey, candidate.sourceName,
+                    candidate.sourceType, baseUrl, candidate.verification);
+            sourceId = mapper.sourceId(candidate.sourceKey);
+        }
+        if (sourceId == null) {
+            throw BusinessException.conflict("岗位来源初始化失败", "INVALID_STATE");
+        }
+        String jobId = UUID.randomUUID().toString();
+        mapper.insertJob(jobId, sourceId, userId, candidate.sourceUrl);
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("searchId", searchId);
+        meta.put("sourceKey", candidate.sourceKey);
+        meta.put("warnings", candidate.warnings);
+        meta.put("aliases", candidate.aliases);
+        meta.put("fingerprint", candidate.fingerprint);
+        mapper.insertJobVersion(UUID.randomUUID().toString(), jobId, candidate.title, candidate.companyName,
+                candidate.cityCode, candidate.roleCode, candidate.candidateType, candidate.companySize,
+                candidate.publishedAt, candidate.fetchedAt, candidate.salaryMin, candidate.salaryMax,
+                candidate.jdText, json.sha256(candidate.jdText), json.stringify(candidate.requirements),
+                json.stringify(meta));
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("title", candidate.title);
+        snapshot.put("companyName", candidate.companyName);
+        snapshot.put("cityCode", candidate.cityCode);
+        snapshot.put("cityName", candidate.cityName);
+        snapshot.put("candidateType", candidate.candidateType);
+        snapshot.put("companySize", candidate.companySize);
+        snapshot.put("publishedAt", iso(candidate.publishedAt));
+        snapshot.put("fetchedAt", iso(candidate.fetchedAt));
+        snapshot.put("salaryMinMonthlyCents", candidate.salaryMin);
+        snapshot.put("salaryMaxMonthlyCents", candidate.salaryMax);
+        snapshot.put("salaryText", candidate.salaryText);
+        snapshot.put("experienceText", candidate.experienceText);
+        snapshot.put("experienceMonthsMin", candidate.experienceMonths);
+        snapshot.put("educationText", candidate.educationText);
+        snapshot.put("educationMin", candidate.educationMin);
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("id", sourceId);
+        source.put("name", candidate.sourceName);
+        source.put("type", candidate.sourceType);
+        source.put("baseUrl", baseUrl);
+        source.put("verificationStatus", candidate.verification);
+        source.put("verifiedAt", iso(candidate.fetchedAt));
+        snapshot.put("source", source);
+        snapshot.put("sourceUrl", candidate.sourceUrl);
+        snapshot.put("verifiedAt", iso(candidate.fetchedAt));
+        snapshot.put("verification", candidate.verification);
+        snapshot.put("warnings", candidate.warnings);
+        snapshot.put("aliases", candidate.aliases);
+        snapshot.put("fingerprint", candidate.fingerprint);
+        jobs.insertItem(UUID.randomUUID().toString(), searchId, jobId, 1, rank,
+                candidate.eligibilityStatus, json.stringify(candidate.eligibility), candidate.matchScore,
+                json.stringify(candidate.components), json.stringify(candidate.gaps),
+                json.stringify(candidate.reasons), json.stringify(snapshot));
+    }
+
+    private void annotate(SearchCandidate candidate) {
+        if (candidate.publishedAt == null) {
+            candidate.warnings.add("MISSING_PUBLISHED_AT");
+        } else if (candidate.publishedAt.isBefore(LocalDateTime.now(ZoneOffset.UTC).minusDays(90))) {
+            candidate.warnings.add("POSSIBLY_EXPIRED");
+        }
+        if (candidate.salaryMin == null || candidate.salaryMax == null) {
+            candidate.warnings.add("MISSING_SALARY");
+        }
+        if (candidate.educationMin == null) {
+            candidate.warnings.add("MISSING_EDUCATION");
+        }
+        if (candidate.experienceText == null && candidate.experienceMonths == null) {
+            candidate.warnings.add("MISSING_EXPERIENCE");
+        }
+        if (CompanySizes.SIZE_UNKNOWN.equals(candidate.companySize)) {
+            candidate.warnings.add("COMPANY_SIZE_UNKNOWN");
+        }
+        if (!"VERIFIED".equals(candidate.verification)) {
+            candidate.warnings.add("UNVERIFIED_SOURCE");
+        }
+        candidate.warnings = dedupe(candidate.warnings, 20);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> aliases(Object raw) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!(raw instanceof List<?> list)) {
+            return result;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+            String url = text(map.get("sourceUrl"));
+            String sourceKey = text(map.get("sourceKey"));
+            if (!httpUrl(url) || sourceKey == null) {
+                continue;
+            }
+            Map<String, Object> alias = new LinkedHashMap<>();
+            alias.put("sourceKey", sourceKey);
+            alias.put("sourceName", text(map.get("sourceName")));
+            alias.put("sourceType", text(map.get("sourceType")));
+            alias.put("sourceUrl", url);
+            alias.put("publishedAt", text(map.get("publishedAt")));
+            alias.put("fetchedAt", text(map.get("fetchedAt")));
+            alias.put("verification", "VERIFIED".equals(text(map.get("verification"))) ? "VERIFIED" : "UNVERIFIED");
+            result.add(alias);
+        }
+        return result;
+    }
+
+    private static Map<String, Object> alias(SearchCandidate candidate) {
+        Map<String, Object> alias = new LinkedHashMap<>();
+        alias.put("sourceKey", candidate.sourceKey);
+        alias.put("sourceName", candidate.sourceName);
+        alias.put("sourceType", candidate.sourceType);
+        alias.put("sourceUrl", candidate.sourceUrl);
+        alias.put("publishedAt", iso(candidate.publishedAt));
+        alias.put("fetchedAt", iso(candidate.fetchedAt));
+        alias.put("verification", candidate.verification);
+        return alias;
+    }
+
+    private static List<Map<String, Object>> dedupeAliases(List<Map<String, Object>> aliases) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        for (Map<String, Object> alias : aliases) {
+            result.putIfAbsent(String.valueOf(alias.get("sourceKey")) + "|" + alias.get("sourceUrl"), alias);
+        }
+        return new ArrayList<>(result.values());
+    }
+
+    private String fingerprint(String company, String title, String cityCode) {
+        return JobSearchFingerprint.of(company, title, cityCode);
+    }
+
+    private String normalizeCompany(String value) {
+        String text = normalizeKey(value);
+        for (String suffix : List.of("股份有限公司", "有限责任公司", "有限公司", "集团", "科技", "网络", "信息技术")) {
+            if (text.endsWith(suffix) && text.length() > suffix.length()) {
+                text = text.substring(0, text.length() - suffix.length());
+            }
+        }
+        return text;
+    }
+
+    private String normalizeTitle(String value) {
+        String text = normalizeKey(value);
+        for (String suffix : List.of("急聘", "热招", "招聘", "高薪")) {
+            if (text.endsWith(suffix) && text.length() > suffix.length()) {
+                text = text.substring(0, text.length() - suffix.length());
+            }
+        }
+        return text;
+    }
+
+    private String normalizeKey(String value) {
+        String text = value == null ? "" : value.toLowerCase(Locale.ROOT)
+                .replaceAll("[（(].*?[）)]", "")
+                .replaceAll("[\\s\\-_/·,，。:：;；'\"“”‘’、|]+", "");
+        return text;
+    }
+
+    private String limit(String value, int max, List<String> warnings, String field) {
+        if (value == null) {
+            return null;
+        }
+        if (value.length() > max) {
+            warnings.add("TRUNCATED_" + field);
+            return value.substring(0, max);
+        }
+        return value;
+    }
+
+    private String limitNullable(String value, int max) {
+        return value == null || value.length() <= max ? value : value.substring(0, max);
+    }
+
+    private String cityCode(String value) {
+        return value != null && value.matches("\\d{6}") ? value : null;
+    }
+
+    private String origin(String url) {
+        try {
+            URI uri = URI.create(url);
+            return uri.getScheme() + "://" + uri.getHost();
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private boolean httpUrl(String value) {
+        return JobSearchLinks.isHttpUrl(value);
+    }
+
+    private LocalDateTime time(Object value) {
+        String text = text(value);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(text).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        } catch (RuntimeException ignored) {
+            try {
+                return LocalDateTime.parse(text);
+            } catch (RuntimeException ex) {
+                return null;
+            }
+        }
+    }
+
+    private static String iso(LocalDateTime value) {
+        return value == null ? null : value.toInstant(ZoneOffset.UTC).toString();
+    }
+
+    private BigDecimal decimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private Integer integer(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && text.matches("-?\\d+")) {
+            return Integer.parseInt(text);
+        }
+        return null;
+    }
+
+    private List<String> strings(Object value, int limit, int maxLength) {
+        if (!(value instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : list) {
+            String text = text(item);
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+            result.add(text.length() > maxLength ? text.substring(0, maxLength) : text);
+            if (result.size() >= limit) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static List<String> dedupe(List<String> values, int limit) {
+        List<String> result = new ArrayList<>();
+        for (String value : values) {
+            if (value != null && !result.contains(value)) {
+                result.add(value);
+                if (result.size() >= limit) {
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private String text(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    private String str(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private record SourceDefaults(String type, String verification) {
+    }
+
+    private static final class SearchCandidate {
+        private String sourceKey;
+        private String sourceName;
+        private String sourceType;
+        private String verification;
+        private String sourceUrl;
+        private String title;
+        private String companyName;
+        private String cityCode;
+        private String cityName;
+        private String candidateType;
+        private String companySize;
+        private Integer salaryMin;
+        private Integer salaryMax;
+        private String salaryText;
+        private String experienceText;
+        private Integer experienceMonths;
+        private String educationText;
+        private String educationMin;
+        private LocalDateTime publishedAt;
+        private LocalDateTime fetchedAt;
+        private String jdText;
+        private Map<String, Object> requirements = Map.of();
+        private BigDecimal semantic;
+        private List<String> reasons = new ArrayList<>();
+        private List<Map<String, Object>> gaps = new ArrayList<>();
+        private List<String> warnings = new ArrayList<>();
+        private List<Map<String, Object>> aliases = new ArrayList<>();
+        private String fingerprint;
+        private String roleCode;
+        private String eligibilityStatus;
+        private Map<String, Object> eligibility = Map.of();
+        private Integer matchScore;
+        private List<Map<String, Object>> components = new ArrayList<>();
+
+        private void merge(SearchCandidate other) {
+            int currentPriority = priority(sourceType);
+            int otherPriority = priority(other.sourceType);
+            boolean otherPrimary = otherPriority < currentPriority
+                    || (otherPriority == currentPriority && other.jdText.length() > jdText.length());
+            if (otherPrimary) {
+                SearchCandidate swapped = copy();
+                this.sourceKey = other.sourceKey;
+                this.sourceName = other.sourceName;
+                this.sourceType = other.sourceType;
+                this.verification = other.verification;
+                this.sourceUrl = other.sourceUrl;
+                this.title = other.title;
+                this.companyName = other.companyName;
+                this.cityCode = other.cityCode;
+                this.cityName = other.cityName;
+                this.candidateType = other.candidateType;
+                this.companySize = other.companySize;
+                this.salaryMin = other.salaryMin;
+                this.salaryMax = other.salaryMax;
+                this.salaryText = other.salaryText;
+                this.experienceText = other.experienceText;
+                this.experienceMonths = other.experienceMonths;
+                this.educationText = other.educationText;
+                this.educationMin = other.educationMin;
+                this.publishedAt = other.publishedAt;
+                this.fetchedAt = other.fetchedAt;
+                this.jdText = other.jdText;
+                this.requirements = other.requirements;
+                this.semantic = other.semantic;
+                this.reasons = other.reasons;
+                this.gaps = other.gaps;
+                this.warnings = other.warnings;
+                this.aliases = other.aliases;
+                this.fingerprint = other.fingerprint;
+                other = swapped;
+            }
+            fillMissing(other);
+            warnings.addAll(other.warnings);
+            warnings = dedupe(warnings, 20);
+            List<Map<String, Object>> merged = new ArrayList<>(aliases);
+            merged.addAll(other.aliases);
+            aliases = dedupeAliases(merged);
+            if (aliases.isEmpty()) {
+                aliases.add(alias(this));
+            }
+            if (semantic == null) {
+                semantic = other.semantic;
+            }
+        }
+
+        private void fillMissing(SearchCandidate other) {
+            if (cityCode == null) cityCode = other.cityCode;
+            if (cityName == null) cityName = other.cityName;
+            if (salaryMin == null) salaryMin = other.salaryMin;
+            if (salaryMax == null) salaryMax = other.salaryMax;
+            if (salaryText == null) salaryText = other.salaryText;
+            if (experienceText == null) experienceText = other.experienceText;
+            if (experienceMonths == null) experienceMonths = other.experienceMonths;
+            if (educationText == null) educationText = other.educationText;
+            if (educationMin == null) educationMin = other.educationMin;
+            if (publishedAt == null) publishedAt = other.publishedAt;
+            if (fetchedAt == null) fetchedAt = other.fetchedAt;
+        }
+
+        private SearchCandidate copy() {
+            SearchCandidate copy = new SearchCandidate();
+            copy.sourceKey = sourceKey;
+            copy.sourceName = sourceName;
+            copy.sourceType = sourceType;
+            copy.verification = verification;
+            copy.sourceUrl = sourceUrl;
+            copy.title = title;
+            copy.companyName = companyName;
+            copy.cityCode = cityCode;
+            copy.cityName = cityName;
+            copy.candidateType = candidateType;
+            copy.companySize = companySize;
+            copy.salaryMin = salaryMin;
+            copy.salaryMax = salaryMax;
+            copy.salaryText = salaryText;
+            copy.experienceText = experienceText;
+            copy.experienceMonths = experienceMonths;
+            copy.educationText = educationText;
+            copy.educationMin = educationMin;
+            copy.publishedAt = publishedAt;
+            copy.fetchedAt = fetchedAt;
+            copy.jdText = jdText;
+            copy.requirements = requirements;
+            copy.semantic = semantic;
+            copy.reasons = reasons;
+            copy.gaps = gaps;
+            copy.warnings = warnings;
+            copy.aliases = aliases;
+            copy.fingerprint = fingerprint;
+            return copy;
+        }
+
+        private static int priority(String type) {
+            return switch (type == null ? "" : type) {
+                case "OFFICIAL" -> 0;
+                case "AUTHORIZED" -> 1;
+                case "PUBLIC_SEARCH" -> 2;
+                default -> 3;
+            };
+        }
+    }
+}

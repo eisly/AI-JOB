@@ -45,11 +45,11 @@ class DatabaseQueryTest {
         List<Map<String, Object>> skills = jdbcTemplate.queryForList(
                 "SELECT code, name, parent_code, enabled FROM skill_catalog ORDER BY code");
         skills.forEach(s -> System.out.println("skill_catalog -> " + s));
-        assertFalse(skills.isEmpty(), "skill_catalog 不应为空（demo 数据应有 java/mysql/redis/spring）");
+        assertFalse(skills.isEmpty(), "skill_catalog 不应为空（本地数据应有规范技能编码）");
 
         List<String> codes = jdbcTemplate.queryForList(
                 "SELECT code FROM skill_catalog WHERE enabled = 1", String.class);
-        assertTrue(codes.containsAll(List.of("java", "mysql", "redis", "spring")));
+        assertTrue(codes.containsAll(List.of("JAVA", "MYSQL", "REDIS", "SPRING_BOOT")));
     }
 
     @Test

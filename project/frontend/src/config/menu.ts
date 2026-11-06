@@ -9,6 +9,9 @@ import {
   Microphone,
   TrendCharts,
   List,
+  MagicStick,
+  Bell,
+  Search,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
@@ -23,10 +26,13 @@ export const menuItems: MenuItem[] = [
   { path: '/dashboard', name: 'dashboard', title: '求职工作台', icon: House },
   { path: '/profile', name: 'profile', title: '求职画像', icon: User },
   { path: '/resume', name: 'resume', title: '简历中心', icon: Document },
+  { path: '/resume-optimization', name: 'resume-optimization', title: '智能简历优化', icon: MagicStick },
   { path: '/job-match', name: 'job-match', title: '岗位匹配', icon: Aim },
+  { path: '/job-search', name: 'job-search', title: '联网搜索', icon: Search },
   { path: '/training', name: 'training', title: '专项训练', icon: Edit },
-  { path: '/project', name: 'project', title: '项目实战', icon: School, badge: '规划中' },
+  { path: '/project', name: 'project', title: '项目实战', icon: School },
   { path: '/interview', name: 'interview', title: '模拟面试', icon: Microphone },
   { path: '/growth', name: 'growth', title: '成长中心', icon: TrendCharts },
-  { path: '/application', name: 'application', title: '投递进度', icon: List, badge: '方案预览' },
+  { path: '/application', name: 'application', title: '投递进度', icon: List },
+  { path: '/tasks', name: 'tasks', title: '任务中心', icon: Bell },
 ]

@@ -5,3 +5,10 @@
 /ppt/
 /video/
 /project/frontend/node_modules/
+# Python test / coverage artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.testdeps/

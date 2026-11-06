@@ -30,3 +30,7 @@ qdrant-client==1.20.0
 # Extract text from resume files
 pypdf==6.21.3
 python-docx==1.2.0
+# Unit tests and coverage (development / CI)
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1
+coverage==7.17.1

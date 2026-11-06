@@ -1,0 +1,12 @@
+app:
+  auth:
+    dev-user-header-enabled: true
+  files:
+    storage-dir: ${APP_FILES_STORAGE_DIR:./data/private-files}
+  agent:
+    base-url: ${AGENT_BASE_URL:http://127.0.0.1:8100}
+    scheduler-enabled: ${AGENT_SCHEDULER_ENABLED:true}
+spring:
+  threads:
+    virtual:
+      enabled: true

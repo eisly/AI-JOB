@@ -7,14 +7,8 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((_to, _from, next) => {
-  // TODO: 预留登录态判断钩子
-  // const userStore = useUserStore()
-  // if (!userStore.token && to.path !== '/login') {
-  //   next('/login')
-  //   return
-  // }
-  next()
+router.afterEach(to => {
+  document.title = to.meta.title ? `${to.meta.title} - AI-JOB` : 'AI-JOB'
 })
 
 export default router

@@ -17,6 +17,7 @@ import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -75,6 +76,14 @@ public class GlobalExceptionHandler {
         CommonError body = validationError(List.of(Map.of(
                 "field", ex.getParameterName(),
                 "message", "缺少必填参数: " + ex.getParameterName())));
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<CommonError> handleMissingHeader(MissingRequestHeaderException ex) {
+        CommonError body = validationError(List.of(Map.of(
+                "field", ex.getHeaderName(),
+                "message", "缺少必填请求头: " + ex.getHeaderName())));
         return ResponseEntity.badRequest().body(body);
     }
 

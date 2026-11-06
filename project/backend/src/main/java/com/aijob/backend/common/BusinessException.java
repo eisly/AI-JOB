@@ -50,11 +50,80 @@ public class BusinessException extends RuntimeException {
         return new BusinessException(404, 40401, "资源不存在", "RESOURCE_NOT_FOUND", false, null);
     }
 
+    /** 404，附带字段与处理建议，便于前端定位具体输入 */
+    public static BusinessException notFound(String message, Map<String, Object> details) {
+        return new BusinessException(404, 40401, message, "RESOURCE_NOT_FOUND", false, details);
+    }
+
     /** 409 VERSION_CONFLICT，details.currentVersion=数据库当前版本 */
     public static BusinessException versionConflict(long currentVersion) {
         Map<String, Object> details = new HashMap<>();
         details.put("currentVersion", currentVersion);
         return new BusinessException(409, 40901, "数据版本已变化，请刷新后重试", "VERSION_CONFLICT", false, details);
+    }
+
+    public static BusinessException forbidden() {
+        return new BusinessException(403, 40301, "权限不足", "FORBIDDEN", false, null);
+    }
+
+    public static BusinessException conflict(String message, String key) {
+        int code = switch (key) {
+            case "IDEMPOTENCY_CONFLICT" -> 40903;
+            case "INVALID_STATE" -> 40904;
+            case "STALE_INPUT" -> 40905;
+            case "REPORT_NOT_READY" -> 40906;
+            default -> 40904;
+        };
+        return new BusinessException(409, code, message, key, false, null);
+    }
+
+    public static BusinessException taskInProgress(String taskId) {
+        return new BusinessException(409, 40902, "已有任务正在处理", "TASK_IN_PROGRESS", false,
+                Map.of("taskId", taskId));
+    }
+
+    public static BusinessException reportNotReady(String taskId) {
+        return new BusinessException(409, 40906, "报告尚未生成", "REPORT_NOT_READY", false,
+                Map.of("taskId", taskId));
+    }
+
+    public static BusinessException stale(String message) {
+        return new BusinessException(409, 40905, message, "STALE_INPUT", false, null);
+    }
+
+    public static BusinessException stale(String message, Map<String, Object> details) {
+        return new BusinessException(409, 40905, message, "STALE_INPUT", false, details);
+    }
+
+    public static BusinessException conflict(String message, String key, Map<String, Object> details) {
+        int code = switch (key) {
+            case "IDEMPOTENCY_CONFLICT" -> 40903;
+            case "INVALID_STATE" -> 40904;
+            case "STALE_INPUT" -> 40905;
+            case "REPORT_NOT_READY" -> 40906;
+            default -> 40904;
+        };
+        return new BusinessException(409, code, message, key, false, details);
+    }
+
+    public static BusinessException payloadTooLarge() {
+        return new BusinessException(413, 41301, "文件或请求载荷过大", "PAYLOAD_TOO_LARGE", false, null);
+    }
+
+    public static BusinessException unsupportedFileType() {
+        return new BusinessException(415, 41501, "仅支持 PDF 或 DOCX 文件", "UNSUPPORTED_FILE_TYPE", false, null);
+    }
+
+    public static BusinessException eventCursorExpired() {
+        return new BusinessException(410, 41001, "事件游标已过期", "EVENT_CURSOR_EXPIRED", false, null);
+    }
+
+    public static BusinessException aiSchema(String message) {
+        return new BusinessException(422, 42201, message, "AI_SCHEMA_INVALID", false, null);
+    }
+
+    public static BusinessException dependencyUnavailable(String message) {
+        return new BusinessException(503, 50301, message, "DEPENDENCY_UNAVAILABLE", true, null);
     }
 
     public int getHttpStatus() {

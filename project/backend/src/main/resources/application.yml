@@ -12,6 +12,10 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
 
 mybatis:
   configuration:
@@ -22,8 +26,27 @@ server:
   port: ${SERVER_PORT:8080}
 app:
   auth:
-    # 本地联调降级认证开关：默认关闭，且仅当激活 profile 包含 local 时才可能生效（双条件缺一不可）。
-    # 其他环境（默认/生产）即使误设该开关为 true 也不会启用，任何请求头伪造均得到 401。
-    # 开启时仅接受 app_user 中 status=ACTIVE 的真实用户；正常与生产运行只认
-    # SecurityContext 中已验证的非匿名认证身份。建议在 application-local.yml 中显式开启。
     dev-user-header-enabled: ${APP_AUTH_DEV_USER_HEADER_ENABLED:false}
+    user-jwt-secret: ${APP_AUTH_USER_JWT_SECRET:dev-only-user-jwt-secret-change-me}
+    user-jwt-issuer: ${APP_AUTH_USER_JWT_ISSUER:career-auth}
+    user-jwt-audience: ${APP_AUTH_USER_JWT_AUDIENCE:career-business}
+  agent:
+    base-url: ${AGENT_BASE_URL:http://127.0.0.1:8100}
+    jwt-secret: ${AGENT_JWT_SECRET:dev-only-internal-jwt-secret-change-me}
+    callback-jwt-secret: ${AGENT_CALLBACK_JWT_SECRET:${AGENT_JWT_SECRET:dev-only-internal-jwt-secret-change-me}}
+    connect-timeout: ${AGENT_CONNECT_TIMEOUT:5s}
+    read-timeout: ${AGENT_READ_TIMEOUT:65s}
+    scheduler-enabled: ${AGENT_SCHEDULER_ENABLED:true}
+  files:
+    storage-dir: ${APP_FILES_STORAGE_DIR:./data/private-files}
+    download-signing-secret: ${APP_FILES_DOWNLOAD_SIGNING_SECRET:dev-only-file-signing-secret}
+    pdf-font-path: ${APP_PDF_FONT_PATH:}
+  tasks:
+    deadline-seconds: ${AI_TASK_DEADLINE_SECONDS:300}
+    sse-heartbeat-seconds: ${AI_TASK_SSE_HEARTBEAT_SECONDS:15}
+  job-search:
+    sources: ${JOB_SEARCH_SOURCES:tencent,greenhouse,liepin,boss,zhaopin}
+    per-source: ${JOB_SEARCH_PER_SOURCE:20}
+    max-total: ${JOB_SEARCH_MAX_TOTAL:60}
+    concurrency: ${JOB_SEARCH_CONCURRENCY:4}
+    source-timeout-seconds: ${JOB_SEARCH_SOURCE_TIMEOUT_SECONDS:12}
