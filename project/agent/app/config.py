@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
@@ -92,7 +93,8 @@ class Settings(BaseSettings):
     file_allowed_schemes: str = "https"
     file_download_timeout_seconds: float = 10.0
 
-    job_search_sources: str = "tencent,greenhouse,liepin,boss,zhaopin"
+    tavily_api_key: str | None = Field(default=None, repr=False, validation_alias="TAVILY_API_KEY")
+    job_search_sources: str = "web,tencent,greenhouse"
     job_search_timeout_seconds: float = 12.0
     job_search_concurrency: int = 4
     job_search_per_source: int = 20

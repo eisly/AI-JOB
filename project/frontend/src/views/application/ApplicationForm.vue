@@ -8,6 +8,7 @@ import {
   APPLICATION_STATUSES,
   APPLICATION_STATUS_LABELS,
   buildUpdatePayload,
+  type ApplicationCreatePayload,
   type ApplicationFormFieldValues,
   type ApplicationStatus,
   type ApplicationVO,
@@ -26,6 +27,7 @@ const props = defineProps<{
   mode: 'create' | 'edit'
   /** 编辑模式的基线记录（进入时快照） */
   baseline: ApplicationVO | null
+  plan?: ApplicationCreatePayload | null
 }>()
 
 const emit = defineEmits<{
@@ -78,7 +80,7 @@ const rules: FormRules = {
 }
 
 const isEdit = computed(() => props.mode === 'edit')
-const title = computed(() => (isEdit.value ? '编辑投递记录' : '新增投递记录'))
+const title = computed(() => (isEdit.value ? '编辑投递记录' : props.plan ? '添加投递计划' : '新增投递记录'))
 
 function fromVO(vo: ApplicationVO): ApplicationFormFieldValues {
   return {
@@ -98,7 +100,7 @@ function fromVO(vo: ApplicationVO): ApplicationFormFieldValues {
 }
 
 watch(
-  () => [props.visible, props.baseline] as const,
+  () => [props.visible, props.baseline, props.plan] as const,
   ([visible]) => {
     if (visible) {
       conflictVisible.value = false
@@ -107,12 +109,12 @@ watch(
         Object.assign(form, fromVO(props.baseline))
       } else {
         Object.assign(form, {
-          companyName: '',
-          jobTitle: '',
-          cityCode: '',
-          education: '',
-          salaryText: '',
-          description: '',
+          companyName: props.plan?.companyName ?? '',
+          jobTitle: props.plan?.jobTitle ?? '',
+          cityCode: props.plan?.cityCode ?? '',
+          education: props.plan?.education ?? '',
+          salaryText: props.plan?.salaryText ?? '',
+          description: props.plan?.description ?? '',
           status: 'PLANNED' as ApplicationStatus,
           plannedDate: '',
           appliedDate: '',
@@ -129,13 +131,14 @@ watch(
 
 function buildCreatePayload() {
   return {
+    ...(props.plan?.jobId ? { jobId: props.plan.jobId } : {}),
     companyName: form.companyName.trim(),
     jobTitle: form.jobTitle.trim(),
     cityCode: form.cityCode.trim() === '' ? null : form.cityCode.trim(),
     education: form.education.trim() === '' ? null : form.education.trim(),
     salaryText: form.salaryText.trim() === '' ? null : form.salaryText.trim(),
     description: form.description.trim() === '' ? null : form.description.trim(),
-    status: form.status,
+    status: props.plan ? 'PLANNED' as const : form.status,
     plannedDate: form.plannedDate === '' ? null : form.plannedDate,
     appliedDate: form.appliedDate === '' ? null : form.appliedDate,
     interviewDate: form.interviewDate === '' ? null : form.interviewDate,
@@ -258,7 +261,7 @@ function handleClosed() {
         />
       </el-form-item>
       <el-form-item label="状态" prop="status">
-        <el-select v-model="form.status" style="width: 200px">
+        <el-select v-model="form.status" :disabled="!!plan" style="width: 200px">
           <el-option
             v-for="status in APPLICATION_STATUSES"
             :key="status"

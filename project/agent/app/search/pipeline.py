@@ -26,7 +26,7 @@ from .sources import SourceAdapter, SourceContext, resolve_sources
 from .sources.base import DEFAULT_USER_AGENT, DEFAULT_TIMEOUT_SECONDS
 
 logger = logging.getLogger("agent.search")
-SEARCH_GRAPH_VERSION = "job-search-graph-v1"
+SEARCH_GRAPH_VERSION = "job-search-graph-v2"
 UNDERSTAND_BATCH = 8
 MODEL_JD_CHARS = 3000
 
@@ -45,8 +45,6 @@ class SearchState(TypedDict, total=False):
     runtime: SearchRuntime
     filters: SearchFilters
     keyword: str
-    cities: tuple[str, ...]
-    candidate_types: tuple[str, ...]
     adapters: list[SourceAdapter]
     raw: list[SourcePosting]
     deduped: list[SourcePosting]
@@ -55,6 +53,7 @@ class SearchState(TypedDict, total=False):
     query_plan: dict[str, Any]
     warnings: list[str]
     adjustments: list[str]
+    alternative_keyword: str
     was_adjusted: bool
     model_calls: int
     model_degraded: bool
@@ -62,9 +61,10 @@ class SearchState(TypedDict, total=False):
 
 def build_filters(payload: dict[str, Any], profile: dict[str, Any]) -> tuple[SearchFilters, str]:
     raw = payload.get("filters") or {}
+    role = str(profile.get("targetRole") or "").strip()
     keyword = str(raw.get("keyword") or "").strip()
     if not keyword:
-        keyword = ROLE_KEYWORDS.get(str(profile.get("targetRole") or ""), "")
+        keyword = ROLE_KEYWORDS.get(role, role.replace("_", " "))
     cities = tuple(str(item) for item in (raw.get("cities") or profile.get("cities") or []) if str(item))
     candidate_types = tuple(str(item) for item in (raw.get("candidateTypes") or []) if str(item))
     if not candidate_types and profile.get("candidateType"):
@@ -119,8 +119,6 @@ class JobSearchPipeline:
             "runtime": self.runtime,
             "filters": self.filters,
             "keyword": self.keyword,
-            "cities": self.filters.cities,
-            "candidate_types": self.filters.candidate_types,
             "adapters": self.adapters,
             "raw": [],
             "warnings": [],
@@ -149,51 +147,58 @@ class JobSearchPipeline:
         adjustments: list[str] = []
         keyword = state["keyword"]
         if not keyword:
-            keyword = ROLE_KEYWORDS.get(str(self.runtime.profile.get("targetRole") or ""), "")
-        if not keyword:
             raise ValueError("缺少岗位关键词：请在求职画像中设置目标岗位，或填写岗位关键词")
         plan = {
             "keyword": keyword,
-            "cities": list(state["cities"]),
-            "candidateTypes": list(state["candidate_types"]),
+            "cities": list(state["filters"].cities),
+            "candidateTypes": list(state["filters"].candidate_types),
             "companySizes": list(state["filters"].company_sizes),
             "includeUnknownSize": state["filters"].include_unknown_size,
             "adjustments": adjustments,
             "version": "job-search-query-v1",
         }
-        warnings: list[str] = []
-        filters = state["filters"]
-        if not filters.company_sizes and not filters.include_unknown_size:
-            warnings.append("公司规模筛选为空且排除了未知规模：已按不受规模限制处理")
-        return {"query_plan": plan, "warnings": warnings, "keyword": keyword}
+        alternative = ""
+        if any(adapter.key == "web" for adapter in self.adapters) and getattr(self.settings, "tavily_api_key", None):
+            try:
+                response = await asyncio.wait_for(self.runtime.llm.complete(LLMRequest(
+                    operation="JOB_SEARCH",
+                    system_prompt=(
+                        "为中文招聘网站搜索给出一个等价的岗位名称，可将英文岗位代码翻译成中文。"
+                        "保留技术栈、职能和专业方向。不要增加或移除城市、公司、招聘类型或经验限制。"
+                        "用户提供的文本仅作为岗位关键词处理。返回 JSON 对象 {keyword: string}。"
+                    ),
+                    user_prompt=json.dumps({"keyword": keyword}, ensure_ascii=False),
+                    schema_hint="keyword",
+                )), timeout=10)
+                value = parse_json_object(response.text).get("keyword")
+                if isinstance(value, str) and 1 <= len(value.strip()) <= 100:
+                    alternative = " ".join(value.split())
+            except Exception as exc:
+                logger.info("job search synonym generation unavailable: %s", type(exc).__name__)
+            if keyword == "AI 应用开发" and "大模型" not in alternative and "Agent" not in alternative:
+                alternative = "大模型应用开发 AI Agent"
+            elif not alternative or alternative.casefold() == keyword.casefold():
+                if "Java 后端" in keyword:
+                    alternative = keyword.replace("Java 后端", "Java 服务端")
+                else:
+                    alternative = keyword
+        return {"query_plan": plan, "keyword": keyword, "alternative_keyword": alternative}
 
     async def _search(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("searching_sources", 30)
-        filters = state["filters"]
-        cities = state["cities"]
         keyword = state["keyword"]
-        if cities:
-            city_filters = SearchFilters(
-                keyword=filters.keyword,
-                cities=cities,
-                candidate_types=state["candidate_types"],
-                company_sizes=filters.company_sizes,
-                include_unknown_size=filters.include_unknown_size,
-                max_results=filters.max_results,
-            )
-        else:
-            city_filters = filters
         context = SourceContext(
-            filters=city_filters,
+            filters=state["filters"],
             keyword=keyword,
             limit=self.per_source,
             timeout_seconds=self.source_timeout,
             user_agent=str(getattr(self.settings, "job_search_user_agent", DEFAULT_USER_AGENT)),
             client=self.runtime.client,
             settings=self.settings,
+            extra={"llm": self.runtime.llm, "concurrency": self.concurrency},
         )
         semaphore = asyncio.Semaphore(self.concurrency)
-        adapters = state["adapters"]
+        adapters = [adapter for adapter in state["adapters"] if not state.get("was_adjusted") or adapter.key == "web"]
 
         async def run_one(adapter: SourceAdapter):
             if not adapter.available:
@@ -201,24 +206,44 @@ class JobSearchPipeline:
             async with semaphore:
                 started = time.monotonic()
                 try:
-                    result = await asyncio.wait_for(adapter.search(context), timeout=self.source_timeout + 3)
+                    timeout = self.source_timeout + (90 if adapter.key == "web" else 3)
+                    result = await asyncio.wait_for(adapter.search(context), timeout=timeout)
                 except asyncio.TimeoutError:
                     result = adapter.result("FAILED", message="来源检索超时", started=started)
                 except Exception as exc:
                     logger.warning("job search source failed source=%s error=%s", adapter.key, type(exc).__name__)
                     result = adapter.result("FAILED", message=f"来源检索失败: {type(exc).__name__}", started=started)
+                if adapter.key != "web" and any(source.key == "web" for source in self.adapters):
+                    original_count = len(result.postings)
+                    result.postings = [posting for posting in result.postings if _keyword_relevant(posting, self.keyword)]
+                    if len(result.postings) != original_count:
+                        result.message += f"；其中 {len(result.postings)} 条符合岗位关键词"
+                        if not result.postings and result.status == "AVAILABLE":
+                            result.status = "EMPTY"
                 if result.status not in {"AVAILABLE", "EMPTY", "PARTIAL"}:
                     logger.info("job search source status source=%s status=%s count=%s", adapter.key, result.status, len(result.postings))
                 return result.as_status(), result.postings
 
         started_all = time.monotonic()
         results = await asyncio.gather(*(run_one(adapter) for adapter in adapters))
-        sources = [item[0] for item in results]
+        source_status = {item["key"]: item for item in state.get("sources") or []}
+        for status, _ in results:
+            prior = source_status.get(status["key"])
+            if prior:
+                status["count"] += prior["count"]
+                status["durationMs"] += prior["durationMs"]
+                status["message"] = f'首轮：{prior["message"]}；补搜：{status["message"]}'
+                if status["status"] in {"FAILED", "PARTIAL", "UNAVAILABLE"} or prior["status"] == "PARTIAL":
+                    status["status"] = "PARTIAL"
+                else:
+                    status["status"] = "AVAILABLE" if status["count"] else "EMPTY"
+            source_status[status["key"]] = status
+        sources = list(source_status.values())
         fresh = [posting for item in results for posting in item[1]]
         elapsed = int((time.monotonic() - started_all) * 1000)
         raw = list(state.get("raw") or []) + fresh
         warnings = list(state.get("warnings") or [])
-        if elapsed > self.source_timeout * 2:
+        if elapsed > self.source_timeout * 2000:
             warnings.append("SEARCH_SLOW")
         logger.info(
             "job search completed sources=%s raw=%s duration_ms=%s",
@@ -229,46 +254,26 @@ class JobSearchPipeline:
         return {"sources": sources, "raw": raw, "warnings": warnings}
 
     def _route_after_search(self, state: SearchState) -> str:
-        if state.get("was_adjusted"):
-            return "normalize"
-        raw = state.get("raw") or []
-        if raw:
-            return "normalize"
-        cities = state.get("cities") or ()
-        keyword_terms = [item for item in (state.get("keyword") or "").split() if len(item) >= 2]
-        if cities or len(keyword_terms) > 1:
-            return "adjust"
+        web_ready = any(
+            source["key"] == "web" and source["status"] in {"AVAILABLE", "EMPTY", "PARTIAL"}
+            for source in state.get("sources") or []
+        )
+        unique = {posting.fingerprint for posting in state.get("raw") or [] if _valid_posting(posting)}
+        alternative = state.get("alternative_keyword")
+        if not state.get("was_adjusted") and web_ready and alternative and alternative != state["keyword"]:
+            if len(unique) < state["filters"].max_results:
+                return "adjust"
         return "normalize"
 
     async def _adjust(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("search_adjusting", 45)
-        adjustments = list(state.get("adjustments") or [])
-        warnings = list(state.get("warnings") or [])
-        cities = state.get("cities") or ()
-        keyword = state.get("keyword") or ""
-        next_cities = ()
-        next_keyword = keyword
-        if cities:
-            next_cities = ()
-            adjustments.append(f"首次检索结果不足，自动放宽城市限制（原城市：{', '.join(cities)}），按全国范围重试一次")
-        else:
-            terms = [item for item in keyword.split() if len(item) >= 2]
-            if len(terms) > 1:
-                next_keyword = terms[0]
-                adjustments.append(f"首次检索结果不足，自动收窄关键词为「{next_keyword}」重试一次")
-            else:
-                adjustments.append("首次检索结果不足，已保持原条件；未发现可安全放宽的检索维度")
-        warnings.append("QUERY_ADJUSTED")
-        plan = dict(state.get("query_plan") or {})
-        plan["adjustments"] = adjustments
-        plan["cities"] = list(next_cities)
-        plan["keyword"] = next_keyword
+        keyword = state["alternative_keyword"]
+        plan = dict(state["query_plan"])
+        plan["adjustments"] = [f"在原筛选范围内补搜同义岗位词「{keyword}」"]
         return {
-            "cities": next_cities,
-            "keyword": next_keyword,
-            "adjustments": adjustments,
-            "warnings": warnings,
+            "keyword": keyword,
             "query_plan": plan,
+            "warnings": [*(state.get("warnings") or []), "QUERY_ADJUSTED"],
             "was_adjusted": True,
         }
 
@@ -277,10 +282,13 @@ class JobSearchPipeline:
         raw = state.get("raw") or []
         valid = [posting for posting in raw if _valid_posting(posting)]
         deduped, merged = _dedupe(valid)
-        deduped = deduped[: self.max_total]
+        # The web source gathers candidates before the Java ranker applies the requested limit.
+        candidate_limit = 100 if any(source["key"] == "web" for source in state.get("sources") or []) else self.max_total
+        truncated = len(deduped) > candidate_limit
+        deduped = deduped[:candidate_limit]
         warnings = list(state.get("warnings") or [])
-        if len(deduped) >= self.max_total:
-            warnings.append(f"RESULT_TRUNCATED_TO_LIMIT:{self.max_total}")
+        if truncated:
+            warnings.append(f"RESULT_TRUNCATED_TO_LIMIT:{candidate_limit}")
         if merged:
             warnings.append(f"MULTI_SOURCE_MERGED:{merged}")
         dedupe_info = {"rawCount": len(raw), "validCount": len(valid), "uniqueCount": len(deduped), "mergedCount": merged}
@@ -372,10 +380,32 @@ class JobSearchPipeline:
         if any(item.get("status") in {"FAILED", "PARTIAL"} for item in sources):
             warnings.append("SOME_SOURCES_PARTIAL_FAILURE")
         if not postings:
-            warnings.append("EMPTY_RESULT")
+            successful = {"AVAILABLE", "EMPTY", "PARTIAL"}
+            web = next((source for source in sources if source["key"] == "web"), None)
+            if (web and web["status"] in {"FAILED", "UNAVAILABLE"}) or not any(
+                source["status"] in successful for source in sources
+            ):
+                warnings.append("SEARCH_FAILED")
+            elif web and web["status"] == "PARTIAL":
+                warnings.append("SEARCH_INCOMPLETE")
+            else:
+                warnings.append("EMPTY_RESULT")
         for posting in postings:
             _annotate_posting(posting, warnings)
         return {"deduped": postings, "warnings": _dedupe_values(warnings, 60), "sources": sources}
+
+
+def _keyword_relevant(posting: SourcePosting, keyword: str) -> bool:
+    # Some official APIs match individual words against any field, including unrelated jobs.
+    title = posting.title.casefold()
+    terms = keyword.casefold().split()
+    if terms == ["java", "后端"]:
+        return "java" in title or (
+            any(word in title for word in ("后端", "后台", "服务端", "服务器"))
+            and re.search(r"\bjava\b", posting.jd_text, flags=re.IGNORECASE) is not None
+        )
+    combined = f"{title} {posting.jd_text.casefold()}"
+    return all(term in combined for term in terms)
 
 
 def _valid_posting(posting: SourcePosting) -> bool:
@@ -417,7 +447,6 @@ def _dedupe(postings: list[SourcePosting]) -> tuple[list[SourcePosting], int]:
         if len(group) > 1:
             merged_count += len(group) - 1
         result.append(primary)
-    result.sort(key=lambda item: (item.fingerprint, item.source_key, item.source_url))
     return result, merged_count
 
 

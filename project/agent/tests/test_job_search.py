@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.fake_model import FakeLLM
+from app.llm import LLMResponse
 from app.search.models import (
     SearchFilters,
     SourcePosting,
@@ -20,7 +21,7 @@ from app.search.models import (
     posting_fingerprint,
     size_for_headcount,
 )
-from app.search.pipeline import JobSearchPipeline, SearchRuntime
+from app.search.pipeline import JobSearchPipeline, SearchRuntime, _keyword_relevant
 from app.search.security import UnsafeUrlError, ensure_public_url
 from app.search.sources.base import SourceAdapter
 
@@ -107,7 +108,14 @@ class FixedAdapter(SourceAdapter):
 
 
 class EmptyThenFilledAdapter(FixedAdapter):
+    key = "web"
+
+    def __init__(self, postings: list[SourcePosting]) -> None:
+        super().__init__(postings)
+        self.contexts = []
+
     async def search(self, context) -> SourceResult:
+        self.contexts.append(context)
         self.calls += 1
         if self.calls == 1:
             return self.result("EMPTY", [])
@@ -181,7 +189,8 @@ def test_company_size_filter_unknown() -> None:
     assert company_size_matches("SIZE_UNKNOWN", (), False) is False
     assert company_size_matches("SIZE_UNKNOWN", ("SIZE_UNKNOWN",), True) is True
     assert company_size_matches("SIZE_UNKNOWN", ("SIZE_UNKNOWN",), False) is True
-    assert company_size_matches("SIZE_UNKNOWN", ("SIZE_0_20",), True) is False
+    assert company_size_matches("SIZE_UNKNOWN", ("SIZE_0_20",), True) is True
+    assert company_size_matches("SIZE_UNKNOWN", ("SIZE_0_20",), False) is False
     assert company_size_matches("SIZE_0_20", ("SIZE_21_99",), True) is False
     assert company_size_matches("SIZE_10000_PLUS", ("SIZE_10000_PLUS",), False) is True
 
@@ -245,9 +254,20 @@ async def test_pipeline_dedupe_and_explain(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_pipeline_adjusts_query_when_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = EmptyThenFilledAdapter([posting()])
     monkeypatch.setattr("app.search.pipeline.resolve_sources", lambda requested, settings: [adapter])
-    result = await JobSearchPipeline(runtime(FakeLLM())).run()
+    class SynonymLLM(FakeLLM):
+        async def complete(self, request):
+            if request.schema_hint == "keyword":
+                return LLMResponse('{"keyword":"Java 服务端"}', "fake", "test")
+            return await super().complete(request)
+
+    run = runtime(SynonymLLM(), {"cities": ["440300", "310100"], "includeUnknownSize": False})
+    run.settings.tavily_api_key = "test"
+    result = await JobSearchPipeline(run).run()
     assert adapter.calls == 2
-    assert any("放宽城市限制" in item for item in result["queryPlan"]["adjustments"])
+    assert adapter.contexts[0].filters == adapter.contexts[1].filters
+    assert adapter.contexts[1].keyword == "Java 服务端"
+    assert result["queryPlan"]["cities"] == ["440300", "310100"]
+    assert any("原筛选范围" in item for item in result["queryPlan"]["adjustments"])
     assert "QUERY_ADJUSTED" in result["warnings"]
     assert len(result["items"]) == 1
 
@@ -335,3 +355,8 @@ async def test_ssrf_guard(monkeypatch: pytest.MonkeyPatch) -> None:
             allowed_hosts={"careers.tencent.com"},
             resolver=lambda host: ["10.0.0.8"],
         )
+
+def test_official_supplement_requires_relevant_job_title_for_java_backend() -> None:
+    assert _keyword_relevant(posting(title="Java 开发工程师"), "Java 后端")
+    assert _keyword_relevant(posting(title="服务端研发工程师", jd_text="负责 Java 服务研发"), "Java 后端")
+    assert not _keyword_relevant(posting(title="前端开发工程师", jd_text="对接 Java 后端团队"), "Java 后端")

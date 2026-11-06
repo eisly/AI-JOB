@@ -617,7 +617,7 @@ onMounted(() => {
       <section class="panel">
         <div class="panel__heading"><h2>2. 选择已分析岗位并优化</h2><el-button text type="primary" @click="loadJobs">刷新岗位</el-button></div>
         <AsyncState :loading="jobsLoading" :error="jobsError" :empty="!analyzedJobs.length" empty-text="暂无已分析岗位" empty-description="请先导入或选择已完成 JD 分析的岗位。" @retry="loadJobs">
-          <template #empty><router-link to="/job-match"><el-button type="primary">前往岗位匹配</el-button></router-link></template>
+          <template #empty><router-link to="/jobs?tab=trusted"><el-button type="primary">前往岗位推荐</el-button></router-link></template>
           <el-select v-model="selectedJobId" class="full-width" filterable placeholder="选择目标岗位">
             <el-option v-for="job in analyzedJobs" :key="job.id" :value="job.id" :label="jobLabel(job)" />
           </el-select>

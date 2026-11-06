@@ -20,7 +20,7 @@ export interface JobSearchItemsQuery extends PageQuery {
 
 export const jobSearchApi = {
   create(body: JobSearchCreateInput) {
-    return submitTrackedTask('/api/v1/job-searches', body, '/job-search')
+    return submitTrackedTask('/api/v1/job-searches', body, '/jobs?tab=search')
   },
   list(query: PageQuery = {}) {
     return request<Page<JobSearchVO>>('/api/v1/job-searches', { query })

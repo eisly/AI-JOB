@@ -61,7 +61,6 @@ public class TaskService {
                                                        Map<String, Object> payload, String retryOfTaskId,
                                                        Consumer<String> placeholder) {
         return idempotency.executeTask(userId, method, route, key, request, () -> {
-            mapper.lockUser(userId);
             int activeCount = mapper.activeTaskCount(userId);
             // The final interview turn creates its report inside the same result transaction.
             if ("INTERVIEW_REPORT".equals(operation)) {

@@ -215,7 +215,7 @@ async function loadMatchItemOptions() {
 }
 
 function goMatchResults() {
-  void router.push({ path: '/job-match', query: { tab: 'matches' } })
+  void router.push({ path: '/jobs', query: { tab: 'matches' } })
 }
 
 function matchItemOptionLabel(item: MatchItemOptionVO) {

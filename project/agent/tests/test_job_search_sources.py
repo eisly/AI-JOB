@@ -128,3 +128,67 @@ async def test_unavailable_adapters_do_not_pretend_to_be_connected() -> None:
         assert result.requires_credentials is True
         assert result.message
         assert result.postings == []
+
+@pytest.mark.asyncio
+async def test_web_search_uses_provider_evidence_and_filters() -> None:
+    import json
+    from types import SimpleNamespace
+
+    from app.llm import LLMResponse
+    from app.search.sources.web import WebSearchSource
+
+    jd = "岗位职责：开发企业知识库问答与检索增强生成服务，维护模型接入、评测和数据处理流程。"
+    cities = ["杭州", "上海", "深圳", "北京", "上海"]
+    urls = [f"https://careers.example.com/job/{index}" for index in range(len(cities))]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.tavily.com"
+        query = json.loads(request.content)["query"]
+        assert all(value in query for value in ("AI 应用开发", "实习", "100-499人"))
+        assert ("杭州" in query) != ("上海" in query)
+        return httpx.Response(200, json={"results": [
+            {
+                "url": url, "title": "AI 应用开发实习生",
+                "raw_content": f"示例公司 {city} 实习 100-499人 {jd}" + (" [已结束](#)" if index == 4 else ""),
+            }
+            for index, (url, city) in enumerate(zip(urls, cities))
+        ]})
+
+    class ExtractionLLM:
+        async def complete(self, request):
+            return LLMResponse(json.dumps({"postings": [
+                {"pageIndex": str(index), "title": "AI 应用开发实习生", "companyName": "示例公司",
+                 "cityName": "杭州" if index == 3 else city, "candidateTypeText": "实习", "jdQuotes": [jd],
+                 "companySizeText": "100-499人" if index else None}
+                for index, city in enumerate(cities)
+            ]}), "fake", "test")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        context = SourceContext(
+            filters=SearchFilters(cities=("330100", "310100"), candidate_types=("INTERNSHIP",),
+                                  company_sizes=("SIZE_100_499",), include_unknown_size=False),
+            keyword="AI 应用开发", limit=10, client=client,
+            settings=SimpleNamespace(tavily_api_key="test"),
+            extra={"llm": ExtractionLLM()},
+        )
+        result = await WebSearchSource().search(context)
+        assert result.status == "AVAILABLE"
+        assert [posting.source_url for posting in result.postings] == [urls[1]]
+        assert result.postings[0].verification == "UNVERIFIED"
+
+
+@pytest.mark.asyncio
+async def test_web_search_distinguishes_no_config_and_provider_failure() -> None:
+    from types import SimpleNamespace
+
+    from app.search.sources.web import WebSearchSource
+
+    source = WebSearchSource()
+    context = SourceContext(filters=SearchFilters(), keyword="Java 后端", limit=8)
+    assert (await source.search(context)).status == "UNAVAILABLE"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(429))) as client:
+        context.client = client
+        context.settings = SimpleNamespace(tavily_api_key="test")
+        context.extra["llm"] = object()
+        result = await source.search(context)
+        assert (result.status, result.http_status) == ("FAILED", 429)

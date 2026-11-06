@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { jobApi } from '@/api/jobs'
 import { jobSearchApi } from '@/api/job-searches'
 import { profileApi } from '@/api/profile'
+import { getJobRoleLabel } from '@/config/jobRoles'
 import { taskApi } from '@/api/tasks'
 import { retryTrackedTask } from '@/api/task-registry'
 import type {
@@ -12,7 +14,6 @@ import type {
   JobSearchCreateInput,
   JobSearchItemVO,
   JobSearchVO,
-  JobSearchSourceStatusVO,
   Page,
   ProfileVO,
   TaskVO,
@@ -32,6 +33,11 @@ import {
   searchWarningLabels,
 } from '@/utils/format'
 
+const route = useRoute()
+const router = useRouter()
+const emit = defineEmits<{ plan: [item: JobSearchItemVO] }>()
+const linkedSearchId = typeof route.query.searchId === 'string' ? route.query.searchId : ''
+const linkedTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
 const taskStorageKey = 'ai-job-job-search-task'
 const searchStorageKey = 'ai-job-job-search-id'
 
@@ -73,8 +79,8 @@ const itemFilters = reactive({
 
 const cityOptions = Object.entries(cityLabels).map(([value, label]) => ({ value, label }))
 const candidateOptions = Object.entries(candidateTypeLabels).map(([value, label]) => ({ value, label }))
-const companySizeOptions = Object.entries(companySizeLabels).map(([value, label]) => ({ value, label }))
-const profileReady = computed(() => Boolean(profile.value?.targetRole && profile.value?.candidateType && profile.value?.cities?.length))
+const companySizeOptions = Object.entries(companySizeLabels).filter(([value]) => value !== 'SIZE_UNKNOWN').map(([value, label]) => ({ value, label }))
+const profileReady = computed(() => Boolean(profile.value?.activeResumeVersionId && profile.value.targetRole && profile.value?.candidateType && profile.value?.cities?.length))
 
 function readStorage(key: string) {
   try {
@@ -93,8 +99,8 @@ function writeStorage(key: string, value: string) {
   }
 }
 
-const taskId = ref(readStorage(taskStorageKey))
-const searchId = ref(readStorage(searchStorageKey))
+const taskId = ref(linkedTaskId || (linkedSearchId ? '' : readStorage(taskStorageKey)))
+const searchId = ref(linkedSearchId || (linkedTaskId ? '' : readStorage(searchStorageKey)))
 const {
   task,
   loading: taskLoading,
@@ -186,7 +192,7 @@ async function loadItems() {
 
 async function createSearch() {
   if (!profile.value || !profileReady.value || busying.value) {
-    if (!profileReady.value) ElMessage.warning('请先完整保存目标岗位、求职类型和城市偏好')
+    if (!profileReady.value) ElMessage.warning('请先确认简历并保存目标岗位、求职类型和城市偏好')
     return
   }
   createSubmitting.value = true
@@ -210,7 +216,11 @@ async function createSearch() {
     search.value = null
     page.records = []
     page.total = 0
-    ElMessage.success('联网搜索任务已提交')
+    resetFilters()
+    if (linkedSearchId || linkedTaskId) {
+      await router.replace({ name: 'jobs', query: { tab: 'search' } })
+    }
+    ElMessage.success('AI 搜索任务已提交')
   } catch (reason) {
     createError.value = reason
   } finally {
@@ -242,6 +252,9 @@ async function retrySearch() {
     search.value = null
     page.records = []
     page.total = 0
+    if (linkedTaskId) {
+      await router.replace({ name: 'jobs', query: { tab: 'search' } })
+    }
     ElMessage.success('已按原条件重新提交搜索')
   } catch (reason) {
     createError.value = reason
@@ -307,6 +320,14 @@ function warningLabel(code: string) {
   return code
 }
 
+const sourceIncomplete = computed(() => search.value?.summary?.warnings?.includes('SEARCH_INCOMPLETE') || false)
+const sourceFailed = computed(() => search.value?.summary?.warnings?.includes('SEARCH_FAILED') || false)
+const webUnavailable = computed(() => {
+  const web = search.value?.sources?.find(source => source.key === 'web')
+  return web && ['FAILED', 'UNAVAILABLE', 'PARTIAL'].includes(web.status)
+})
+const eligibilityLabels: Record<string, string> = { PASS: '资格通过', UNKNOWN: '资格未知', FAIL: '资格不符' }
+
 function sourceAlerts() {
   if (!search.value) return []
   const unavailable = search.value.sources.filter(item => item.status === 'UNAVAILABLE')
@@ -315,17 +336,14 @@ function sourceAlerts() {
   if (unavailable.length) {
     alerts.push({
       type: 'warning',
-      title: `以下来源当前不可用，未伪装为已接入：${unavailable.map(item => `${item.name}（${item.message || '缺少授权或公开接口'}）`).join('；')}`,
+      title: `当前不可用：${unavailable.map(item => `${item.name}（${item.message || '缺少授权或公开接口'}）`).join('；')}`,
     })
   }
   if (failed.length) {
     alerts.push({
       type: 'error',
-      title: `部分来源检索失败，其他来源结果仍可用：${failed.map(item => `${item.name}（${item.message || '请求失败'}）`).join('；')}`,
+      title: `检索异常：${failed.map(item => `${item.name}（${item.message || '请求失败'}）`).join('；')}`,
     })
-  }
-  if (search.value.summary?.warnings?.includes('EMPTY_RESULT')) {
-    alerts.push({ type: 'info', title: '本次搜索没有返回岗位。可调整关键词、城市或公司规模后重试。' })
   }
   return alerts
 }
@@ -376,7 +394,7 @@ function openSource(url?: string | null) {
 }
 
 function openMatchBatch(item: JobSearchItemVO) {
-  void window.location.assign(`/job-match?tab=matches&matchId=${encodeURIComponent(item.batchId)}`)
+  void router.push({ name: 'jobs', query: { tab: 'matches', matchId: item.batchId } })
 }
 
 async function toggleFavorite(item: JobSearchItemVO) {
@@ -403,14 +421,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page job-search-page">
-    <header class="page-header">
-      <div>
-        <h1>联网岗位搜索</h1>
-        <p>以已确认简历与求职偏好自动制定搜索条件，联网检索岗位并解析 JD，按硬性资格与匹配度排序。</p>
-      </div>
-      <el-button :loading="searchLoading || itemsLoading" @click="refresh">刷新当前结果</el-button>
-    </header>
+  <div class="job-search-page">
 
     <el-alert
       class="ai-notice"
@@ -423,19 +434,20 @@ onMounted(async () => {
     <section class="panel">
       <div class="panel__heading">
         <div>
-          <h2>搜索条件</h2>
+          <h2>AI 岗位搜索</h2>
           <p class="section-note">关键词、城市与求职类型可调整；未填写时使用求职偏好。公司规模按统一边界筛选。</p>
         </div>
+        <el-button v-if="searchId" :loading="searchLoading || itemsLoading" @click="refresh">刷新结果</el-button>
       </div>
       <AsyncState :loading="profileLoading" :error="profileError" :empty="false" @retry="loadProfile">
         <template v-if="profile">
           <div class="profile-line">
             <span>画像版本 v{{ profile.profileVersion }}</span>
-            <span>目标岗位：{{ profile.targetRole || '未设置' }}</span>
+            <span>目标岗位：{{ profile.targetRole ? getJobRoleLabel(profile.targetRole) : '未设置' }}</span>
             <span>求职类型：{{ candidateTypeLabels[profile.candidateType] || '未设置' }}</span>
             <span>城市：{{ profile.cities?.length ? profile.cities.map(code => cityLabels[code] || code).join('、') : '未设置' }}</span>
           </div>
-          <el-alert v-if="!profileReady" class="inline-alert" type="warning" :closable="false" show-icon title="请先完整保存目标岗位、求职类型和城市偏好，再到本页搜索。" />
+          <el-alert v-if="!profileReady" class="inline-alert" type="warning" :closable="false" show-icon title="请先确认简历并保存目标岗位、求职类型和城市偏好，再到本页搜索。" />
           <div class="form-grid">
             <el-form-item label="岗位关键词（可选）">
               <el-input v-model="createForm.keyword" maxlength="100" placeholder="例如：Java 后端；留空则使用目标岗位" clearable />
@@ -464,7 +476,7 @@ onMounted(async () => {
           </div>
           <el-alert v-if="createError" class="inline-alert" type="error" :title="errorMessage(createError)" :closable="false" show-icon />
           <div class="actions">
-            <el-button type="primary" :loading="createSubmitting" :disabled="busying || !profileReady" @click="createSearch">开始联网搜索</el-button>
+            <el-button type="primary" :loading="createSubmitting" :disabled="busying || !profileReady" @click="createSearch">开始 AI 搜索</el-button>
             <el-button v-if="task && taskIsActive(task)" :loading="canceling" @click="cancelSearch">取消任务</el-button>
           </div>
         </template>
@@ -489,16 +501,13 @@ onMounted(async () => {
       </el-alert>
     </section>
 
-    <AsyncState :loading="searchLoading" :error="searchError" :empty="!search" empty-text="尚未发起联网搜索" empty-description="设置条件并提交后，这里会显示搜索进度、来源状态和排序结果。" @retry="loadSearch()">
+    <AsyncState :loading="searchLoading" :error="searchError" :empty="!search" empty-text="尚未发起 AI 搜索" empty-description="设置条件并提交后，这里会显示搜索进度、来源状态和排序结果。" @retry="loadSearch()">
       <template v-if="search">
+        <el-alert v-if="sourceFailed" class="inline-alert" type="error" title="检索服务不可用，请查看来源诊断后重试。" :closable="false" show-icon />
+        <el-alert v-else-if="webUnavailable" class="inline-alert" type="warning" title="全网搜索能力受限，页面展示本次仍可用的结果。" :closable="false" show-icon />
         <section class="panel">
-          <div class="panel__heading">
-            <div>
-              <h2>来源状态</h2>
-              <p class="section-note">来源可用性来自本次真实请求；不可用来源会明确说明原因，不会被当作已接入。</p>
-            </div>
-            <el-tag :type="search.status === 'READY' ? 'success' : search.status === 'FAILED' ? 'danger' : 'primary'">{{ search.status === 'READY' ? '搜索完成' : search.status === 'FAILED' ? '搜索失败' : '搜索中' }}</el-tag>
-          </div>
+          <details>
+          <summary class="section-note">来源诊断</summary>
           <el-alert v-if="search.isStale" class="inline-alert" type="warning" :closable="false" show-icon :title="`该搜索结果已过期（${search.staleReason || '输入或岗位状态变化'}），仅供参考；请重新搜索后再据此做训练或面试。`" />
           <el-alert v-for="(alert, index) in sourceAlerts()" :key="index" class="inline-alert" :type="alert.type" :title="alert.title" :closable="false" show-icon />
           <el-table v-if="search.sources?.length" :data="search.sources" size="small" border class="source-table">
@@ -525,14 +534,14 @@ onMounted(async () => {
           <p v-if="queryAdjustments.length" class="section-note">
             自动调整：{{ queryAdjustments.join('；') }}
           </p>
-          <el-alert class="inline-alert" type="info" :closable="false" show-icon title="排序规则：硬性资格 PASS > UNKNOWN > FAIL；同组按有效匹配分从高到低；再按来源核验与多来源覆盖稳定排序。匹配分 = 技能 60% + 语义 25% + 偏好 15%，缺项不计分。" />
+          </details>
         </section>
 
         <section class="panel">
           <div class="panel__heading">
             <div>
               <h2>搜索结果</h2>
-              <p class="section-note">筛选与排序在完整候选集上执行后再分页，翻页顺序稳定。可收藏、打开原始岗位，或进入现有匹配结果流程创建训练与模拟面试。</p>
+              <p class="section-note">先按资格排序，同组按匹配分、来源可信度和发布时间排序。缺失的评分项不参与计算。</p>
             </div>
             <el-button :loading="itemsLoading" @click="loadItems">刷新结果</el-button>
           </div>
@@ -553,12 +562,12 @@ onMounted(async () => {
               <el-button @click="resetFilters">重置</el-button>
             </div>
           </div>
-          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" empty-text="没有符合条件的岗位" empty-description="可放宽关键词、城市或公司规模筛选，或调整搜索条件后重试。" @retry="loadItems">
+          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" :empty-text="sourceFailed ? '检索失败' : sourceIncomplete ? '部分查询未完成，暂未找到符合条件的岗位' : '没有符合条件的岗位'" :empty-description="sourceFailed ? '请查看来源诊断。' : '可调整筛选条件后重试。'" @retry="loadItems">
             <div class="search-list">
               <article v-for="item in page.records" :key="item.id" class="search-card">
                 <div class="search-card__heading">
                   <div>
-                    <h3>{{ item.title }}</h3>
+                    <h3><el-tag effect="plain" size="small">优先级 {{ item.rankNo }}</el-tag> {{ item.title }}</h3>
                     <p>{{ item.companyName }} · {{ cityName(item.cityCode) }} · {{ candidateTypeLabels[item.candidateType] || item.candidateType }}</p>
                   </div>
                   <div class="search-score">
@@ -568,7 +577,7 @@ onMounted(async () => {
                 </div>
 
                 <div class="tag-list">
-                  <el-tag :type="eligibilityType(item.eligibility.status)" size="small">资格 {{ item.eligibility.status }}</el-tag>
+                  <el-tag :type="eligibilityType(item.eligibility.status)" size="small">{{ eligibilityLabels[item.eligibility.status] || item.eligibility.status }}</el-tag>
                   <el-tag size="small" effect="plain">{{ item.source?.name || '来源未提供' }}</el-tag>
                   <el-tag :type="item.verification === 'VERIFIED' ? 'success' : 'warning'" size="small">{{ item.verification === 'VERIFIED' ? '来源已核验' : '来源未核验' }}</el-tag>
                   <el-tag v-if="item.warnings?.includes('POSSIBLY_EXPIRED')" type="danger" size="small">可能过期</el-tag>
@@ -639,7 +648,8 @@ onMounted(async () => {
                     <el-icon><StarFilled v-if="item.isFavorite" /><Star v-else /></el-icon>
                     {{ item.isFavorite ? '取消收藏' : '收藏岗位' }}
                   </el-button>
-                  <el-button plain type="primary" :disabled="!safeUrl(item.sourceUrl)" @click="openSource(item.sourceUrl)">查看原始岗位</el-button>
+                  <el-button plain type="primary" :disabled="!safeUrl(item.sourceUrl)" @click="openSource(item.sourceUrl)">前往投递</el-button>
+                  <el-button @click="emit('plan', item)">添加投递计划</el-button>
                   <el-button @click="openMatchBatch(item)">在匹配结果中继续（训练/面试）</el-button>
                 </div>
               </article>
@@ -663,8 +673,8 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="scss">
-.job-search-page { padding-bottom: 24px; }
-.ai-notice { margin-bottom: 16px; }
+.job-search-page { display: grid; gap: 16px; min-width: 0; padding-bottom: 24px; }
+.job-search-page > .panel { margin-bottom: 0; }
 .section-note { margin: 6px 0 0; color: $ai-text-secondary; line-height: 1.6; }
 .inline-alert { margin: 0 0 14px; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -705,6 +715,8 @@ onMounted(async () => {
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 700px) {
+  .form-grid :deep(.el-form-item) { display: block; }
+  .form-grid :deep(.el-form-item__label) { justify-content: flex-start; }
   .summary-grid, .filter-grid { grid-template-columns: 1fr; }
   .search-card__heading { flex-direction: column; }
   .search-score { align-items: flex-start; }

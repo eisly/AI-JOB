@@ -13,7 +13,7 @@ export const jobApi = {
     return request<Page<JobVO>>('/api/v1/jobs/imports', { query })
   },
   importJd(body: { title: string; companyName: string; jdText: string; sourceUrl?: string }) {
-    return submitTrackedTask('/api/v1/jobs/imports', body, '/job-match?tab=personal')
+    return submitTrackedTask('/api/v1/jobs/imports', body, '/jobs?tab=personal')
   },
   favorites(query: PageQuery = {}) {
     return request<Page<JobVO>>('/api/v1/favorites', { query })
@@ -22,7 +22,7 @@ export const jobApi = {
     return request<boolean>(`/api/v1/favorites/${jobId}`, { method: favorite ? 'PUT' : 'DELETE', ...(favorite ? { body: {} } : {}) })
   },
   createMatch(body: { expectedProfileVersion: number; jobIds?: string[]; includeUnknown: boolean }) {
-    return submitTrackedTask('/api/v1/job-matches', body, '/job-match?tab=matches')
+    return submitTrackedTask('/api/v1/job-matches', body, '/jobs?tab=matches')
   },
   getMatch(matchId: string) {
     return request<MatchBatchVO>(`/api/v1/job-matches/${matchId}`)

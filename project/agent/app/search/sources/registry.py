@@ -6,8 +6,10 @@ from .base import SourceAdapter
 from .greenhouse import GreenhouseSource
 from .tencent import TencentCareerSource
 from .unavailable import BossZhipinSource, LiepinSource, ZhaopinSource
+from .web import WebSearchSource
 
 ALL_SOURCES: dict[str, SourceAdapter] = {
+    "web": WebSearchSource(),
     "tencent": TencentCareerSource(),
     "greenhouse": GreenhouseSource(),
     "liepin": LiepinSource(),
@@ -15,7 +17,7 @@ ALL_SOURCES: dict[str, SourceAdapter] = {
     "zhaopin": ZhaopinSource(),
 }
 
-DEFAULT_SOURCE_KEYS = ("tencent", "greenhouse", "liepin", "boss", "zhaopin")
+DEFAULT_SOURCE_KEYS = ("web", "tencent", "greenhouse")
 
 
 def configured_source_keys(settings: Any) -> list[str]:

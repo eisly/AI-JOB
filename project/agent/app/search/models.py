@@ -71,6 +71,10 @@ CITY_CODES = {
 }
 ROLE_KEYWORDS = {
     "JAVA_BACKEND": "Java 后端",
+    "AI_APPLICATION_DEVELOPER": "AI 应用开发",
+    "AI_AGENT_DEVELOPER": "AI Agent 智能体开发",
+    "LLM_APPLICATION_DEVELOPER": "大模型应用开发",
+    "RAG_APPLICATION_DEVELOPER": "RAG 检索增强生成开发",
     "FRONTEND": "前端开发",
     "ALGORITHM": "算法工程师",
     "TEST": "测试工程师",
@@ -215,9 +219,7 @@ def size_for_headcount(count: int | None) -> str:
 def company_size_matches(size: str, selected: tuple[str, ...], include_unknown: bool) -> bool:
     normalized = normalize_company_size(size)
     if normalized == "SIZE_UNKNOWN":
-        if selected:
-            return "SIZE_UNKNOWN" in selected
-        return include_unknown
+        return include_unknown or "SIZE_UNKNOWN" in selected
     if not selected:
         return True
     return normalized in selected

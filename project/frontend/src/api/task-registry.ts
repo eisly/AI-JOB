@@ -62,8 +62,9 @@ export function taskBusinessPath(task: TaskVO) {
   if (task.status === 'SUCCEEDED' && task.result) {
     const routes: Record<string, string> = {
       RESUME_VERSION: `/resume?versionId=${resourceId}`,
-      JOB: `/job-match?jobId=${resourceId}`,
-      JOB_MATCH: `/job-match?matchId=${resourceId}`,
+      JOB: `/jobs?tab=trusted&jobId=${resourceId}`,
+      JOB_MATCH: `/jobs?tab=matches&matchId=${resourceId}`,
+      JOB_SEARCH: `/jobs?tab=search&searchId=${resourceId}`,
       LEARNING_PLAN: `/training?planId=${resourceId}`,
       LEARNING_SESSION: `/training?sessionId=${resourceId}`,
       LEARNING_ANSWER: `/training?answerId=${resourceId}`,
@@ -77,13 +78,14 @@ export function taskBusinessPath(task: TaskVO) {
     }
     if (routes[task.result.resourceType]) return routes[task.result.resourceType]
   }
+  if (task.type === 'JOB_SEARCH') return `/jobs?tab=search&taskId=${task.id}`
   if (saved) return saved
   const fallback: Record<string, string> = {
     RESUME_PARSE: '/resume',
     RESUME_DIAGNOSE: '/resume-optimization',
     RESUME_OPTIMIZE: '/resume-optimization',
-    JD_ANALYZE: '/job-match',
-    JOB_MATCH: '/job-match',
+    JD_ANALYZE: '/jobs?tab=personal',
+    JOB_MATCH: '/jobs?tab=matches',
     LEARNING_PLAN: '/training',
     LEARNING_QUESTION: '/training',
     LEARNING_EVALUATE: '/training',

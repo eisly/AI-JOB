@@ -37,6 +37,8 @@ public class IdempotencyService {
     @Transactional
     public ResponseEntity<CommonResult<Object>> executeTask(String userId, String method, String route, String key,
                                                             Object request, Supplier<ActionResult> action) {
+        // Inserting the idempotency row takes a shared lock on its user foreign key.
+        mapper.lockUser(userId);
         return run(userId, method, route, key, request, 202, action);
     }
 

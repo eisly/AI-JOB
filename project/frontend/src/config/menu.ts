@@ -11,7 +11,6 @@ import {
   List,
   MagicStick,
   Bell,
-  Search,
 } from '@element-plus/icons-vue'
 
 export interface MenuItem {
@@ -27,8 +26,7 @@ export const menuItems: MenuItem[] = [
   { path: '/profile', name: 'profile', title: '求职画像', icon: User },
   { path: '/resume', name: 'resume', title: '简历中心', icon: Document },
   { path: '/resume-optimization', name: 'resume-optimization', title: '智能简历优化', icon: MagicStick },
-  { path: '/job-match', name: 'job-match', title: '岗位匹配', icon: Aim },
-  { path: '/job-search', name: 'job-search', title: '联网搜索', icon: Search },
+  { path: '/jobs', name: 'jobs', title: '岗位推荐与投递', icon: Aim },
   { path: '/training', name: 'training', title: '专项训练', icon: Edit },
   { path: '/project', name: 'project', title: '项目实战', icon: School },
   { path: '/interview', name: 'interview', title: '模拟面试', icon: Microphone },

@@ -28,7 +28,7 @@ import com.aijob.backend.task.TaskService;
 public class JobSearchService {
 
     private static final Set<String> CANDIDATE_TYPES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
-    private static final Set<String> SOURCE_KEYS = Set.of("tencent", "greenhouse", "liepin", "boss", "zhaopin");
+    private static final Set<String> SOURCE_KEYS = Set.of("web", "tencent", "greenhouse", "liepin", "boss", "zhaopin");
 
     private final JobSearchMapper mapper;
     private final JobMapper jobs;
@@ -45,7 +45,7 @@ public class JobSearchService {
 
     public JobSearchService(JobSearchMapper mapper, JobMapper jobs, ProfileService profiles, ResumeMapper resumes,
                             TaskService tasks, JsonService json, ApiView view,
-                            @Value("${app.job-search.sources:tencent,greenhouse,liepin,boss,zhaopin}") String configuredSources,
+                            @Value("${app.job-search.sources:web,tencent,greenhouse}") String configuredSources,
                             @Value("${app.job-search.per-source:20}") int perSource,
                             @Value("${app.job-search.max-total:60}") int maxTotal,
                             @Value("${app.job-search.concurrency:4}") int concurrency,
@@ -327,7 +327,7 @@ public class JobSearchService {
             }
         }
         if (configured.isEmpty()) {
-            configured.addAll(List.of("tencent", "greenhouse", "liepin", "boss", "zhaopin"));
+            configured.addAll(List.of("web", "tencent", "greenhouse"));
         }
         List<Object> raw = Data.list(body, "sources", false, 10);
         if (raw.isEmpty()) {

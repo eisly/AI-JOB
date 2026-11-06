@@ -96,7 +96,7 @@ onMounted(loadDashboard)
     <div class="overview">
       <section class="panel task-panel">
         <div class="panel__heading"><h2><el-icon><Aim /></el-icon>你的下一项任务</h2><router-link to="/training">查看训练计划 <el-icon><ArrowRight /></el-icon></router-link></div>
-        <AsyncState :loading="loading && !plans.length" :error="plansError" :empty="!nextPlan || !nextItem" empty-text="暂无待完成训练任务" empty-description="可先从有效岗位匹配结果创建训练计划。" @retry="loadDashboard">
+        <AsyncState :loading="loading && !plans.length" :error="plansError" :empty="!nextPlan || !nextItem" empty-text="暂无待完成训练任务" empty-description="可先从有效岗位推荐结果创建训练计划。" @retry="loadDashboard">
           <div v-if="nextPlan && nextItem" class="next-task">
             <el-tag type="primary" effect="plain">{{ kindLabel(nextItem.kind) }}</el-tag>
             <h3>{{ nextItem.title }}</h3>
@@ -104,15 +104,15 @@ onMounted(loadDashboard)
             <div class="next-task__progress">当前计划 {{ nextPlan.items.filter(item => item.status === 'COMPLETED').length }} / {{ nextPlan.items.length }} 项已完成</div>
             <router-link class="primary-button" :to="`/training?planId=${nextPlan.id}`">继续训练 <el-icon><ArrowRight /></el-icon></router-link>
           </div>
-          <template #empty><router-link class="primary-button" to="/job-match?tab=matches">前往岗位匹配 <el-icon><ArrowRight /></el-icon></router-link></template>
+          <template #empty><router-link class="primary-button" to="/jobs?tab=matches">前往岗位推荐 <el-icon><ArrowRight /></el-icon></router-link></template>
         </AsyncState>
       </section>
 
       <section class="panel job-panel">
-        <div class="panel__heading"><h2><el-icon><Aim /></el-icon>近期目标岗位</h2><router-link to="/job-match?tab=matches">查看岗位匹配 <el-icon><ArrowRight /></el-icon></router-link></div>
-        <AsyncState :loading="loading && !targetJobs.length" :error="jobsError" :empty="!targetJobs.length" empty-text="暂无可用目标岗位" empty-description="生成 READY 状态的岗位匹配后，这里会展示最新结果。" @retry="loadDashboard">
+        <div class="panel__heading"><h2><el-icon><Aim /></el-icon>近期目标岗位</h2><router-link to="/jobs?tab=matches">查看岗位推荐 <el-icon><ArrowRight /></el-icon></router-link></div>
+        <AsyncState :loading="loading && !targetJobs.length" :error="jobsError" :empty="!targetJobs.length" empty-text="暂无可用目标岗位" empty-description="生成 READY 状态的岗位推荐后，这里会展示最新结果。" @retry="loadDashboard">
           <div class="target-jobs">
-            <router-link v-for="item in targetJobs" :key="item.id" class="target-job" :to="`/job-match?jobId=${item.jobId}`">
+            <router-link v-for="item in targetJobs" :key="item.id" class="target-job" :to="`/jobs?jobId=${item.jobId}`">
               <span><strong>{{ item.title }}</strong><small>JD v{{ item.jobVersion }}</small></span>
               <span class="target-job__score">{{ displayScore(item.matchScore) }}</span>
             </router-link>

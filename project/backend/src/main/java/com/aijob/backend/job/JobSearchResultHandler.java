@@ -101,6 +101,13 @@ public class JobSearchResultHandler implements TaskResultHandler {
         Map<String, Object> payload = json.map(task.getInputSnapshotJson());
         Map<String, Object> profile = (Map<String, Object>) payload.get("profile");
         Map<String, Object> facts = (Map<String, Object>) profile.getOrDefault("facts", Map.of());
+        Map<String, Object> filters = (Map<String, Object>) payload.getOrDefault("filters", Map.of());
+        List<String> cities = strings(filters.get("cities"), 20, 6);
+        List<String> types = strings(filters.get("candidateTypes"), 3, 20);
+        List<String> sizes = strings(filters.get("companySizes"), 7, 20);
+        boolean includeUnknownSize = !Boolean.FALSE.equals(filters.get("includeUnknownSize"));
+        Integer requestedCount = integer(filters.get("maxResults"));
+        int resultLimit = requestedCount == null ? 30 : Math.clamp(requestedCount, 1, 60);
         Map<String, Object> root = json.map(result);
         List<Map<String, Object>> rawItems = root.get("items") instanceof List<?> list
                 ? (List<Map<String, Object>>) list : null;
@@ -123,7 +130,9 @@ public class JobSearchResultHandler implements TaskResultHandler {
         int valid = 0;
         for (Map<String, Object> raw : rawItems) {
             SearchCandidate candidate = normalize(raw, catalog);
-            if (candidate == null) {
+            if (candidate == null || (!cities.isEmpty() && !cities.contains(candidate.cityCode))
+                    || (!types.isEmpty() && !types.contains(candidate.candidateType))
+                    || !matchesSize(candidate.companySize, sizes, includeUnknownSize)) {
                 dropped++;
                 continue;
             }
@@ -147,11 +156,13 @@ public class JobSearchResultHandler implements TaskResultHandler {
                     default -> 2;
                 })
                 .thenComparing(item -> item.matchScore, Comparator.nullsLast(Comparator.reverseOrder()))
-                .thenComparing(item -> item.verification, Comparator.nullsLast(Comparator.reverseOrder()))
-                .thenComparing(item -> item.aliases.size(), Comparator.reverseOrder())
-                .thenComparing(item -> item.fetchedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparingInt(item -> "VERIFIED".equals(item.verification) ? 0 : 1)
+                .thenComparingInt(item -> SearchCandidate.priority(item.sourceType))
+                .thenComparing(item -> item.publishedAt, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(item -> item.fingerprint));
 
+        int uniqueCount = candidates.size();
+        candidates = candidates.subList(0, Math.min(resultLimit, uniqueCount));
         int rank = 1;
         int multiSource = 0;
         int unknownSize = 0;
@@ -173,7 +184,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         summary.put("validCount", valid);
         summary.put("uniqueCount", candidates.size());
         summary.put("droppedCount", dropped);
-        summary.put("mergedCount", valid - candidates.size());
+        summary.put("mergedCount", valid - uniqueCount);
         summary.put("multiSourceCount", multiSource);
         summary.put("unknownSizeCount", unknownSize);
         summary.put("possiblyExpiredCount", possiblyExpired);
@@ -183,6 +194,13 @@ public class JobSearchResultHandler implements TaskResultHandler {
                 json.stringify(root.get("sources")), json.stringify(summary));
         jobs.updateBatch(task.getResourceId(), "READY", task.getId());
         return 1;
+    }
+
+    private boolean matchesSize(String size, List<String> sizes, boolean includeUnknown) {
+        if (CompanySizes.SIZE_UNKNOWN.equals(size)) {
+            return includeUnknown || sizes.contains(CompanySizes.SIZE_UNKNOWN);
+        }
+        return sizes.isEmpty() || sizes.contains(size);
     }
 
     private SearchCandidate normalize(Map<String, Object> raw, Set<String> catalog) {
@@ -259,7 +277,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         if (Set.of("tencent", "greenhouse").contains(key)) {
             return new SourceDefaults("OFFICIAL", "VERIFIED");
         }
-        if (Set.of("liepin", "boss", "zhaopin").contains(key)) {
+        if (Set.of("web", "liepin", "boss", "zhaopin").contains(key)) {
             return new SourceDefaults("PUBLIC_SEARCH", "UNVERIFIED");
         }
         return new SourceDefaults(type, verification);
@@ -408,7 +426,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         BigDecimal preference = scores.preference(str(profile.get("targetRole")), candidate.roleCode,
                 profile.get("cities") instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of(),
                 candidate.cityCode);
-        Integer total = scores.score(skill, candidate.semantic, preference);
+        Integer total = scores.searchScore(skill, candidate.semantic, preference);
         candidate.matchScore = "FAIL".equals(candidate.eligibilityStatus) ? null : total;
         List<Map<String, Object>> components = new ArrayList<>();
         components.add(scores.component("skill", skill, BigDecimal.valueOf(0.60), "confirmed-resume-v1"));
@@ -460,15 +478,18 @@ public class JobSearchResultHandler implements TaskResultHandler {
         String sourceId = mapper.sourceId(candidate.sourceKey);
         String baseUrl = origin(candidate.sourceUrl);
         if (sourceId == null) {
-            mapper.upsertSource(UUID.randomUUID().toString(), candidate.sourceKey, candidate.sourceName,
-                    candidate.sourceType, baseUrl, candidate.verification);
+            boolean web = "web".equals(candidate.sourceKey);
+            mapper.upsertSource(UUID.randomUUID().toString(), candidate.sourceKey,
+                    web ? "AI 全网搜索" : candidate.sourceName, candidate.sourceType,
+                    web ? "https://api.tavily.com" : baseUrl, candidate.verification);
             sourceId = mapper.sourceId(candidate.sourceKey);
         }
         if (sourceId == null) {
             throw BusinessException.conflict("岗位来源初始化失败", "INVALID_STATE");
         }
         String jobId = UUID.randomUUID().toString();
-        mapper.insertJob(jobId, sourceId, userId, candidate.sourceUrl);
+        boolean verified = "VERIFIED".equals(candidate.verification);
+        mapper.insertJob(jobId, sourceId, userId, candidate.sourceUrl, verified);
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("searchId", searchId);
         meta.put("sourceKey", candidate.sourceKey);
@@ -502,10 +523,10 @@ public class JobSearchResultHandler implements TaskResultHandler {
         source.put("type", candidate.sourceType);
         source.put("baseUrl", baseUrl);
         source.put("verificationStatus", candidate.verification);
-        source.put("verifiedAt", iso(candidate.fetchedAt));
+        source.put("verifiedAt", verified ? iso(candidate.fetchedAt) : null);
         snapshot.put("source", source);
         snapshot.put("sourceUrl", candidate.sourceUrl);
-        snapshot.put("verifiedAt", iso(candidate.fetchedAt));
+        snapshot.put("verifiedAt", verified ? iso(candidate.fetchedAt) : null);
         snapshot.put("verification", candidate.verification);
         snapshot.put("warnings", candidate.warnings);
         snapshot.put("aliases", candidate.aliases);

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -33,6 +34,9 @@ class IdempotencyServiceTest {
         when(mapper.insertIdempotency(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         ResponseEntity<CommonResult<Object>> first = service.executeTask("user", "POST", "/route", key, request,
                 () -> new IdempotencyService.ActionResult("task", Map.of("id", "task", "attempt", actions.incrementAndGet())));
+        var ordering = inOrder(mapper);
+        ordering.verify(mapper).lockUser("user");
+        ordering.verify(mapper).insertIdempotency(any(), any(), any(), any(), any(), any(), any());
         Map<String, Object> existing = new HashMap<>();
         existing.put("request_digest", java.util.HexFormat.of().parseHex(json.digest(request)));
         existing.put("http_status", 202);

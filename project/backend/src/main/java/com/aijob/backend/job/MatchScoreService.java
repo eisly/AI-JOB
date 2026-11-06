@@ -41,6 +41,23 @@ public class MatchScoreService {
         return weighted.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).intValue();
     }
 
+    public Integer searchScore(BigDecimal skill, BigDecimal semantic, BigDecimal preference) {
+        if (skill == null && semantic == null) {
+            return null;
+        }
+        BigDecimal weighted = BigDecimal.ZERO;
+        BigDecimal totalWeight = BigDecimal.ZERO;
+        BigDecimal[] values = {skill, semantic, preference};
+        BigDecimal[] weights = {BigDecimal.valueOf(0.60), BigDecimal.valueOf(0.25), BigDecimal.valueOf(0.15)};
+        for (int index = 0; index < values.length; index++) {
+            if (values[index] != null) {
+                weighted = weighted.add(values[index].multiply(weights[index]));
+                totalWeight = totalWeight.add(weights[index]);
+            }
+        }
+        return weighted.multiply(BigDecimal.valueOf(100)).divide(totalWeight, 0, RoundingMode.HALF_UP).intValue();
+    }
+
     public Map<String, Object> component(String key, BigDecimal value, BigDecimal weight, String provenance) {
         Map<String, Object> result = new java.util.LinkedHashMap<>();
         result.put("key", key);

@@ -17,7 +17,7 @@ public interface JobSearchMapper {
 
     @Insert("""
             INSERT INTO job_source (id,code,name,type,base_url,verification_status,verified_at)
-            VALUES (#{id},#{code},#{name},#{type},#{baseUrl},#{verification},UTC_TIMESTAMP(3))
+            VALUES (#{id},#{code},#{name},#{type},#{baseUrl},#{verification},IF(#{verification}='VERIFIED',UTC_TIMESTAMP(3),NULL))
             ON DUPLICATE KEY UPDATE name=VALUES(name),type=VALUES(type),base_url=VALUES(base_url),
               verification_status=VALUES(verification_status),verified_at=VALUES(verified_at)
             """)
@@ -27,10 +27,10 @@ public interface JobSearchMapper {
 
     @Insert("""
             INSERT INTO job (id,source_id,owner_user_id,visibility,current_version,status,source_url,verified_at)
-            VALUES (#{id},#{sourceId},#{userId},'PRIVATE',1,'ACTIVE',#{sourceUrl},UTC_TIMESTAMP(3))
+            VALUES (#{id},#{sourceId},#{userId},'PRIVATE',1,'ACTIVE',#{sourceUrl},IF(#{verified},UTC_TIMESTAMP(3),NULL))
             """)
     int insertJob(@Param("id") String id, @Param("sourceId") String sourceId, @Param("userId") String userId,
-                  @Param("sourceUrl") String sourceUrl);
+                  @Param("sourceUrl") String sourceUrl, @Param("verified") boolean verified);
 
     @Insert("""
             INSERT INTO job_version (id,job_id,version_no,title,company_name,city_code,role_code,candidate_type,
@@ -97,13 +97,16 @@ public interface JobSearchMapper {
             </if>
             <if test="cityCode != null and cityCode != ''">AND jv.city_code=#{cityCode}</if>
             <if test="candidateType != null and candidateType != ''">AND jv.candidate_type=#{candidateType}</if>
-            <if test="sizes != null and !sizes.isEmpty()">
-              AND (
-                jv.company_size IN
-                <foreach collection="sizes" item="size" open="(" separator="," close=")">#{size}</foreach>
-                <if test="includeUnknown">OR jv.company_size IS NULL OR jv.company_size='SIZE_UNKNOWN'</if>
-              )
-            </if>
+            <choose>
+              <when test="sizes != null and !sizes.isEmpty()">
+                AND (
+                  jv.company_size IN
+                  <foreach collection="sizes" item="size" open="(" separator="," close=")">#{size}</foreach>
+                  <if test="includeUnknown">OR jv.company_size IS NULL OR jv.company_size='SIZE_UNKNOWN'</if>
+                )
+              </when>
+              <when test="!includeUnknown">AND jv.company_size IS NOT NULL AND jv.company_size &lt;&gt; 'SIZE_UNKNOWN'</when>
+            </choose>
             ORDER BY i.rank_no,i.job_id LIMIT #{size} OFFSET #{offset}
             </script>
             """)
@@ -124,13 +127,16 @@ public interface JobSearchMapper {
             </if>
             <if test="cityCode != null and cityCode != ''">AND jv.city_code=#{cityCode}</if>
             <if test="candidateType != null and candidateType != ''">AND jv.candidate_type=#{candidateType}</if>
-            <if test="sizes != null and !sizes.isEmpty()">
-              AND (
-                jv.company_size IN
-                <foreach collection="sizes" item="size" open="(" separator="," close=")">#{size}</foreach>
-                <if test="includeUnknown">OR jv.company_size IS NULL OR jv.company_size='SIZE_UNKNOWN'</if>
-              )
-            </if>
+            <choose>
+              <when test="sizes != null and !sizes.isEmpty()">
+                AND (
+                  jv.company_size IN
+                  <foreach collection="sizes" item="size" open="(" separator="," close=")">#{size}</foreach>
+                  <if test="includeUnknown">OR jv.company_size IS NULL OR jv.company_size='SIZE_UNKNOWN'</if>
+                )
+              </when>
+              <when test="!includeUnknown">AND jv.company_size IS NOT NULL AND jv.company_size &lt;&gt; 'SIZE_UNKNOWN'</when>
+            </choose>
             </script>
             """)
     long searchItemCount(@Param("searchId") String searchId, @Param("keyword") String keyword,

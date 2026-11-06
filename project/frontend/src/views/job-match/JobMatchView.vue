@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import ApplicationForm from '@/views/application/ApplicationForm.vue'
+import type { ApplicationCreatePayload } from '@/types/application'
+import JobSearchView from '@/views/job-search/JobSearchView.vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Aim, Plus, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -8,14 +11,14 @@ import { jobApi } from '@/api/jobs'
 import { learningApi } from '@/api/learning'
 import { profileApi } from '@/api/profile'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
-import type { JobVO, MatchBatchVO, MatchItemVO, Page, ProfileVO, TaskVO } from '@/api/types'
+import type { JobSearchItemVO, JobVO, MatchBatchVO, MatchItemVO, Page, ProfileVO, TaskVO } from '@/api/types'
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 
 import { candidateTypeLabels, cityLabels, commonStatusLabels, educationLabels, errorMessage, formatDate, formatSalary } from '@/utils/format'
 
-type JobTab = 'trusted' | 'personal' | 'favorites' | 'matches'
+type JobTab = 'search' | 'trusted' | 'personal' | 'favorites' | 'matches'
 type EligibilityStatus = 'PASS' | 'UNKNOWN' | 'FAIL'
 type ImportBody = Parameters<typeof jobApi.importJd>[0]
 type MatchBody = Parameters<typeof jobApi.createMatch>[0]
@@ -23,9 +26,36 @@ type PlanBody = Parameters<typeof learningApi.createPlan>[0]
 
 const route = useRoute()
 const router = useRouter()
-const allowedTabs: JobTab[] = ['trusted', 'personal', 'favorites', 'matches']
-const initialQueryTab = String(route.query.tab || '') as JobTab
-const activeTab = ref<JobTab>(allowedTabs.includes(initialQueryTab) ? initialQueryTab : route.query.matchId ? 'matches' : 'trusted')
+const applicationPlan = ref<ApplicationCreatePayload | null>(null)
+const applicationVisible = ref(false)
+
+function planApplication(job: JobVO | JobSearchItemVO) {
+  const fromSearch = 'jobId' in job
+  applicationPlan.value = {
+    jobId: fromSearch ? job.jobId : job.id,
+    companyName: job.companyName.slice(0, 100),
+    jobTitle: job.title.slice(0, 100),
+    cityCode: job.cityCode,
+    education: fromSearch ? job.educationText?.slice(0, 50) : null,
+    salaryText: fromSearch ? job.salaryText?.slice(0, 100) : null,
+    description: fromSearch ? null : job.jdText.slice(0, 1000),
+    status: 'PLANNED',
+  }
+  applicationVisible.value = true
+}
+
+const allowedTabs: JobTab[] = ['search', 'trusted', 'personal', 'favorites', 'matches']
+const activeTab = computed<JobTab>({
+  get() {
+    const tab = String(route.query.tab || '') as JobTab
+    if (allowedTabs.includes(tab)) return tab
+    if (route.query.matchId) return 'matches'
+    return route.query.jobId ? 'trusted' : 'search'
+  },
+  set(tab) {
+    setQuery({ tab, jobId: undefined, matchId: undefined, searchId: undefined, taskId: undefined })
+  },
+})
 const cityOptions = Object.entries(cityLabels).map(([value, label]) => ({ value, label }))
 const candidateOptions = Object.entries(candidateTypeLabels).map(([value, label]) => ({ value, label }))
 
@@ -164,7 +194,7 @@ const collectionJobs = computed(() => {
 })
 const collectionLoading = computed(() => activeTab.value === 'trusted' ? trustedLoading.value : activeTab.value === 'favorites' ? favoritesLoading.value : personalLoading.value)
 const collectionError = computed(() => activeTab.value === 'trusted' ? trustedError.value : activeTab.value === 'favorites' ? favoritesError.value : personalError.value)
-const collectionTitle = computed(() => ({ trusted: '可信岗位', personal: '我导入的岗位', favorites: '我的收藏', matches: '岗位列表' } as Record<JobTab, string>)[activeTab.value])
+const collectionTitle = computed(() => ({ search: 'AI 搜索', trusted: '可信岗位', personal: '我导入的岗位', favorites: '我的收藏', matches: '岗位列表' } as Record<JobTab, string>)[activeTab.value])
 const collectionEmpty = computed(() => !collectionJobs.value.length)
 const collectionTotal = computed(() => activeTab.value === 'trusted' ? trustedJobs.value.total : activeTab.value === 'favorites' ? favoriteJobs.value.total : personalTotal.value)
 const collectionCurrent = computed(() => activeTab.value === 'trusted' ? trustedJobs.value.current : activeTab.value === 'favorites' ? favoriteJobs.value.current : personalCurrent.value)
@@ -646,6 +676,7 @@ async function retryPlan() {
 }
 
 function loadActiveTab() {
+  if (activeTab.value === 'search') return
   if (activeTab.value === 'matches') {
     void loadProfile()
     void loadMatches()
@@ -654,28 +685,19 @@ function loadActiveTab() {
   }
 }
 
-watch(activeTab, tab => {
-  setQuery({ tab })
-  loadActiveTab()
-})
-
-onMounted(() => {
-  loadActiveTab()
-  const jobId = queryValue(route.query.jobId)
-  const matchId = queryValue(route.query.matchId)
-  if (jobId) void openJobById(jobId, false)
-  if (matchId) void loadMatch(matchId, false)
-})
+watch(activeTab, loadActiveTab, { immediate: true })
+watch(() => queryValue(route.query.jobId), id => { if (id) void openJobById(id, false) }, { immediate: true })
+watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, false) }, { immediate: true })
 </script>
 
 <template>
   <div class="page job-match-page">
     <header class="page-header">
       <div>
-        <h1><el-icon><Aim /></el-icon> 岗位匹配</h1>
-        <p>基于已确认画像核验资格、解释匹配差距，并将有效结果用于训练或模拟面试。</p>
+        <h1><el-icon><Aim /></el-icon> 岗位推荐与投递</h1>
+        <p>搜索岗位、比较匹配度，并将感兴趣的机会加入投递计划。</p>
       </div>
-      <div class="page-header__actions">
+      <div v-if="activeTab !== 'search'" class="page-header__actions">
         <el-tag v-if="selectedJobIds.length" type="primary" effect="plain">已选 {{ selectedJobIds.length }} / 20 个岗位</el-tag>
         <el-button v-if="selectedJobIds.length" @click="selectedJobIds = []">清空选择</el-button>
         <el-button type="primary" @click="activeTab = 'matches'">创建匹配</el-button>
@@ -683,13 +705,15 @@ onMounted(() => {
     </header>
 
     <el-tabs v-model="activeTab" class="job-tabs">
+      <el-tab-pane label="AI 搜索" name="search" />
       <el-tab-pane label="可信岗位" name="trusted" />
       <el-tab-pane label="个人JD" name="personal" />
       <el-tab-pane label="收藏" name="favorites" />
       <el-tab-pane label="匹配结果" name="matches" />
     </el-tabs>
 
-    <template v-if="activeTab !== 'matches'">
+    <JobSearchView v-if="activeTab === 'search'" @plan="planApplication" :key="String(route.query.searchId || route.query.taskId || 'current')" />
+    <template v-else-if="activeTab !== 'matches'">
       <section v-if="activeTab === 'trusted'" class="panel">
         <div class="filter-bar">
           <el-input v-model="trustedFilters.q" class="filter-keyword" placeholder="搜索职位关键词" maxlength="100" clearable @keyup.enter="applyTrustedFilters" @clear="applyTrustedFilters" />
@@ -1034,8 +1058,9 @@ onMounted(() => {
               <el-descriptions-item label="岗位校验时间">{{ formatDate(jobDetail.verifiedAt) }}</el-descriptions-item>
               <el-descriptions-item label="来源基础地址">{{ jobDetail.source.baseUrl || '未提供' }}</el-descriptions-item>
             </el-descriptions>
-            <el-button v-if="httpUrl(jobDetail.sourceUrl)" class="source-link" type="primary" plain @click="openSource(jobDetail.sourceUrl)">新窗口打开原始来源</el-button>
+            <el-button v-if="httpUrl(jobDetail.sourceUrl)" class="source-link" type="primary" plain @click="openSource(jobDetail.sourceUrl)">前往投递</el-button>
             <p v-else class="muted">未提供可安全打开的http/https来源地址</p>
+            <el-button class="source-link" @click="planApplication(jobDetail)">添加投递计划</el-button>
           </section>
         </template>
       </AsyncState>
@@ -1073,6 +1098,7 @@ onMounted(() => {
         <el-button v-else type="primary" :loading="planSubmitting" :disabled="planTaskActive || planSourceStale || selectedMatch?.isStale" @click="submitPlan">提交生成计划</el-button>
       </template>
     </el-dialog>
+    <ApplicationForm v-model:visible="applicationVisible" mode="create" :baseline="null" :plan="applicationPlan" />
   </div>
 </template>
 
