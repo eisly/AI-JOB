@@ -5,6 +5,9 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -15,12 +18,15 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 import com.aijob.backend.common.BusinessException;
 import com.aijob.backend.common.JsonService;
+import com.aijob.backend.common.TraceIdFilter;
 
 import io.netty.channel.ChannelOption;
 import reactor.netty.http.client.HttpClient;
 
 @Component
 public class WebClientAgentClient implements AgentClient {
+
+    private static final Logger log = LoggerFactory.getLogger(WebClientAgentClient.class);
 
     private static final Map<String, String> PATHS = Map.ofEntries(
             Map.entry("RESUME_PARSE", "/internal/ai/v1/resumes/parse"),
@@ -67,26 +73,64 @@ public class WebClientAgentClient implements AgentClient {
         envelope.put("inputVersions", json.map(task.getInputVersionsJson()));
         envelope.put("deadlineAt", task.getDeadlineAt().toInstant(ZoneOffset.UTC));
         envelope.put("payload", json.map(task.getInputSnapshotJson()));
-        return data(webClient.post().uri(path)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(task.getId()))
-                .header("Idempotency-Key", task.getIdempotencyKey())
-                .contentType(MediaType.APPLICATION_JSON).bodyValue(envelope)
-                .retrieve().bodyToMono(Map.class).block(timeout));
+        long started = System.nanoTime();
+        log.info("agent submit operation={} task={} path={}", task.getOperation(), task.getId(), path);
+        try {
+            Map<String, Object> result = data(webClient.post().uri(path)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(task.getId()))
+                    .header("Idempotency-Key", task.getIdempotencyKey())
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceIdOr(task.getId()))
+                    .contentType(MediaType.APPLICATION_JSON).bodyValue(envelope)
+                    .retrieve().bodyToMono(Map.class).block(timeout));
+            log.info("agent accepted operation={} task={} runId={} status={} duration={}ms",
+                    task.getOperation(), task.getId(), result.get("runId"), result.get("status"),
+                    elapsedMillis(started));
+            return result;
+        } catch (RuntimeException ex) {
+            log.error("agent submit failed operation={} task={} error={} duration={}ms",
+                    task.getOperation(), task.getId(), describe(ex), elapsedMillis(started));
+            throw ex;
+        }
     }
 
     @Override
     public Map<String, Object> findByTask(String taskId) {
-        return data(webClient.get().uri(uri -> uri.path("/internal/ai/v1/runs").queryParam("taskId", taskId).build())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(taskId))
-                .retrieve().bodyToMono(Map.class).block(timeout));
+        long started = System.nanoTime();
+        log.info("agent query task={}", taskId);
+        try {
+            Map<String, Object> result = data(webClient.get()
+                    .uri(uri -> uri.path("/internal/ai/v1/runs").queryParam("taskId", taskId).build())
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(taskId))
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceIdOr(taskId))
+                    .retrieve().bodyToMono(Map.class).block(timeout));
+            log.info("agent query result task={} runId={} status={} duration={}ms",
+                    taskId, result.get("runId"), result.get("status"), elapsedMillis(started));
+            return result;
+        } catch (RuntimeException ex) {
+            log.warn("agent query failed task={} error={} duration={}ms",
+                    taskId, describe(ex), elapsedMillis(started));
+            throw ex;
+        }
     }
 
     @Override
     public Map<String, Object> cancel(String runId, String taskId) {
-        return data(webClient.post().uri("/internal/ai/v1/runs/{runId}/cancel", runId)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(taskId))
-                .contentType(MediaType.APPLICATION_JSON).bodyValue(Map.of())
-                .retrieve().bodyToMono(Map.class).block(timeout));
+        long started = System.nanoTime();
+        log.info("agent cancel task={} run={}", taskId, runId);
+        try {
+            Map<String, Object> result = data(webClient.post().uri("/internal/ai/v1/runs/{runId}/cancel", runId)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(taskId))
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceIdOr(taskId))
+                    .contentType(MediaType.APPLICATION_JSON).bodyValue(Map.of())
+                    .retrieve().bodyToMono(Map.class).block(timeout));
+            log.info("agent cancel result task={} run={} status={} duration={}ms",
+                    taskId, runId, result.get("status"), elapsedMillis(started));
+            return result;
+        } catch (RuntimeException ex) {
+            log.error("agent cancel failed task={} run={} error={} duration={}ms",
+                    taskId, runId, describe(ex), elapsedMillis(started));
+            throw ex;
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -97,8 +141,19 @@ public class WebClientAgentClient implements AgentClient {
         return (Map<String, Object>) response.get("data");
     }
 
-    @SuppressWarnings("unused")
-    private String error(WebClientResponseException ex) {
-        return ex.getStatusCode().value() + ":" + ex.getClass().getSimpleName();
+    private static String traceIdOr(String fallback) {
+        String traceId = MDC.get(TraceIdFilter.MDC_KEY);
+        return traceId == null || traceId.isBlank() ? fallback : traceId;
+    }
+
+    private static String describe(RuntimeException ex) {
+        if (ex instanceof WebClientResponseException responseException) {
+            return "HTTP " + responseException.getStatusCode().value();
+        }
+        return ex.getClass().getSimpleName();
+    }
+
+    private static long elapsedMillis(long started) {
+        return (System.nanoTime() - started) / 1_000_000;
     }
 }

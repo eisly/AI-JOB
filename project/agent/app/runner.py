@@ -14,6 +14,7 @@ from .files import FileFetcher
 from .graphs import CareerOrchestrator
 from .handlers import ExecutionContext, get_handler
 from .llm import LLMClient
+from .logging_config import bind_log_context, reset_log_context
 from .operations import PAYLOAD_MODELS, validate_version_binding
 from .schemas import AIRequestEnvelope
 from .storage import (
@@ -79,9 +80,16 @@ class RunService:
             if record.status == "RUNNING":
                 requeued = await self._repo.requeue(record.run_id, utcnow())
                 if requeued is not None:
-                    logger.info("requeued interrupted run=%s attempt=%s", record.run_id, requeued.attempt)
+                    logger.info(
+                        "requeued interrupted run=%s task=%s operation=%s attempt=%s",
+                        record.run_id,
+                        record.task_id,
+                        record.operation,
+                        requeued.attempt,
+                    )
                     self._queue.put_nowait(record.run_id)
             elif record.status == "QUEUED":
+                logger.info("requeued queued run=%s task=%s operation=%s", record.run_id, record.task_id, record.operation)
                 self._queue.put_nowait(record.run_id)
             elif record.status == "CANCEL_REQUESTED":
                 await self._finalize_cancelled(record.run_id)
@@ -257,10 +265,24 @@ class RunService:
         record = await self._repo.get(run_id)
         if record is None or record.terminal:
             return
+        token = bind_log_context(
+            trace=record.trace_id,
+            task=record.task_id,
+            run=run_id,
+            op=record.operation,
+            user=record.user_id,
+        )
+        try:
+            await self._execute_record(run_id, record)
+        finally:
+            reset_log_context(token)
+
+    async def _execute_record(self, run_id: str, record: RunRecord) -> None:
         if record.status == "CANCEL_REQUESTED":
             await self._finalize_cancelled(run_id)
             return
         if record.status != "QUEUED":
+            logger.debug("skip run status=%s", record.status)
             return
 
         now = utcnow()
@@ -280,6 +302,7 @@ class RunService:
                 await self._finalize_cancelled(run_id)
             return
 
+        logger.info("execute start attempt=%s deadline=%s", claimed.attempt, claimed.deadline_at.isoformat())
         await self._emit(run_id, "stage", {"name": "started", "progress": 5}, now)
         handler = get_handler(claimed.operation)
         ctx = ExecutionContext(
@@ -365,7 +388,14 @@ class RunService:
         await self._emit(run_id, "result_ready", {"operation": claimed.operation}, utcnow())
         self._callbacks.notify()
         self._cancel_events.pop(run_id, None)
-        logger.info("succeeded run=%s attempt=%s", run_id, finished.attempt)
+        logger.info(
+            "succeeded attempt=%s model=%s latency_ms=%s tokens=%s/%s",
+            finished.attempt,
+            meta.get("model"),
+            meta.get("latencyMs"),
+            meta.get("inputTokens"),
+            meta.get("outputTokens"),
+        )
 
     async def _finalize_cancelled(self, run_id: str) -> None:
         record = await self._repo.get(run_id)
@@ -379,7 +409,7 @@ class RunService:
         if finished is not None:
             await self._emit(run_id, "cancelled", {}, utcnow())
             self._callbacks.notify()
-            logger.info("cancelled run=%s", run_id)
+            logger.info("cancelled")
         self._cancel_events.pop(run_id, None)
 
     async def _finish_failed(self, run_id: str, code: str, message: str, *, retryable: bool) -> None:
@@ -395,7 +425,7 @@ class RunService:
         await self._emit(run_id, "error", error, utcnow())
         self._callbacks.notify()
         self._cancel_events.pop(run_id, None)
-        logger.warning("failed run=%s code=%s retryable=%s", run_id, code, retryable)
+        logger.warning("failed code=%s retryable=%s message=%s", code, retryable, message)
 
     async def _fail_unknown(self, run_id: str, exc: Exception) -> None:
         record = await self._repo.get(run_id)
@@ -410,6 +440,7 @@ class RunService:
         payload: dict[str, Any],
         now: datetime,
     ) -> None:
+        logger.debug("emit event=%s payload=%s", event_type, payload)
         expires = now + timedelta(hours=self._settings.event_retention_hours)
         await self._repo.add_event(run_id, event_type, payload, now, expires)
 

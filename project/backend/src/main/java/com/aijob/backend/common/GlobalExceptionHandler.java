@@ -40,6 +40,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<CommonError> handleBusiness(BusinessException ex) {
+        log.warn("business error code={} key={} status={} retryable={} message={}",
+                ex.getCode(), ex.getErrorKey(), ex.getHttpStatus(), ex.getRetryable(), ex.getMessage());
         CommonError body = CommonError.of(ex.getCode(), ex.getMessage(), ex.getErrorKey(), ex.getRetryable(),
                 ex.getDetails());
         body.setTraceId(traceId());

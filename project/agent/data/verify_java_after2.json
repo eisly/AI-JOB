@@ -1,0 +1,472 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "now": "2026-11-06T16:20:09.539029+00:00",
+  "sourceStatus": [
+    {
+      "key": "web",
+      "name": "AI 全网搜索",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "首轮：引擎 tavily 发现 36 个链接（24 个域名），分析 20 页，筛选后 0 个岗位；补搜：引擎 tavily 发现 36 个链接（24 个域名），分析 20 页，筛选后 0 个岗位",
+      "httpStatus": null,
+      "durationMs": 15874,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 10,
+        "providerCount": 1,
+        "discovered": 72,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 0,
+        "cacheHits": 5,
+        "searchResults": {
+          "tavily": 100
+        },
+        "uniqueUrls": 36,
+        "pagesSelected": 40,
+        "extractionAttempted": 40,
+        "pagesWithPosting": 0,
+        "hardFilterPass": 0,
+        "detailChecks": 0,
+        "extractionFailures": 0,
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "命中查询缓存",
+            "httpStatus": null,
+            "durationMs": 0,
+            "attempts": 0
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "命中查询缓存",
+            "httpStatus": null,
+            "durationMs": 0,
+            "attempts": 0
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "命中查询缓存",
+            "httpStatus": null,
+            "durationMs": 0,
+            "attempts": 0
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "命中查询缓存",
+            "httpStatus": null,
+            "durationMs": 0,
+            "attempts": 0
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "命中查询缓存",
+            "httpStatus": null,
+            "durationMs": 0,
+            "attempts": 0
+          }
+        ]
+      },
+      "providers": [
+        "tavily"
+      ]
+    },
+    {
+      "key": "baidu",
+      "name": "百度招聘官网",
+      "status": "PARTIAL",
+      "count": 2,
+      "message": "官网当前列表确认 17 个职位，条件筛选后 11 条；每个关键词取官网首屏；其中 2 条符合岗位关键词",
+      "httpStatus": null,
+      "durationMs": 2250,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 4,
+        "discovered": 17,
+        "confirmedOpen": 17
+      },
+      "providers": []
+    },
+    {
+      "key": "tencent",
+      "name": "腾讯招聘官网",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "官方接口可用，但当前条件下没有匹配岗位",
+      "httpStatus": 200,
+      "durationMs": 125,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    },
+    {
+      "key": "greenhouse",
+      "name": "公司招聘官网（Greenhouse ATS）",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "ATS 官方接口可用，但当前条件下没有匹配岗位",
+      "httpStatus": null,
+      "durationMs": 1812,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    }
+  ],
+  "queryPlan": {
+    "keyword": "Java 后端",
+    "expansions": [
+      "Java 后端",
+      "Java 服务端",
+      "Java 开发",
+      "后端开发",
+      "Java 研发"
+    ],
+    "cities": [
+      "110100",
+      "310100",
+      "330100"
+    ],
+    "candidateTypes": [
+      "CAMPUS"
+    ],
+    "companySizes": [],
+    "includeUnknownSize": true,
+    "freshnessDays": 30,
+    "searchProviders": [
+      "tavily"
+    ],
+    "queries": [
+      {
+        "query": "北京 Java 后端 校招 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "Java 后端",
+        "category": "Java 后端",
+        "candidateType": "CAMPUS",
+        "freshness": null
+      },
+      {
+        "query": "上海 Java 服务端 校招 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "Java 服务端",
+        "category": "Java 后端",
+        "candidateType": "CAMPUS",
+        "freshness": null
+      },
+      {
+        "query": "杭州 Java 开发 校招 招聘 职位",
+        "cityCode": "330100",
+        "cityName": "杭州",
+        "keyword": "Java 开发",
+        "category": "Java 后端",
+        "candidateType": "CAMPUS",
+        "freshness": null
+      },
+      {
+        "query": "北京 后端开发 校招 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "后端开发",
+        "category": "后端开发",
+        "candidateType": "CAMPUS",
+        "freshness": null
+      },
+      {
+        "query": "上海 Java 研发 校招 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "Java 研发",
+        "category": "Java 后端",
+        "candidateType": "CAMPUS",
+        "freshness": null
+      }
+    ],
+    "coverage": {
+      "cities": {
+        "北京": 40,
+        "上海": 40,
+        "杭州": 20
+      },
+      "categories": {
+        "Java 后端": 80,
+        "后端开发": 20
+      },
+      "cells": [
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "Java 后端",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 20,
+          "completed": true
+        },
+        {
+          "cityCode": "310100",
+          "cityName": "上海",
+          "category": "Java 后端",
+          "queries": 2,
+          "providers": [
+            "tavily"
+          ],
+          "found": 40,
+          "completed": true
+        },
+        {
+          "cityCode": "330100",
+          "cityName": "杭州",
+          "category": "Java 后端",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 20,
+          "completed": true
+        },
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "后端开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 20,
+          "completed": true
+        }
+      ],
+      "completedCells": 4,
+      "totalCells": 4
+    },
+    "adjustments": [
+      "首轮覆盖已完成，按剩余预算补充同义词查询"
+    ],
+    "version": "job-search-query-v4"
+  },
+  "warnings": [
+    "QUERY_ADJUSTED",
+    "SOME_SOURCES_PARTIAL_FAILURE",
+    "SEARCH_INCOMPLETE"
+  ],
+  "dedupe": {
+    "rawCount": 2,
+    "validCount": 2,
+    "uniqueCount": 2,
+    "mergedCount": 0,
+    "methods": {},
+    "duplicateRate": 0.0
+  },
+  "metrics": {
+    "funnel": {
+      "searchResults": {
+        "tavily": 150
+      },
+      "uniqueUrls": 36,
+      "uniquePostings": 2,
+      "jobDetailPages": 0,
+      "extractionAttempted": 2,
+      "extractionSuccess": 2,
+      "verification": {
+        "counts": {
+          "ACTIVE_CONFIRMED": 2,
+          "ACTIVE_PROBABLE": 0,
+          "UNKNOWN": 0,
+          "CLOSED": 0
+        },
+        "reasons": {
+          "ACTIVE_EVIDENCE_FOUND": 2
+        },
+        "records": 2,
+        "rates": {
+          "officialVerificationRate": 1.0,
+          "unknownRate": 0.0,
+          "closedRate": 0.0
+        }
+      },
+      "hardFilterPass": 2,
+      "finalRecommendations": 2
+    },
+    "counts": {
+      "ACTIVE_CONFIRMED": 2,
+      "ACTIVE_PROBABLE": 0,
+      "UNKNOWN": 0,
+      "CLOSED": 0
+    },
+    "reasons": {
+      "ACTIVE_EVIDENCE_FOUND": 2
+    },
+    "failures": {},
+    "stageMs": {
+      "plan": 1500,
+      "search": 3030,
+      "normalize": 0
+    },
+    "sourceCounts": {
+      "web": 0,
+      "baidu": 2,
+      "tencent": 0,
+      "greenhouse": 0
+    },
+    "cityCoverage": {
+      "北京": 40,
+      "上海": 40,
+      "杭州": 20
+    },
+    "jobCategoryCoverage": {
+      "Java 后端": 80,
+      "后端开发": 20
+    },
+    "sourceDiversity": {
+      "sources": 1,
+      "providers": [],
+      "uniqueDomains": 1
+    },
+    "rates": {
+      "officialVerificationRate": 1.0,
+      "unknownRate": 0.0,
+      "closedRate": 0.0,
+      "extractionSuccessRate": 1.0,
+      "duplicateRate": 0.0,
+      "staleRate": 1.0
+    },
+    "freshnessLagDays": 121.68,
+    "evaluation": {
+      "status": "NOT_MEASURED",
+      "reason": "缺少人工标注的相关岗位全集，未计算 Recall@K / NDCG@10"
+    },
+    "postingIds": [
+      "9d00f5ebe7c5d243380a514c57de1476",
+      "d143a94cd1ccdacb9409497376110a56"
+    ]
+  },
+  "meta": {
+    "graph": "job-search-graph-v3",
+    "modelCalls": 1,
+    "modelDegraded": false,
+    "budget": {
+      "rounds": 2,
+      "queries": 10,
+      "pages": 40,
+      "detailChecks": 0,
+      "apiCalls": 5,
+      "cacheHits": 5,
+      "elapsedMs": 20108,
+      "limits": {
+        "maxQueriesPerRound": 12,
+        "maxPagesPerRound": 20,
+        "maxDetailPages": 20,
+        "maxApiCalls": 60,
+        "maxElapsedSeconds": 150.0,
+        "maxRounds": 3,
+        "targetResults": 10,
+        "minResults": 5
+      },
+      "stages": {
+        "plan": 1500,
+        "search": 3030,
+        "normalize": 0
+      }
+    },
+    "companyRegistry": {
+      "companies": [
+        {
+          "key": "greenhouse:stripe",
+          "lastCollectedAt": "2026-11-06T16:19:51.769422+00:00",
+          "lastStatus": "AVAILABLE",
+          "lastCount": 764
+        }
+      ],
+      "registered": [
+        {
+          "key": "greenhouse:stripe",
+          "company": "Stripe",
+          "platform": "greenhouse"
+        }
+      ]
+    }
+  },
+  "itemCount": 2,
+  "items": [
+    {
+      "title": "上海-后端开发工程师(J100741)",
+      "company": "百度",
+      "city": "上海市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-07-08T00:00:00+00:00",
+      "fetchedAt": "2026-11-06T16:19:51.357887+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/GRADUATE/b68949bd-516b-463b-8219-844dd2e184c2",
+      "semanticScore": 0.62
+    },
+    {
+      "title": "北京-后端开发工程师(J100737)",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-07-08T00:00:00+00:00",
+      "fetchedAt": "2026-11-06T16:19:51.357887+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/GRADUATE/72145a13-5eb1-41ce-8853-d00aa7369281",
+      "semanticScore": 0.62
+    }
+  ]
+}

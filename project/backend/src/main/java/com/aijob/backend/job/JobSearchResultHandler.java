@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -36,10 +37,18 @@ public class JobSearchResultHandler implements TaskResultHandler {
     private static final Set<String> CANDIDATE_TYPES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
     private static final Set<String> EDUCATION = Set.of("HIGH_SCHOOL", "ASSOCIATE", "BACHELOR", "MASTER", "DOCTOR");
     private static final Set<String> SOURCE_TYPES = Set.of("OFFICIAL", "AUTHORIZED", "PUBLIC_SEARCH", "USER_INPUT");
+    private static final Set<String> VERIFICATION_STATUSES = Set.of(
+            "ACTIVE_CONFIRMED", "ACTIVE_PROBABLE", "UNKNOWN", "CLOSED");
+    private static final Set<String> ACTIVE_EVIDENCE = Set.of(
+            "OFFICIAL_LIST", "DETAIL_APPLY_LINK", "DETAIL_TEXT");
+    private static final Set<String> CLOSED_EVIDENCE = Set.of("OFFICIAL_CLOSED", "EXPIRED");
+    private static final Duration CONFIRMED_FRESHNESS = Duration.ofHours(6);
+    private static final Duration PROBABLE_FRESHNESS = Duration.ofHours(24);
     private static final Set<String> QUOTE_KEYS = Set.of("educationMin", "graduationYearMin",
             "graduationYearMax", "experienceMonthsMin");
     private static final Map<String, String> OFFSITE_NAMES = Map.of(
             "tencent", "腾讯招聘官网",
+            "baidu", "百度招聘官网",
             "greenhouse", "公司招聘官网（Greenhouse ATS）",
             "liepin", "猎聘",
             "boss", "BOSS直聘",
@@ -126,21 +135,27 @@ public class JobSearchResultHandler implements TaskResultHandler {
 
         Map<String, SearchCandidate> unique = new LinkedHashMap<>();
         Map<String, Integer> bySource = new LinkedHashMap<>();
+        Map<String, Integer> providers = new LinkedHashMap<>();
         int dropped = 0;
         int valid = 0;
+        String fallbackType = fallbackCandidateType(types, profile);
         for (Map<String, Object> raw : rawItems) {
-            SearchCandidate candidate = normalize(raw, catalog);
-            if (candidate == null || (!cities.isEmpty() && !cities.contains(candidate.cityCode))
-                    || (!types.isEmpty() && !types.contains(candidate.candidateType))
+            SearchCandidate candidate = normalize(raw, catalog, fallbackType);
+            if (candidate == null || (!cities.isEmpty() && candidate.cityCode != null
+                    && !cities.contains(candidate.cityCode))
+                    || (!types.isEmpty() && !candidate.candidateTypeInferred && !types.contains(candidate.candidateType))
                     || !matchesSize(candidate.companySize, sizes, includeUnknownSize)) {
                 dropped++;
                 continue;
             }
             valid++;
             bySource.merge(candidate.sourceKey, 1, Integer::sum);
-            SearchCandidate existing = unique.get(candidate.fingerprint);
+            for (String provider : candidate.searchProviders) {
+                providers.merge(provider, 1, Integer::sum);
+            }
+            SearchCandidate existing = unique.get(candidate.sourceUrl);
             if (existing == null) {
-                unique.put(candidate.fingerprint, candidate);
+                unique.put(candidate.sourceUrl, candidate);
             } else {
                 existing.merge(candidate);
             }
@@ -150,13 +165,15 @@ public class JobSearchResultHandler implements TaskResultHandler {
             prepare(candidate, profile, facts, snapshots);
         }
         candidates.sort(Comparator
-                .comparingInt((SearchCandidate item) -> switch (item.eligibilityStatus) {
-                    case "PASS" -> 0;
-                    case "UNKNOWN" -> 1;
-                    default -> 2;
-                })
+                .comparingInt((SearchCandidate item) -> "CLOSED".equals(item.verificationStatus) ? 3
+                        : switch (item.eligibilityStatus) {
+                            case "PASS" -> 0;
+                            case "UNKNOWN" -> 1;
+                            default -> 2;
+                        })
                 .thenComparing(item -> item.matchScore, Comparator.nullsLast(Comparator.reverseOrder()))
-                .thenComparingInt(item -> "VERIFIED".equals(item.verification) ? 0 : 1)
+                .thenComparingInt(item -> -verificationRank(item.verificationStatus))
+                .thenComparingInt(item -> -completeness(item))
                 .thenComparingInt(item -> SearchCandidate.priority(item.sourceType))
                 .thenComparing(item -> item.publishedAt, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(item -> item.fingerprint));
@@ -167,6 +184,10 @@ public class JobSearchResultHandler implements TaskResultHandler {
         int multiSource = 0;
         int unknownSize = 0;
         int possiblyExpired = 0;
+        int confirmed = 0;
+        int probable = 0;
+        int unknownVerification = 0;
+        int closedCount = 0;
         for (SearchCandidate candidate : candidates) {
             if (candidate.aliases.size() > 1) {
                 multiSource++;
@@ -174,7 +195,13 @@ public class JobSearchResultHandler implements TaskResultHandler {
             if (CompanySizes.SIZE_UNKNOWN.equals(candidate.companySize)) {
                 unknownSize++;
             }
-            if (candidate.warnings.contains("POSSIBLY_EXPIRED")) {
+            switch (candidate.verificationStatus) {
+                case "ACTIVE_CONFIRMED" -> confirmed++;
+                case "ACTIVE_PROBABLE" -> probable++;
+                case "CLOSED" -> closedCount++;
+                default -> unknownVerification++;
+            }
+            if (candidate.warnings.contains("CLOSED_JOB")) {
                 possiblyExpired++;
             }
             persist(task.getUserId(), task.getResourceId(), candidate, rank++);
@@ -189,11 +216,109 @@ public class JobSearchResultHandler implements TaskResultHandler {
         summary.put("unknownSizeCount", unknownSize);
         summary.put("possiblyExpiredCount", possiblyExpired);
         summary.put("bySource", bySource);
+        summary.put("searchProviders", providers);
+        summary.put("verification", Map.of(
+                "ACTIVE_CONFIRMED", confirmed,
+                "ACTIVE_PROBABLE", probable,
+                "UNKNOWN", unknownVerification,
+                "CLOSED", closedCount));
         summary.put("warnings", root.get("warnings") == null ? List.of() : root.get("warnings"));
         mapper.complete(task.getResourceId(), "READY", json.stringify(root.get("queryPlan")),
                 json.stringify(root.get("sources")), json.stringify(summary));
         jobs.updateBatch(task.getResourceId(), "READY", task.getId());
         return 1;
+    }
+
+    private String fallbackCandidateType(List<String> types, Map<String, Object> profile) {
+        if (types.size() == 1) {
+            return types.get(0);
+        }
+        String profileType = text(profile.get("candidateType"));
+        return profileType != null && CANDIDATE_TYPES.contains(profileType) ? profileType : "EXPERIENCED";
+    }
+
+    private String resolveVerificationStatus(Map<String, Object> raw, String sourceKey, String evidence,
+                                              LocalDateTime checkedAt, LocalDateTime now) {
+        String status = text(raw.get("verificationStatus"));
+        if (status == null || !VERIFICATION_STATUSES.contains(status)) {
+            status = legacyVerificationStatus(raw, sourceKey, evidence, checkedAt, now);
+        }
+        if ("ACTIVE_CONFIRMED".equals(status)
+                && !(activeEvidenceAllowed(sourceKey, evidence) && fresh(checkedAt, CONFIRMED_FRESHNESS, now))) {
+            return "UNKNOWN";
+        }
+        if ("ACTIVE_PROBABLE".equals(status)
+                && !(evidence != null && ACTIVE_EVIDENCE.contains(evidence) && fresh(checkedAt, PROBABLE_FRESHNESS, now))) {
+            return "UNKNOWN";
+        }
+        return status;
+    }
+
+    private String legacyVerificationStatus(Map<String, Object> raw, String sourceKey, String evidence,
+                                             LocalDateTime checkedAt, LocalDateTime now) {
+        if ("CLOSED".equals(raw.get("recruitmentStatus")) || (evidence != null && CLOSED_EVIDENCE.contains(evidence))) {
+            return "CLOSED";
+        }
+        boolean confirmed = "OPEN".equals(raw.get("recruitmentStatus"))
+                && activeEvidenceAllowed(sourceKey, evidence) && fresh(checkedAt, CONFIRMED_FRESHNESS, now);
+        if (confirmed) {
+            return "ACTIVE_CONFIRMED";
+        }
+        boolean probable = "PROBABLE".equals(raw.get("recruitmentStatus"))
+                && evidence != null && ACTIVE_EVIDENCE.contains(evidence) && fresh(checkedAt, PROBABLE_FRESHNESS, now);
+        return probable ? "ACTIVE_PROBABLE" : "UNKNOWN";
+    }
+
+    private boolean activeEvidenceAllowed(String sourceKey, String evidence) {
+        if (evidence == null) {
+            return false;
+        }
+        if (Set.of("baidu", "tencent", "greenhouse", "lever").contains(sourceKey)) {
+            return "OFFICIAL_LIST".equals(evidence);
+        }
+        return "web".equals(sourceKey) && Set.of("OFFICIAL_LIST", "DETAIL_APPLY_LINK", "DETAIL_TEXT").contains(evidence);
+    }
+
+    private boolean fresh(LocalDateTime checkedAt, Duration window, LocalDateTime now) {
+        return checkedAt != null && !checkedAt.isAfter(now.plusMinutes(1))
+                && !checkedAt.isBefore(now.minus(window));
+    }
+
+    private String defaultReason(String status, String evidence) {
+        return switch (status) {
+            case "ACTIVE_CONFIRMED", "ACTIVE_PROBABLE" -> "ACTIVE_EVIDENCE_FOUND";
+            case "CLOSED" -> CLOSED_EVIDENCE.contains(evidence) ? evidence : "OFFICIAL_CLOSED";
+            default -> "INSUFFICIENT_EVIDENCE";
+        };
+    }
+
+    private String legacyStatus(String verificationStatus) {
+        return switch (verificationStatus) {
+            case "ACTIVE_CONFIRMED" -> "OPEN";
+            case "ACTIVE_PROBABLE" -> "PROBABLE";
+            case "CLOSED" -> "CLOSED";
+            default -> "UNKNOWN";
+        };
+    }
+
+    private static int verificationRank(String status) {
+        return switch (status == null ? "" : status) {
+            case "ACTIVE_CONFIRMED" -> 4;
+            case "ACTIVE_PROBABLE" -> 3;
+            case "CLOSED" -> 1;
+            default -> 2;
+        };
+    }
+
+    private int completeness(SearchCandidate candidate) {
+        int score = 0;
+        if (candidate.cityCode != null) score++;
+        if (candidate.salaryMin != null && candidate.salaryMax != null) score++;
+        if (candidate.experienceText != null || candidate.experienceMonths != null) score++;
+        if (candidate.educationMin != null) score++;
+        if (candidate.publishedAt != null) score++;
+        if (!candidate.requirements.getOrDefault("skills", List.of()).equals(List.of())) score++;
+        return score;
     }
 
     private boolean matchesSize(String size, List<String> sizes, boolean includeUnknown) {
@@ -203,16 +328,30 @@ public class JobSearchResultHandler implements TaskResultHandler {
         return sizes.isEmpty() || sizes.contains(size);
     }
 
-    private SearchCandidate normalize(Map<String, Object> raw, Set<String> catalog) {
+    private SearchCandidate normalize(Map<String, Object> raw, Set<String> catalog, String fallbackType) {
         String sourceKey = text(raw.get("sourceKey"));
         String sourceName = text(raw.get("sourceName"));
         String sourceUrl = text(raw.get("sourceUrl"));
         String title = text(raw.get("title"));
         String company = text(raw.get("companyName"));
         String jdText = text(raw.get("jdText"));
-        if (sourceKey == null || title == null || company == null || jdText == null || !httpUrl(sourceUrl)) {
+        if (sourceKey == null || title == null || company == null || jdText == null
+                || !httpUrl(sourceUrl) || !sourceUrl.startsWith("https://")) {
             return null;
         }
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        String evidence = firstText(raw.get("verificationEvidence"), raw.get("recruitmentEvidence"));
+        String reason = text(raw.get("verificationReason"));
+        LocalDateTime checkedAt = time(raw.get("verificationCheckedAt"));
+        if (checkedAt == null) {
+            checkedAt = time(raw.get("recruitmentCheckedAt"));
+        }
+        Integer verificationHttp = integer(raw.get("verificationHttpStatus"));
+        String verificationStatus = resolveVerificationStatus(raw, sourceKey, evidence, checkedAt, now);
+        if ("UNKNOWN".equals(verificationStatus) && "ACTIVE_EVIDENCE_FOUND".equals(reason)) {
+            reason = "INSUFFICIENT_EVIDENCE";
+        }
+        boolean confirmedOpen = "ACTIVE_CONFIRMED".equals(verificationStatus);
         if (sourceName == null) {
             sourceName = OFFSITE_NAMES.getOrDefault(sourceKey, sourceKey);
         }
@@ -231,13 +370,29 @@ public class JobSearchResultHandler implements TaskResultHandler {
         candidate.sourceType = sourceType;
         candidate.verification = verification;
         candidate.sourceUrl = sourceUrl;
+        candidate.verificationStatus = verificationStatus;
+        candidate.verificationReason = reason == null ? defaultReason(verificationStatus, evidence) : reason;
+        candidate.verificationEvidence = evidence;
+        candidate.verificationCheckedAt = checkedAt;
+        candidate.verificationHttpStatus = verificationHttp;
+        candidate.verificationHistory = maps(raw.get("verificationHistory"), 10);
+        candidate.searchProviders = strings(raw.get("searchProviders"), 5, 32);
+        candidate.recruitmentStatus = legacyStatus(verificationStatus);
+        candidate.recruitmentEvidence = "UNKNOWN".equals(verificationStatus) ? null : evidence;
+        candidate.recruitmentCheckedAt = confirmedOpen || "ACTIVE_PROBABLE".equals(verificationStatus) ? checkedAt : null;
         candidate.title = limit(title, 100, candidate.warnings, "TITLE");
         candidate.companyName = limit(company, 100, candidate.warnings, "COMPANY");
         candidate.cityCode = cityCode(text(raw.get("cityCode")));
         candidate.cityName = limitNullable(text(raw.get("cityName")), 100);
+        if (candidate.cityCode == null) {
+            candidate.warnings.add("CITY_UNKNOWN");
+        }
         String rawCandidateType = text(raw.get("candidateType"));
-        candidate.candidateType = rawCandidateType != null && CANDIDATE_TYPES.contains(rawCandidateType)
-                ? rawCandidateType : "EXPERIENCED";
+        candidate.candidateTypeInferred = rawCandidateType == null || !CANDIDATE_TYPES.contains(rawCandidateType);
+        candidate.candidateType = candidate.candidateTypeInferred ? fallbackType : rawCandidateType;
+        if (candidate.candidateTypeInferred) {
+            candidate.warnings.add("CANDIDATE_TYPE_UNKNOWN");
+        }
         candidate.companySize = CompanySizes.normalize(text(raw.get("companySize")));
         candidate.salaryMin = integer(raw.get("salaryMinMonthlyCents"));
         candidate.salaryMax = integer(raw.get("salaryMaxMonthlyCents"));
@@ -274,7 +429,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
     }
 
     private SourceDefaults sourceDefaults(String key, String type, String verification) {
-        if (Set.of("tencent", "greenhouse").contains(key)) {
+        if (Set.of("baidu", "tencent", "greenhouse").contains(key)) {
             return new SourceDefaults("OFFICIAL", "VERIFIED");
         }
         if (Set.of("web", "liepin", "boss", "zhaopin").contains(key)) {
@@ -510,6 +665,16 @@ public class JobSearchResultHandler implements TaskResultHandler {
         snapshot.put("companySize", candidate.companySize);
         snapshot.put("publishedAt", iso(candidate.publishedAt));
         snapshot.put("fetchedAt", iso(candidate.fetchedAt));
+        snapshot.put("recruitmentStatus", candidate.recruitmentStatus);
+        snapshot.put("recruitmentCheckedAt", iso(candidate.recruitmentCheckedAt));
+        snapshot.put("recruitmentEvidence", candidate.recruitmentEvidence);
+        snapshot.put("verificationStatus", candidate.verificationStatus);
+        snapshot.put("verificationReason", candidate.verificationReason);
+        snapshot.put("verificationEvidence", candidate.verificationEvidence);
+        snapshot.put("verificationCheckedAt", iso(candidate.verificationCheckedAt));
+        snapshot.put("verificationHttpStatus", candidate.verificationHttpStatus);
+        snapshot.put("verificationHistory", candidate.verificationHistory);
+        snapshot.put("searchProviders", candidate.searchProviders);
         snapshot.put("salaryMinMonthlyCents", candidate.salaryMin);
         snapshot.put("salaryMaxMonthlyCents", candidate.salaryMax);
         snapshot.put("salaryText", candidate.salaryText);
@@ -540,8 +705,6 @@ public class JobSearchResultHandler implements TaskResultHandler {
     private void annotate(SearchCandidate candidate) {
         if (candidate.publishedAt == null) {
             candidate.warnings.add("MISSING_PUBLISHED_AT");
-        } else if (candidate.publishedAt.isBefore(LocalDateTime.now(ZoneOffset.UTC).minusDays(90))) {
-            candidate.warnings.add("POSSIBLY_EXPIRED");
         }
         if (candidate.salaryMin == null || candidate.salaryMax == null) {
             candidate.warnings.add("MISSING_SALARY");
@@ -557,6 +720,12 @@ public class JobSearchResultHandler implements TaskResultHandler {
         }
         if (!"VERIFIED".equals(candidate.verification)) {
             candidate.warnings.add("UNVERIFIED_SOURCE");
+        }
+        switch (candidate.verificationStatus) {
+            case "ACTIVE_CONFIRMED" -> candidate.warnings.add("ACTIVE_CONFIRMED");
+            case "ACTIVE_PROBABLE" -> candidate.warnings.add("ACTIVE_PROBABLE");
+            case "CLOSED" -> candidate.warnings.add("CLOSED_JOB");
+            default -> candidate.warnings.add("VERIFICATION_UNKNOWN");
         }
         candidate.warnings = dedupe(candidate.warnings, 20);
     }
@@ -752,6 +921,28 @@ public class JobSearchResultHandler implements TaskResultHandler {
         return text.isEmpty() ? null : text;
     }
 
+    private String firstText(Object primary, Object fallback) {
+        String value = text(primary);
+        return value != null ? value : text(fallback);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> maps(Object value, int limit) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!(value instanceof List<?> list)) {
+            return result;
+        }
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                result.add((Map<String, Object>) map);
+                if (result.size() >= limit) {
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
     private String str(Object value) {
         return value == null ? "" : String.valueOf(value);
     }
@@ -765,6 +956,17 @@ public class JobSearchResultHandler implements TaskResultHandler {
         private String sourceType;
         private String verification;
         private String sourceUrl;
+        private String recruitmentStatus;
+        private String recruitmentEvidence;
+        private LocalDateTime recruitmentCheckedAt;
+        private String verificationStatus = "UNKNOWN";
+        private String verificationReason;
+        private String verificationEvidence;
+        private LocalDateTime verificationCheckedAt;
+        private Integer verificationHttpStatus;
+        private List<Map<String, Object>> verificationHistory = new ArrayList<>();
+        private List<String> searchProviders = new ArrayList<>();
+        private boolean candidateTypeInferred;
         private String title;
         private String companyName;
         private String cityCode;
@@ -806,6 +1008,17 @@ public class JobSearchResultHandler implements TaskResultHandler {
                 this.sourceType = other.sourceType;
                 this.verification = other.verification;
                 this.sourceUrl = other.sourceUrl;
+                this.recruitmentStatus = other.recruitmentStatus;
+                this.recruitmentEvidence = other.recruitmentEvidence;
+                this.recruitmentCheckedAt = other.recruitmentCheckedAt;
+                this.verificationStatus = other.verificationStatus;
+                this.verificationReason = other.verificationReason;
+                this.verificationEvidence = other.verificationEvidence;
+                this.verificationCheckedAt = other.verificationCheckedAt;
+                this.verificationHttpStatus = other.verificationHttpStatus;
+                this.verificationHistory = other.verificationHistory;
+                this.searchProviders = other.searchProviders;
+                this.candidateTypeInferred = other.candidateTypeInferred;
                 this.title = other.title;
                 this.companyName = other.companyName;
                 this.cityCode = other.cityCode;
@@ -857,6 +1070,25 @@ public class JobSearchResultHandler implements TaskResultHandler {
             if (educationMin == null) educationMin = other.educationMin;
             if (publishedAt == null) publishedAt = other.publishedAt;
             if (fetchedAt == null) fetchedAt = other.fetchedAt;
+            if (other.verificationStatus != null
+                    && verificationRank(other.verificationStatus) > verificationRank(verificationStatus)) {
+                verificationStatus = other.verificationStatus;
+                verificationReason = other.verificationReason;
+                verificationEvidence = other.verificationEvidence;
+                verificationCheckedAt = other.verificationCheckedAt;
+                verificationHttpStatus = other.verificationHttpStatus;
+                recruitmentStatus = other.recruitmentStatus;
+                recruitmentEvidence = other.recruitmentEvidence;
+                recruitmentCheckedAt = other.recruitmentCheckedAt;
+            }
+            for (String provider : other.searchProviders) {
+                if (!searchProviders.contains(provider)) {
+                    searchProviders.add(provider);
+                }
+            }
+            if (verificationHistory.isEmpty()) {
+                verificationHistory = other.verificationHistory;
+            }
         }
 
         private SearchCandidate copy() {
@@ -866,6 +1098,17 @@ public class JobSearchResultHandler implements TaskResultHandler {
             copy.sourceType = sourceType;
             copy.verification = verification;
             copy.sourceUrl = sourceUrl;
+            copy.recruitmentStatus = recruitmentStatus;
+            copy.recruitmentEvidence = recruitmentEvidence;
+            copy.recruitmentCheckedAt = recruitmentCheckedAt;
+            copy.verificationStatus = verificationStatus;
+            copy.verificationReason = verificationReason;
+            copy.verificationEvidence = verificationEvidence;
+            copy.verificationCheckedAt = verificationCheckedAt;
+            copy.verificationHttpStatus = verificationHttpStatus;
+            copy.verificationHistory = verificationHistory;
+            copy.searchProviders = searchProviders;
+            copy.candidateTypeInferred = candidateTypeInferred;
             copy.title = title;
             copy.companyName = companyName;
             copy.cityCode = cityCode;

@@ -46,6 +46,23 @@ def _reject_address(address: str) -> None:
         raise UnsafeUrlError("目标地址属于内网或保留地址，已拒绝访问")
 
 
+async def resolve_public_ipv4(host: str) -> str:
+    """Resolve untrusted web destinations once, before connecting to the returned IP."""
+    if "." not in host or host.endswith((".local", ".localhost", ".internal")) or _parse_ip(host):
+        raise UnsafeUrlError("详情来源必须是公网域名")
+    addresses = await asyncio.to_thread(_default_resolver, host)
+    ipv4 = []
+    for address in addresses:
+        ip = _parse_ip(address)
+        if ip is None or not ip.is_global or ip.is_multicast:
+            raise UnsafeUrlError("详情域名包含非公网地址")
+        if isinstance(ip, ipaddress.IPv4Address):
+            ipv4.append(str(ip))
+    if not ipv4:
+        raise UnsafeUrlError("详情域名没有可用的公网 IPv4 地址")
+    return ipv4[0]
+
+
 async def ensure_public_url(
     url: str,
     *,

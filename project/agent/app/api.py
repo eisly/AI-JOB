@@ -18,7 +18,7 @@ from .config import Settings
 from .errors import ApiError, forbidden, not_found, unauthorized, validation_error
 from .files import FileFetcher
 from .llm import LLMClient, create_llm
-from .logging_config import configure_logging
+from .logging_config import configure_logging, log_context, summarize_payload
 from .operations import (
     GROWTH_ANALYZE,
     INTERVIEW_REPORT,
@@ -129,22 +129,43 @@ def create_app(
         trace = request.headers.get(settings.trace_header) or uuid4().hex
         request.state.trace_id = trace
         started = time.monotonic()
-        try:
-            response = await call_next(request)
-        finally:
+        quiet = request.url.path in {"/healthz", "/readyz"} or request.url.path.startswith("/docs")
+        log_at = logging.DEBUG if quiet else logging.INFO
+        client = request.client.host if request.client else "-"
+        with log_context(trace=trace):
+            logger.log(log_at, "--> %s %s client=%s", request.method, request.url.path, client)
+            try:
+                response = await call_next(request)
+            except Exception:
+                elapsed = int((time.monotonic() - started) * 1000)
+                logger.exception(
+                    "!! %s %s failed duration=%sms",
+                    request.method,
+                    request.url.path,
+                    elapsed,
+                )
+                raise
             elapsed = int((time.monotonic() - started) * 1000)
-            logger.info(
-                "%s %s -> completed in %sms trace=%s",
+            logger.log(
+                log_at,
+                "<-- %s %s status=%s duration=%sms",
                 request.method,
                 request.url.path,
+                response.status_code,
                 elapsed,
-                trace,
             )
         response.headers[settings.trace_header] = trace
         return response
 
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
+        logger.warning(
+            "api error status=%s key=%s retryable=%s message=%s",
+            exc.status_code,
+            exc.key,
+            exc.retryable,
+            exc.message,
+        )
         return JSONResponse(status_code=exc.status_code, content=_error_body(exc, _trace_id(request)))
 
     @app.exception_handler(RequestValidationError)
@@ -153,6 +174,7 @@ def create_app(
         for error in exc.errors():
             location = ".".join(str(item) for item in error.get("loc", ()))
             fields.append({"field": location or "body", "message": str(error.get("msg", "invalid"))})
+        logger.warning("request validation failed fields=%s", ",".join(item["field"] for item in fields))
         api = validation_error("参数校验失败", details={"fields": fields})
         return JSONResponse(status_code=400, content=_error_body(api, _trace_id(request)))
 
@@ -167,12 +189,13 @@ def create_app(
         else:
             api = ApiError(exc.status_code, exc.status_code * 100 + 1, str(exc.detail), "HTTP_ERROR")
         api.status_code = exc.status_code
+        logger.warning("http error status=%s detail=%s", exc.status_code, exc.detail)
         return JSONResponse(status_code=exc.status_code, content=_error_body(api, _trace_id(request)))
 
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
         trace = _trace_id(request)
-        logger.error("unhandled error trace=%s type=%s", trace, type(exc).__name__)
+        logger.exception("unhandled error type=%s", type(exc).__name__)
         api = ApiError(500, 50001, "服务内部错误", "INTERNAL_ERROR")
         return JSONResponse(status_code=500, content=_error_body(api, trace))
 
@@ -195,12 +218,30 @@ def create_app(
         principal: Principal,
     ) -> JSONResponse:
         _assert_task(settings, principal, str(body.task_id))
-        record, _created = await service.submit(
-            operation,
-            body,
-            str(idempotency_key),
-            _trace_id(request),
-        )
+        with log_context(
+            trace=_trace_id(request),
+            task=body.task_id,
+            user=body.user_id,
+            op=operation,
+        ):
+            logger.info(
+                "received idempotency=%s deadline=%s payload=%s",
+                idempotency_key,
+                body.deadline_at.isoformat(),
+                summarize_payload(body.payload),
+            )
+            record, _created = await service.submit(
+                operation,
+                body,
+                str(idempotency_key),
+                _trace_id(request),
+            )
+            logger.info(
+                "submitted run=%s created=%s status=%s",
+                record.run_id,
+                _created,
+                record.status,
+            )
         return _result(
             _run_payload(record),
             code=202,
@@ -354,6 +395,13 @@ def create_app(
     ) -> JSONResponse:
         record = await service.get_run(str(run_id))
         _assert_task(settings, principal, record.task_id)
+        with log_context(
+            trace=_trace_id(request),
+            task=record.task_id,
+            run=record.run_id,
+            op=record.operation,
+        ):
+            logger.info("query run status=%s attempt=%s", record.status, record.attempt)
         return _result(_run_payload(record), trace_id=_trace_id(request))
 
     @app.get("/internal/ai/v1/runs")
@@ -364,6 +412,13 @@ def create_app(
     ) -> JSONResponse:
         _assert_task(settings, principal, str(task_id))
         record = await service.get_by_task(str(task_id))
+        with log_context(
+            trace=_trace_id(request),
+            task=record.task_id,
+            run=record.run_id,
+            op=record.operation,
+        ):
+            logger.info("query by task status=%s callback=%s", record.status, record.callback_status)
         return _result(_run_payload(record), trace_id=_trace_id(request))
 
     @app.post("/internal/ai/v1/runs/{run_id}/cancel")
@@ -374,7 +429,14 @@ def create_app(
     ) -> JSONResponse:
         record = await service.get_run(str(run_id))
         _assert_task(settings, principal, record.task_id)
-        updated = await service.cancel(str(run_id))
+        with log_context(
+            trace=_trace_id(request),
+            task=record.task_id,
+            run=record.run_id,
+            op=record.operation,
+        ):
+            updated = await service.cancel(str(run_id))
+            logger.info("cancel result status=%s", updated.status)
         return _result(_run_payload(updated), trace_id=_trace_id(request))
 
     async def event_stream(
@@ -384,22 +446,31 @@ def create_app(
     ) -> AsyncIterator[str]:
         last = max(0, cursor)
         heartbeat_at = time.monotonic()
-        while True:
-            events = await repository.events_after(record.run_id, last)
-            fresh = [item for item in events if item.expires_at > utcnow()]
-            for event in fresh:
-                yield event.as_sse(record.task_id)
-                last = event.seq
-                heartbeat_at = time.monotonic()
-            current = await repository.get(record.run_id)
-            if current is None:
-                return
-            if current.terminal and not fresh:
-                return
-            if time.monotonic() - heartbeat_at >= settings.heartbeat_seconds:
-                yield ": heartbeat\n\n"
-                heartbeat_at = time.monotonic()
-            await asyncio.sleep(settings.event_poll_seconds)
+        with log_context(
+            trace=trace_id,
+            task=record.task_id,
+            run=record.run_id,
+            op=record.operation,
+        ):
+            logger.info("sse opened cursor=%s", cursor)
+            while True:
+                events = await repository.events_after(record.run_id, last)
+                fresh = [item for item in events if item.expires_at > utcnow()]
+                for event in fresh:
+                    yield event.as_sse(record.task_id)
+                    last = event.seq
+                    heartbeat_at = time.monotonic()
+                current = await repository.get(record.run_id)
+                if current is None:
+                    logger.info("sse closed cursor=%s reason=missing", last)
+                    return
+                if current.terminal and not fresh:
+                    logger.info("sse closed cursor=%s reason=terminal", last)
+                    return
+                if time.monotonic() - heartbeat_at >= settings.heartbeat_seconds:
+                    yield ": heartbeat\n\n"
+                    heartbeat_at = time.monotonic()
+                await asyncio.sleep(settings.event_poll_seconds)
 
     @app.get("/internal/ai/v1/runs/{run_id}/events")
     async def run_events(

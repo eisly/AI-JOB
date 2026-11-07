@@ -312,6 +312,7 @@ export interface JobSearchSourceStatusVO {
   durationMs: number
   verification: 'VERIFIED' | 'UNVERIFIED'
   requiresCredentials: boolean
+  verificationCounts?: { queries?: number; discovered?: number; checked?: number; confirmedOpen?: number; closed?: number; unknown?: number }
 }
 
 export interface JobSearchSummaryVO {
@@ -362,6 +363,15 @@ export interface JobSearchItemVO extends MatchItemVO {
   companySize: CompanySize
   publishedAt: string | null
   fetchedAt: string | null
+  recruitmentStatus?: 'OPEN' | 'PROBABLE' | 'CLOSED' | 'UNKNOWN' | null
+  recruitmentCheckedAt?: string | null
+  recruitmentEvidence?: 'OFFICIAL_LIST' | 'DETAIL_APPLY_LINK' | 'DETAIL_TEXT' | 'SEARCH_SNIPPET' | 'OFFICIAL_CLOSED' | 'EXPIRED' | null
+  verificationStatus?: 'ACTIVE_CONFIRMED' | 'ACTIVE_PROBABLE' | 'UNKNOWN' | 'CLOSED' | null
+  verificationReason?: string | null
+  verificationEvidence?: 'OFFICIAL_LIST' | 'DETAIL_APPLY_LINK' | 'DETAIL_TEXT' | 'SEARCH_SNIPPET' | 'OFFICIAL_CLOSED' | 'EXPIRED' | null
+  verificationCheckedAt?: string | null
+  verificationHttpStatus?: number | null
+  searchProviders?: string[]
   minMonthlySalaryCents: number | null
   maxMonthlySalaryCents: number | null
   salaryText: string | null

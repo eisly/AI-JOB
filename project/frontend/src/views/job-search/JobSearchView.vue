@@ -289,11 +289,6 @@ function changeSize(size: number) {
   void loadItems()
 }
 
-function refresh() {
-  void loadSearch()
-  void loadItems()
-}
-
 function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'AVAILABLE') return 'success'
   if (status === 'EMPTY' || status === 'PARTIAL' || status === 'SKIPPED') return 'warning'
@@ -437,7 +432,7 @@ onMounted(async () => {
           <h2>AI 岗位搜索</h2>
           <p class="section-note">关键词、城市与求职类型可调整；未填写时使用求职偏好。公司规模按统一边界筛选。</p>
         </div>
-        <el-button v-if="searchId" :loading="searchLoading || itemsLoading" @click="refresh">刷新结果</el-button>
+        <el-button v-if="searchId" :loading="createSubmitting" :disabled="busying || !profileReady" @click="createSearch">重新搜索</el-button>
       </div>
       <AsyncState :loading="profileLoading" :error="profileError" :empty="false" @retry="loadProfile">
         <template v-if="profile">
@@ -505,6 +500,7 @@ onMounted(async () => {
       <template v-if="search">
         <el-alert v-if="sourceFailed" class="inline-alert" type="error" title="检索服务不可用，请查看来源诊断后重试。" :closable="false" show-icon />
         <el-alert v-else-if="webUnavailable" class="inline-alert" type="warning" title="全网搜索能力受限，页面展示本次仍可用的结果。" :closable="false" show-icon />
+        <el-alert v-else-if="sourceIncomplete" class="inline-alert" type="warning" title="部分来源未完成检索，已找到的相关岗位仍会展示。" :closable="false" show-icon />
         <section class="panel">
           <details>
           <summary class="section-note">来源诊断</summary>
@@ -516,6 +512,14 @@ onMounted(async () => {
               <template #default="scope"><el-tag :type="statusType(scope.row.status)" size="small">{{ sourceStatus(scope.row.status) }}</el-tag></template>
             </el-table-column>
             <el-table-column prop="count" label="返回" width="70" />
+            <el-table-column label="在招核验" min-width="215">
+              <template #default="{ row }">
+                <span v-if="row.verificationCounts && row.verificationCounts.discovered !== undefined">
+                  发现 {{ row.verificationCounts.discovered }}，已确认 {{ row.verificationCounts.confirmedOpen ?? 0 }}，待确认 {{ row.verificationCounts.probable ?? 0 }}，下线 {{ row.verificationCounts.closed ?? 0 }}，未确认 {{ row.verificationCounts.unknown ?? 0 }}
+                </span>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
             <el-table-column label="耗时" width="90">
               <template #default="scope">{{ scope.row.durationMs }} ms</template>
             </el-table-column>
@@ -528,7 +532,6 @@ onMounted(async () => {
             <div><strong>{{ search.summary.rawCount }}</strong><span>原始结果</span></div>
             <div><strong>{{ search.summary.mergedCount }}</strong><span>多来源合并</span></div>
             <div><strong>{{ search.summary.unknownSizeCount }}</strong><span>规模未知</span></div>
-            <div><strong>{{ search.summary.possiblyExpiredCount }}</strong><span>可能过期</span></div>
             <div><strong>{{ search.summary.droppedCount }}</strong><span>丢弃无效条目</span></div>
           </div>
           <p v-if="queryAdjustments.length" class="section-note">
@@ -541,9 +544,9 @@ onMounted(async () => {
           <div class="panel__heading">
             <div>
               <h2>搜索结果</h2>
-              <p class="section-note">先按资格排序，同组按匹配分、来源可信度和发布时间排序。缺失的评分项不参与计算。</p>
+              <p class="section-note">展示符合筛选条件的相关岗位。投递前可查看原页确认最新状态。</p>
             </div>
-            <el-button :loading="itemsLoading" @click="loadItems">刷新结果</el-button>
+            <el-button :loading="createSubmitting" :disabled="busying || !profileReady" @click="createSearch">重新搜索</el-button>
           </div>
           <div class="filter-grid">
             <el-input v-model="itemFilters.keyword" maxlength="100" placeholder="按岗位/公司关键词筛选" clearable />
@@ -562,7 +565,7 @@ onMounted(async () => {
               <el-button @click="resetFilters">重置</el-button>
             </div>
           </div>
-          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" :empty-text="sourceFailed ? '检索失败' : sourceIncomplete ? '部分查询未完成，暂未找到符合条件的岗位' : '没有符合条件的岗位'" :empty-description="sourceFailed ? '请查看来源诊断。' : '可调整筛选条件后重试。'" @retry="loadItems">
+          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" :empty-text="sourceFailed ? '检索失败' : '暂未找到符合条件的相关岗位'" :empty-description="sourceFailed || sourceIncomplete ? '请查看来源诊断。' : '可调整筛选条件后重新搜索。'" @retry="loadItems">
             <div class="search-list">
               <article v-for="item in page.records" :key="item.id" class="search-card">
                 <div class="search-card__heading">
@@ -580,7 +583,10 @@ onMounted(async () => {
                   <el-tag :type="eligibilityType(item.eligibility.status)" size="small">{{ eligibilityLabels[item.eligibility.status] || item.eligibility.status }}</el-tag>
                   <el-tag size="small" effect="plain">{{ item.source?.name || '来源未提供' }}</el-tag>
                   <el-tag :type="item.verification === 'VERIFIED' ? 'success' : 'warning'" size="small">{{ item.verification === 'VERIFIED' ? '来源已核验' : '来源未核验' }}</el-tag>
-                  <el-tag v-if="item.warnings?.includes('POSSIBLY_EXPIRED')" type="danger" size="small">可能过期</el-tag>
+                  <el-tag v-if="item.recruitmentStatus === 'OPEN'" type="success" size="small">已确认在招</el-tag>
+                  <el-tag v-else-if="item.recruitmentStatus === 'PROBABLE'" type="warning" size="small">待确认在招</el-tag>
+                  <el-tag v-else-if="item.recruitmentStatus === 'CLOSED'" type="info" size="small">原文显示已截止或下线</el-tag>
+                  <el-tag v-else type="info" size="small">在招状态未核实</el-tag>
                   <el-tag v-if="item.warnings?.includes('COMPANY_SIZE_UNKNOWN')" type="info" size="small">规模未知</el-tag>
                   <el-tag v-if="(item.aliases?.length || 0) > 1" type="success" size="small">多来源 {{ item.aliases.length }}</el-tag>
                 </div>
@@ -591,7 +597,9 @@ onMounted(async () => {
                   <el-descriptions-item label="学历">{{ education(item) }}</el-descriptions-item>
                   <el-descriptions-item label="公司规模">{{ sizeLabel(item) }}</el-descriptions-item>
                   <el-descriptions-item label="发布时间">{{ formatDate(item.publishedAt) }}</el-descriptions-item>
-                  <el-descriptions-item label="抓取时间">{{ formatDate(item.fetchedAt) }}</el-descriptions-item>
+                  <el-descriptions-item v-if="item.recruitmentCheckedAt" label="在招核验时间">{{ formatDate(item.recruitmentCheckedAt) }}</el-descriptions-item>
+                  <el-descriptions-item v-if="item.verificationReason" label="核验结论">{{ item.verificationReason }}</el-descriptions-item>
+                  <el-descriptions-item v-if="item.searchProviders?.length" label="搜索引擎">{{ item.searchProviders.join(' / ') }}</el-descriptions-item>
                 </el-descriptions>
 
                 <div v-if="item.warnings?.length" class="warning-list">
@@ -648,7 +656,7 @@ onMounted(async () => {
                     <el-icon><StarFilled v-if="item.isFavorite" /><Star v-else /></el-icon>
                     {{ item.isFavorite ? '取消收藏' : '收藏岗位' }}
                   </el-button>
-                  <el-button plain type="primary" :disabled="!safeUrl(item.sourceUrl)" @click="openSource(item.sourceUrl)">前往投递</el-button>
+                  <el-button plain type="primary" :disabled="!safeUrl(item.sourceUrl)" @click="openSource(item.sourceUrl)">{{ item.recruitmentStatus === 'OPEN' ? '前往投递' : '查看原页' }}</el-button>
                   <el-button @click="emit('plan', item)">添加投递计划</el-button>
                   <el-button @click="openMatchBatch(item)">在匹配结果中继续（训练/面试）</el-button>
                 </div>

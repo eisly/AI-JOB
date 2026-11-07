@@ -28,7 +28,8 @@ import com.aijob.backend.task.TaskService;
 public class JobSearchService {
 
     private static final Set<String> CANDIDATE_TYPES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
-    private static final Set<String> SOURCE_KEYS = Set.of("web", "tencent", "greenhouse", "liepin", "boss", "zhaopin");
+    private static final Set<String> SOURCE_KEYS = Set.of("web", "baidu", "tencent", "greenhouse", "lever",
+            "liepin", "boss", "zhaopin");
 
     private final JobSearchMapper mapper;
     private final JobMapper jobs;
@@ -45,7 +46,7 @@ public class JobSearchService {
 
     public JobSearchService(JobSearchMapper mapper, JobMapper jobs, ProfileService profiles, ResumeMapper resumes,
                             TaskService tasks, JsonService json, ApiView view,
-                            @Value("${app.job-search.sources:web,tencent,greenhouse}") String configuredSources,
+                            @Value("${app.job-search.sources:web,baidu,tencent,greenhouse}") String configuredSources,
                             @Value("${app.job-search.per-source:20}") int perSource,
                             @Value("${app.job-search.max-total:60}") int maxTotal,
                             @Value("${app.job-search.concurrency:4}") int concurrency,
@@ -248,6 +249,9 @@ public class JobSearchService {
                 row.get("job_company_size") == null ? null : String.valueOf(row.get("job_company_size"))));
         result.put("publishedAt", view.value(row.get("published_at")));
         result.put("fetchedAt", view.value(row.get("fetched_at")));
+        result.put("recruitmentStatus", snapshot.get("recruitmentStatus"));
+        result.put("recruitmentCheckedAt", snapshot.get("recruitmentCheckedAt"));
+        result.put("recruitmentEvidence", snapshot.get("recruitmentEvidence"));
         result.put("minMonthlySalaryCents", first(row.get("min_monthly_salary_cents"), snapshot.get("salaryMinMonthlyCents")));
         result.put("maxMonthlySalaryCents", first(row.get("max_monthly_salary_cents"), snapshot.get("salaryMaxMonthlyCents")));
         result.put("salaryText", snapshot.get("salaryText"));
@@ -327,7 +331,7 @@ public class JobSearchService {
             }
         }
         if (configured.isEmpty()) {
-            configured.addAll(List.of("web", "tencent", "greenhouse"));
+            configured.addAll(List.of("web", "baidu", "tencent", "greenhouse"));
         }
         List<Object> raw = Data.list(body, "sources", false, 10);
         if (raw.isEmpty()) {

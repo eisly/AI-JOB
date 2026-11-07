@@ -68,6 +68,69 @@ CITY_CODES = {
     "武汉": "420100",
     "武汉市": "420100",
     "wuhan": "420100",
+    "东莞": "441900",
+    "东莞市": "441900",
+    "dongguan": "441900",
+    "佛山": "440600",
+    "佛山市": "440600",
+    "foshan": "440600",
+    "珠海": "440400",
+    "珠海市": "440400",
+    "zhuhai": "440400",
+    "苏州": "320500",
+    "苏州市": "320500",
+    "suzhou": "320500",
+    "西安": "610100",
+    "西安市": "610100",
+    "xian": "610100",
+    "长沙": "430100",
+    "长沙市": "430100",
+    "changsha": "430100",
+    "合肥": "340100",
+    "合肥市": "340100",
+    "hefei": "340100",
+    "厦门": "350200",
+    "厦门市": "350200",
+    "xiamen": "350200",
+    "天津": "120100",
+    "天津市": "120100",
+    "tianjin": "120100",
+    "重庆": "500100",
+    "重庆市": "500100",
+    "chongqing": "500100",
+    "大连": "210200",
+    "大连市": "210200",
+    "dalian": "210200",
+    "沈阳": "210100",
+    "沈阳市": "210100",
+    "shenyang": "210100",
+    "青岛": "370200",
+    "青岛市": "370200",
+    "qingdao": "370200",
+    "济南": "370100",
+    "济南市": "370100",
+    "jinan": "370100",
+    "郑州": "410100",
+    "郑州市": "410100",
+    "zhengzhou": "410100",
+    "宁波": "330200",
+    "宁波市": "330200",
+    "ningbo": "330200",
+    "无锡": "320200",
+    "无锡市": "320200",
+    "wuxi": "320200",
+    "福州": "350100",
+    "福州市": "350100",
+    "fuzhou": "350100",
+    "昆明": "530100",
+    "昆明市": "530100",
+    "kunming": "530100",
+    "长春": "220100",
+    "长春市": "220100",
+    "changchun": "220100",
+    "哈尔滨": "230100",
+    "哈尔滨市": "230100",
+    "harbin": "230100",
 }
 ROLE_KEYWORDS = {
     "JAVA_BACKEND": "Java 后端",
@@ -81,6 +144,30 @@ ROLE_KEYWORDS = {
     "DATA": "数据工程师",
 }
 SOURCE_STATUSES = ("AVAILABLE", "EMPTY", "PARTIAL", "FAILED", "UNAVAILABLE", "SKIPPED")
+VERIFICATION_STATUSES = ("ACTIVE_CONFIRMED", "ACTIVE_PROBABLE", "UNKNOWN", "CLOSED")
+VERIFICATION_REASONS = (
+    "PAGE_ACCESS_FAILED",
+    "HTTP_403",
+    "HTTP_404",
+    "TIMEOUT",
+    "DETAIL_NOT_FOUND",
+    "APPLY_LINK_MISSING",
+    "OFFICIAL_CLOSED",
+    "EXPIRED",
+    "INSUFFICIENT_EVIDENCE",
+    "ACTIVE_EVIDENCE_FOUND",
+)
+ROLE_CATEGORIES = {
+    "JAVA_BACKEND": "Java 后端",
+    "AI_APPLICATION_DEVELOPER": "AI 应用开发",
+    "AI_AGENT_DEVELOPER": "AI Agent 开发",
+    "LLM_APPLICATION_DEVELOPER": "大模型应用开发",
+    "RAG_APPLICATION_DEVELOPER": "RAG 开发",
+    "FRONTEND": "前端开发",
+    "ALGORITHM": "算法工程师",
+    "TEST": "测试工程师",
+    "DATA": "数据工程师",
+}
 
 
 @dataclass(frozen=True)
@@ -116,6 +203,17 @@ class SourcePosting:
     published_at: datetime | None = None
     fetched_at: datetime = field(default_factory=datetime.utcnow)
     verification: str = "UNVERIFIED"
+    verification_status: str = "UNKNOWN"
+    verification_reason: str | None = None
+    verification_evidence: str | None = None
+    verification_checked_at: datetime | None = None
+    verification_source_url: str | None = None
+    verification_http_status: int | None = None
+    verification_history: list[dict[str, Any]] = field(default_factory=list)
+    recruitment_evidence: str | None = None
+    recruitment_status: str = "UNKNOWN"
+    search_providers: list[str] = field(default_factory=list)
+    query: str | None = None
     warnings: list[str] = field(default_factory=list)
     aliases: list[dict[str, Any]] = field(default_factory=list)
     requirements: dict[str, Any] | None = None
@@ -126,6 +224,14 @@ class SourcePosting:
     @property
     def fingerprint(self) -> str:
         return posting_fingerprint(self.company_name, self.title, self.city_code or self.city_name or "")
+
+    @property
+    def is_closed(self) -> bool:
+        return self.verification_status == "CLOSED" or self.recruitment_status == "CLOSED"
+
+    @property
+    def is_confirmed_active(self) -> bool:
+        return self.verification_status == "ACTIVE_CONFIRMED"
 
 
 @dataclass
@@ -140,6 +246,8 @@ class SourceResult:
     duration_ms: int = 0
     verification: str = "UNVERIFIED"
     requires_credentials: bool = False
+    verification_counts: dict[str, int] = field(default_factory=dict)
+    providers: list[str] = field(default_factory=list)
 
     def as_status(self) -> dict[str, Any]:
         return {
@@ -152,6 +260,8 @@ class SourceResult:
             "durationMs": self.duration_ms,
             "verification": self.verification,
             "requiresCredentials": self.requires_credentials,
+            "verificationCounts": self.verification_counts,
+            "providers": self.providers,
         }
 
 
@@ -295,11 +405,11 @@ def city_code_for(value: str | None) -> str | None:
 
 def infer_candidate_type(*texts: str | None) -> tuple[str, bool]:
     text = " ".join(item for item in texts if item)
-    if re.search(r"(实习|intern|internship)", text, re.IGNORECASE):
+    if re.search(r"(实习|(?<![a-z])intern(?:ship)?(?![a-z]))", text, re.IGNORECASE):
         return "INTERNSHIP", True
-    if re.search(r"(校招|校园招聘|应届|campus|graduate)", text, re.IGNORECASE):
+    if re.search(r"(校招|校园招聘|应届|(?<![a-z])campus(?![a-z])|(?<![a-z])graduate(?![a-z]))", text, re.IGNORECASE):
         return "CAMPUS", True
-    if re.search(r"(社招|experienced|三年以上|3年以上|五年以上|5年以上|工作经验)", text, re.IGNORECASE):
+    if re.search(r"(社招|(?<![a-z])experienced(?![a-z])|三年以上|3年以上|五年以上|5年以上|工作经验)", text, re.IGNORECASE):
         return "EXPERIENCED", True
     return "EXPERIENCED", False
 

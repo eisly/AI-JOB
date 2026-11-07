@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -81,6 +82,8 @@ from .schemas import (
     TurnModelOutput,
     TurnQuestion,
 )
+
+logger = logging.getLogger("agent.handler")
 
 FIXED_RUBRIC_WEIGHTS: dict[str, float] = {
     "correctness": 0.5,
@@ -190,6 +193,14 @@ class BaseHandler:
         await ctx.emit_stage("input_ready", 15)
         payload_dict = ctx.payload.model_dump(by_alias=True, mode="json")
         system, user_prompt, schema_hint = build_prompt(self.operation, payload_dict, prepared)
+        logger.info(
+            "prompt ready prompt_version=%s system_chars=%s user_chars=%s schema_chars=%s prepared=%s",
+            skill.version,
+            len(system),
+            len(user_prompt),
+            len(schema_hint),
+            ",".join(sorted(prepared)) or "-",
+        )
         context = {"payload": payload_dict, **prepared}
         repair_note = ""
         last_error = ""
@@ -202,9 +213,16 @@ class BaseHandler:
                 schema_hint=schema_hint,
                 context=context,
             )
+            logger.info("model call attempt=%s user_chars=%s", attempt + 1, len(request.user_prompt))
             try:
                 response = await ctx.llm.complete(request)
             except LLMProviderError as exc:
+                logger.error(
+                    "model provider error attempt=%s retryable=%s message=%s",
+                    attempt + 1,
+                    exc.retryable,
+                    exc.message,
+                )
                 raise HandlerError("MODEL_PROVIDER_ERROR", exc.message, retryable=exc.retryable) from exc
             meta = {
                 "provider": getattr(ctx.llm, "name", "unknown"),
@@ -216,11 +234,21 @@ class BaseHandler:
                 "attempts": attempt + 1,
                 "operation": self.operation,
             }
+            logger.info(
+                "model response attempt=%s model=%s latency_ms=%s tokens=%s/%s chars=%s",
+                attempt + 1,
+                meta["model"],
+                response.latency_ms,
+                response.input_tokens,
+                response.output_tokens,
+                len(response.text),
+            )
             try:
                 data = skill.parse_output(response.text)
                 output = self.output_model.model_validate(data)
             except (ValueError, ValidationError) as exc:
                 last_error = _format_validation_error(exc)
+                logger.warning("model output invalid attempt=%s error=%s", attempt + 1, last_error)
                 repair_note = "\n\n" + build_repair_prompt(
                     "结构与 JSON",
                     last_error,
@@ -233,6 +261,7 @@ class BaseHandler:
                 result = self.validate_business(ctx, output, prepared, meta)
             except HandlerValidationError as exc:
                 last_error = exc.message
+                logger.warning("business validation failed attempt=%s error=%s", attempt + 1, last_error)
                 repair_note = "\n\n" + build_repair_prompt(
                     "业务规则",
                     last_error,
@@ -242,6 +271,7 @@ class BaseHandler:
                 continue
 
             await ctx.emit_stage("validating_result", 90)
+            logger.info("result ready attempts=%s", attempt + 1)
             return result.model_dump(by_alias=True, mode="json"), meta
 
         raise HandlerError("MODEL_OUTPUT_INVALID", f"模型输出未通过校验: {last_error}", retryable=True)

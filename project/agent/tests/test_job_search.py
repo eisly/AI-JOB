@@ -45,6 +45,7 @@ def posting(**overrides: Any) -> SourcePosting:
         "published_at": datetime(2026, 11, 2, tzinfo=timezone.utc),
         "fetched_at": datetime(2026, 11, 6, tzinfo=timezone.utc),
         "verification": "VERIFIED",
+        "recruitment_evidence": "OFFICIAL_LIST",
     }
     values.update(overrides)
     return SourcePosting(**values)
@@ -263,11 +264,12 @@ async def test_pipeline_adjusts_query_when_empty(monkeypatch: pytest.MonkeyPatch
     run = runtime(SynonymLLM(), {"cities": ["440300", "310100"], "includeUnknownSize": False})
     run.settings.tavily_api_key = "test"
     result = await JobSearchPipeline(run).run()
-    assert adapter.calls == 2
+    assert adapter.calls >= 2
     assert adapter.contexts[0].filters == adapter.contexts[1].filters
     assert adapter.contexts[1].keyword == "Java 服务端"
     assert result["queryPlan"]["cities"] == ["440300", "310100"]
-    assert any("原筛选范围" in item for item in result["queryPlan"]["adjustments"])
+    assert result["queryPlan"]["expansions"][0] == "Java 后端"
+    assert result["queryPlan"]["adjustments"]
     assert "QUERY_ADJUSTED" in result["warnings"]
     assert len(result["items"]) == 1
 
@@ -360,3 +362,65 @@ def test_official_supplement_requires_relevant_job_title_for_java_backend() -> N
     assert _keyword_relevant(posting(title="Java 开发工程师"), "Java 后端")
     assert _keyword_relevant(posting(title="服务端研发工程师", jd_text="负责 Java 服务研发"), "Java 后端")
     assert not _keyword_relevant(posting(title="前端开发工程师", jd_text="对接 Java 后端团队"), "Java 后端")
+    assert _keyword_relevant(posting(title="后端开发工程师", jd_text="熟练掌握Java、Go等至少一门语言"), "Java后端")
+    assert not _keyword_relevant(posting(title="后端开发工程师", jd_text="使用JavaScript开发接口"), "Java后端")
+
+def test_official_keyword_relevance_accepts_expanded_variants() -> None:
+    assert _keyword_relevant(
+        posting(title="智能体应用开发实习生", jd_text="负责智能体应用开发与评测"), "AI Agent 开发实习"
+    )
+    assert _keyword_relevant(
+        posting(title="AI 应用开发实习生", jd_text="负责大模型应用开发"), "AI Agent 开发实习"
+    )
+    assert not _keyword_relevant(
+        posting(title="研究助理", jd_text="参与 AI Agent 应用开发课题"), "AI Agent 开发实习"
+    )
+    assert not _keyword_relevant(
+        posting(title="产品经理（AI 方向）", jd_text="负责 AI Agent 产品规划"), "AI Agent 开发实习"
+    )
+
+
+def test_extraction_prompt_is_markdown_backed() -> None:
+    from app.search.sources.web import extraction_system_prompt
+
+    prompt = extraction_system_prompt()
+    assert "研究助理" in prompt
+    assert "pageIndex" in prompt
+    assert "软件研发岗位" in prompt
+    assert "JSON" in prompt
+
+
+def test_non_development_official_postings_are_rejected() -> None:
+    assert not _keyword_relevant(
+        posting(title="Account Executive, AI Sales", jd_text="Sell AI products to enterprise customers"),
+        "AI Agent 开发实习",
+    )
+    assert not _keyword_relevant(
+        posting(title="Abuse Investigator", jd_text="Investigate abuse cases with machine learning tooling"),
+        "AI Agent 开发实习",
+    )
+    assert not _keyword_relevant(
+        posting(title="法务专员", jd_text="负责合同审核，了解 AI Agent 产品"), "AI Agent 开发实习"
+    )
+
+
+def test_intern_keyword_does_not_match_internal() -> None:
+    from app.search.models import infer_candidate_type
+
+    assert infer_candidate_type("Backend Engineer", "work on internal systems")[0] == "EXPERIENCED"
+    assert infer_candidate_type("Software Engineer Intern")[0] == "INTERNSHIP"
+    assert infer_candidate_type("Backend Engineer", "international team")[0] == "EXPERIENCED"
+
+
+def test_foreign_city_is_filtered_when_china_city_selected() -> None:
+    from app.search.sources.base import filter_postings
+
+    foreign = posting(city_name="San Francisco, CA", city_code=None)
+    other_city = posting(city_name="大连市", city_code=None)
+    missing = posting(city_name=None, city_code=None)
+    filters = SearchFilters(cities=("440300",))
+    assert filter_postings([foreign], filters) == []
+    assert filter_postings([other_city], filters) == []
+    kept = filter_postings([missing], filters)
+    assert len(kept) == 1
+    assert "CITY_UNKNOWN" in kept[0].warnings

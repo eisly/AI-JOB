@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -69,22 +70,69 @@ class SourceAdapter:
         )
 
 
-def filter_postings(postings: list[SourcePosting], filters: SearchFilters) -> list[SourcePosting]:
+FOREIGN_LOCATION = re.compile(r"[A-Za-z]")
+HAN = re.compile(r"[\u4e00-\u9fff]")
+CHINA_CITY_SUFFIX = re.compile(r"(市|地区|自治州|特别行政区)$")
+
+
+def is_foreign_location(city_name: str | None) -> bool:
+    """在选择中国城市时，纯英文且无法映射为城市码的地点视为境外岗位。"""
+    text = str(city_name or "").strip()
+    return bool(text) and bool(FOREIGN_LOCATION.search(text)) and not bool(HAN.search(text))
+
+
+def is_other_china_city(city_name: str | None) -> bool:
+    """中文城市名明确指向其他中国城市时，视为“城市明确不符合”。"""
+    text = str(city_name or "").strip()
+    return bool(text) and bool(HAN.search(text)) and bool(CHINA_CITY_SUFFIX.search(text))
+
+
+def partition_postings(postings: list[SourcePosting], filters: SearchFilters) -> tuple[list[SourcePosting], dict[str, int]]:
+    """按用户硬条件分流，并记录每一类淘汰原因，便于定位漏斗丢失点。"""
     from ..models import company_size_matches
 
     selected_cities = set(filters.cities)
     selected_types = set(filters.candidate_types)
     selected_sizes = tuple(filters.company_sizes)
+    stats = {
+        "input": len(postings),
+        "kept": 0,
+        "rejectedCity": 0,
+        "rejectedType": 0,
+        "rejectedSize": 0,
+        "unknownCity": 0,
+        "unknownType": 0,
+    }
     result: list[SourcePosting] = []
     for posting in postings:
-        if selected_cities and posting.city_code not in selected_cities:
+        # 只有“明确不符合”才淘汰；字段缺失属于未知，保留给 Java 端标记与排序。
+        if selected_cities and posting.city_code and posting.city_code not in selected_cities:
+            stats["rejectedCity"] += 1
             continue
-        if selected_types and posting.candidate_type not in selected_types:
+        if selected_cities and not posting.city_code and (
+            is_foreign_location(posting.city_name) or is_other_china_city(posting.city_name)
+        ):
+            stats["rejectedCity"] += 1
+            continue
+        if selected_types and posting.candidate_type and posting.candidate_type not in selected_types:
+            stats["rejectedType"] += 1
             continue
         if not company_size_matches(posting.company_size or "SIZE_UNKNOWN", selected_sizes, filters.include_unknown_size):
+            stats["rejectedSize"] += 1
             continue
+        if selected_cities and not posting.city_code:
+            posting.warnings.append("CITY_UNKNOWN")
+            stats["unknownCity"] += 1
+        if selected_types and not posting.candidate_type:
+            posting.warnings.append("CANDIDATE_TYPE_UNKNOWN")
+            stats["unknownType"] += 1
         result.append(posting)
-    return result
+    stats["kept"] = len(result)
+    return result, stats
+
+
+def filter_postings(postings: list[SourcePosting], filters: SearchFilters) -> list[SourcePosting]:
+    return partition_postings(postings, filters)[0]
 
 
 def query_terms(keyword: str) -> list[str]:

@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from .base import SourceAdapter
+from .baidu import BaiduCareerSource
 from .greenhouse import GreenhouseSource
+from .lever import LeverSource
 from .tencent import TencentCareerSource
 from .unavailable import BossZhipinSource, LiepinSource, ZhaopinSource
 from .web import WebSearchSource
@@ -11,13 +13,15 @@ from .web import WebSearchSource
 ALL_SOURCES: dict[str, SourceAdapter] = {
     "web": WebSearchSource(),
     "tencent": TencentCareerSource(),
+    "baidu": BaiduCareerSource(),
     "greenhouse": GreenhouseSource(),
+    "lever": LeverSource(),
     "liepin": LiepinSource(),
     "boss": BossZhipinSource(),
     "zhaopin": ZhaopinSource(),
 }
 
-DEFAULT_SOURCE_KEYS = ("web", "tencent", "greenhouse")
+DEFAULT_SOURCE_KEYS = ("web", "baidu", "tencent", "greenhouse")
 
 
 def configured_source_keys(settings: Any) -> list[str]:

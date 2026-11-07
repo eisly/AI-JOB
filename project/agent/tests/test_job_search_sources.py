@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from app.search.models import SearchFilters
+from app.search.sources.baidu import BaiduCareerSource
 from app.search.sources.base import SourceContext
 from app.search.sources.greenhouse import GreenhouseSource
 from app.search.sources.tencent import TencentCareerSource
@@ -13,6 +16,7 @@ from app.search.sources.unavailable import BossZhipinSource, LiepinSource, Zhaop
 
 
 def context(client: httpx.AsyncClient, **filters: object) -> SourceContext:
+    keyword = str(filters.pop("keyword", "Java"))
     values = {
         "cities": ("440300",),
         "candidate_types": ("EXPERIENCED",),
@@ -22,7 +26,7 @@ def context(client: httpx.AsyncClient, **filters: object) -> SourceContext:
     values.update(filters)
     return SourceContext(
         filters=SearchFilters(**values),
-        keyword=str(filters.pop("keyword", "Java")),
+        keyword=keyword,
         limit=10,
         client=client,
         settings=SimpleNamespace(job_search_greenhouse_boards="stripe:Stripe"),
@@ -38,6 +42,7 @@ async def test_tencent_official_payload_is_parsed(monkeypatch: pytest.MonkeyPatc
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
+            "Code": 200,
             "Data": {
                 "Posts": [
                     {
@@ -46,6 +51,7 @@ async def test_tencent_official_payload_is_parsed(monkeypatch: pytest.MonkeyPatc
                         "ComName": "腾讯云智研发子公司",
                         "Responsibility": "负责 Java 后端开发，三年以上工作经验。",
                         "PostURL": "https://careers.tencent.com/jobdesc.html?postId=1",
+                        "PostId": "1",
                         "LastUpdateTime": "2026年11月02日",
                         "RequireWorkYearsName": "三年以上工作经验",
                     }
@@ -78,11 +84,12 @@ async def test_tencent_city_filter_keeps_empty_result(monkeypatch: pytest.Monkey
     monkeypatch.setattr("app.search.sources.tencent.ensure_public_url", allow)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"Data": {"Posts": [{
+        return httpx.Response(200, json={"Code": 200, "Data": {"Posts": [{
             "RecruitPostName": "Java 后端",
             "LocationName": "北京",
             "Responsibility": "负责 Java 后端开发，三年以上经验。",
             "PostURL": "https://careers.tencent.com/jobdesc.html?postId=2",
+            "PostId": "2",
             "LastUpdateTime": "2026年11月02日",
             "RequireWorkYearsName": "三年以上工作经验",
         }]}})
@@ -102,6 +109,7 @@ async def test_greenhouse_payload_is_parsed(monkeypatch: pytest.MonkeyPatch) -> 
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"jobs": [{
+            "id": 1,
             "title": "Backend Engineer",
             "absolute_url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/1",
             "content": "<p>Java and Spring Boot. 3+ years of experience.</p>",
@@ -121,6 +129,30 @@ async def test_greenhouse_payload_is_parsed(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_baidu_checks_requested_list_and_dedupes_multi_city_posting(monkeypatch) -> None:
+    async def allow(url, **kwargs):
+        return url
+
+    monkeypatch.setattr("app.search.sources.baidu.ensure_public_url", allow)
+    job = {"postId": "e3cec5b8-b7a3-4946-99fc-b292b749cd53", "name": "智能体应用开发实习生",
+           "workPlace": "北京市,上海市", "workContent": "负责智能体应用开发"}
+
+    def handle(request):
+        keyword = request.url.params["search"]
+        data = {"listData": {"keyWord": keyword, "recruitType": "INTERN" if keyword == "AI 应用开发" else "SOCIAL",
+                             "listDetailData": [job], "total": 1}}
+        return httpx.Response(200, text=f"<script>window.__INITIAL_DATA__ = {json.dumps(data)}</script>")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        result = await BaiduCareerSource().search(context(client, keyword="AI 应用开发", cities=("110100", "310100"),
+                                                          candidate_types=("INTERNSHIP",)))
+    assert result.status == "PARTIAL"
+    assert len(result.postings) == 1
+    assert result.postings[0].recruitment_evidence == "OFFICIAL_LIST"
+    assert result.postings[0].candidate_type == "INTERNSHIP"
+
+
+@pytest.mark.asyncio
 async def test_unavailable_adapters_do_not_pretend_to_be_connected() -> None:
     for adapter in (BossZhipinSource(), ZhaopinSource(), LiepinSource()):
         result = await adapter.search(context(None))  # type: ignore[arg-type]
@@ -130,26 +162,25 @@ async def test_unavailable_adapters_do_not_pretend_to_be_connected() -> None:
         assert result.postings == []
 
 @pytest.mark.asyncio
-async def test_web_search_uses_provider_evidence_and_filters() -> None:
-    import json
-    from types import SimpleNamespace
-
+async def test_web_search_keeps_relevant_results_independent_of_recruitment_status() -> None:
     from app.llm import LLMResponse
     from app.search.sources.web import WebSearchSource
 
     jd = "岗位职责：开发企业知识库问答与检索增强生成服务，维护模型接入、评测和数据处理流程。"
     cities = ["杭州", "上海", "深圳", "北京", "上海"]
-    urls = [f"https://careers.example.com/job/{index}" for index in range(len(cities))]
+    urls = [f"https://careers.example.com/company/{index}" for index in range(len(cities))]
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.tavily.com"
-        query = json.loads(request.content)["query"]
-        assert all(value in query for value in ("AI 应用开发", "实习", "100-499人"))
+        payload = json.loads(request.content)
+        assert "include_domains" not in payload
+        query = payload["query"]
+        assert "实习" in query
         assert ("杭州" in query) != ("上海" in query)
         return httpx.Response(200, json={"results": [
             {
                 "url": url, "title": "AI 应用开发实习生",
-                "raw_content": f"示例公司 {city} 实习 100-499人 {jd}" + (" [已结束](#)" if index == 4 else ""),
+                "raw_content": f"示例公司 {city} 实习 100-499人 {jd}" + (" 当前职位已下线" if index == 4 else ""),
             }
             for index, (url, city) in enumerate(zip(urls, cities))
         ]})
@@ -168,13 +199,100 @@ async def test_web_search_uses_provider_evidence_and_filters() -> None:
             filters=SearchFilters(cities=("330100", "310100"), candidate_types=("INTERNSHIP",),
                                   company_sizes=("SIZE_100_499",), include_unknown_size=False),
             keyword="AI 应用开发", limit=10, client=client,
-            settings=SimpleNamespace(tavily_api_key="test"),
+            settings=SimpleNamespace(tavily_api_key="test", job_search_detail_verification=False),
             extra={"llm": ExtractionLLM()},
         )
         result = await WebSearchSource().search(context)
         assert result.status == "AVAILABLE"
-        assert [posting.source_url for posting in result.postings] == [urls[1]]
+        # 索引 3 的城市字段与页面不一致，按“缺失不淘汰”保留并标记未知。
+        assert [posting.source_url for posting in result.postings] == [urls[1], urls[3], urls[4]]
         assert result.postings[0].verification == "UNVERIFIED"
+        assert [posting.recruitment_status for posting in result.postings] == ["UNKNOWN", "UNKNOWN", "CLOSED"]
+        assert [posting.verification_status for posting in result.postings] == ["UNKNOWN", "UNKNOWN", "CLOSED"]
+        assert result.postings[1].warnings and "CITY_UNKNOWN" in result.postings[1].warnings
+        assert result.postings[0].recruitment_evidence is None
+        assert result.postings[1].recruitment_evidence is None
+        assert result.postings[2].recruitment_evidence == "OFFICIAL_CLOSED"
+        assert result.verification_counts["closed"] == 1
+        assert result.verification_counts["discovered"] == 5
+
+
+def _detail_html(url: str, *, extra: str = "", deadline: str = "", link: str = "") -> str:
+    job = {"@type": "JobPosting", "title": "AI 应用开发实习生", "url": url, "validThrough": deadline}
+    return (f'<script type="application/ld+json">{json.dumps(job)}</script>'
+            f'<h1>AI 应用开发实习生</h1><p>{extra}</p><a href="{link or url + "/apply"}">立即申请</a>')
+
+
+@pytest.mark.parametrize(("extra", "deadline", "link", "expected_status", "expected_reason"), [
+    ("", "", "", "ACTIVE_PROBABLE", "ACTIVE_EVIDENCE_FOUND"),
+    ("该岗位已经下线", "", "", "CLOSED", "OFFICIAL_CLOSED"),
+    ("", "2025-03-01", "", "CLOSED", "EXPIRED"),
+    ("", "", "/login", "ACTIVE_PROBABLE", "APPLY_LINK_MISSING"),
+    ("", "", "/company/999/apply", "ACTIVE_PROBABLE", "APPLY_LINK_MISSING"),
+])
+def test_detail_status_requires_job_specific_evidence(extra, deadline, link, expected_status, expected_reason) -> None:
+    from app.search.sources.detail import read_detail_result
+
+    url = "https://jobs.lever.co/company/123"
+    html = _detail_html(url, extra=extra, deadline=deadline, link=link)
+    result = read_detail_result(url, html, datetime(2026, 11, 6, tzinfo=timezone.utc))
+    assert (result.status, result.reason) == (expected_status, expected_reason)
+
+
+def test_detail_accepts_job_specific_application_routes_on_other_sites() -> None:
+    from app.search.sources.detail import read_detail_result
+
+    url = "https://careers.example.com/detail?jobId=123"
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    valid = read_detail_result(url, _detail_html(url, link="/apply?jobId=123"), now)
+    assert (valid.status, valid.reason, valid.apply_link) == ("ACTIVE_PROBABLE", "ACTIVE_EVIDENCE_FOUND", True)
+    mismatched = read_detail_result(url, _detail_html(url, link="/apply?jobId=999"), now)
+    assert (mismatched.status, mismatched.reason) == ("ACTIVE_PROBABLE", "APPLY_LINK_MISSING")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("response", "expected", "reason"), [
+    (httpx.Response(404), "UNKNOWN", "HTTP_404"),
+    (httpx.Response(410), "UNKNOWN", "HTTP_404"),
+    (httpx.Response(302, headers={"Location": "/company"}), "UNKNOWN", "PAGE_ACCESS_FAILED"),
+    (httpx.Response(403), "UNKNOWN", "HTTP_403"),
+    (httpx.Response(401), "UNKNOWN", "HTTP_403"),
+    (httpx.ReadTimeout("timeout"), "UNKNOWN", "TIMEOUT"),
+])
+async def test_detail_network_failures_are_not_closed(monkeypatch, response, expected, reason) -> None:
+    from app.search.sources.detail import fetch_detail
+
+    async def resolve(_host):
+        return "93.184.216.34"
+
+    def handle(_):
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr("app.search.sources.detail.resolve_public_ipv4", resolve)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        result = await fetch_detail(client, "https://jobs.lever.co/company/123", 1)
+        assert (result.status, result.reason) == (expected, reason)
+
+
+@pytest.mark.asyncio
+async def test_detail_blocks_redirect_to_internal_ip_before_connecting(monkeypatch) -> None:
+    from app.search.sources.detail import fetch_detail
+
+    monkeypatch.setattr("app.search.security._default_resolver", lambda host: [
+        "93.184.216.34" if host == "careers.example.com" else "127.0.0.1",
+    ])
+    seen = []
+
+    def handle(request):
+        seen.append(request.headers["host"])
+        return httpx.Response(302, headers={"Location": "https://redirect.example.com/company/123"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        result = await fetch_detail(client, "https://careers.example.com/company/123", 1)
+        assert (result.status, result.reason) == ("UNKNOWN", "PAGE_ACCESS_FAILED")
+    assert seen == ["careers.example.com"]
 
 
 @pytest.mark.asyncio

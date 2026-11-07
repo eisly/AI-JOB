@@ -1,0 +1,813 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "now": "2026-11-06T16:15:14.002154+00:00",
+  "sourceStatus": [
+    {
+      "key": "web",
+      "name": "AI 全网搜索",
+      "status": "PARTIAL",
+      "count": 0,
+      "message": "引擎 tavily 发现 66 个链接（31 个域名），分析 20 页，筛选后 0 个岗位；4 个解析批次失败",
+      "httpStatus": null,
+      "durationMs": 7093,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 8,
+        "providerCount": 1,
+        "discovered": 66,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 0,
+        "cacheHits": 0,
+        "searchResults": {
+          "tavily": 80
+        },
+        "pagesSelected": 20,
+        "extractionAttempted": 20,
+        "pagesWithPosting": 0,
+        "hardFilterPass": 0,
+        "detailChecks": 0,
+        "extractionFailures": 4,
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1421,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 6781,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1343,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 906,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1452,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2467,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 250,
+            "attempts": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 10,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 250,
+            "attempts": 1
+          }
+        ]
+      },
+      "providers": [
+        "tavily"
+      ]
+    },
+    {
+      "key": "baidu",
+      "name": "百度招聘官网",
+      "status": "PARTIAL",
+      "count": 3,
+      "message": "官网当前列表确认 32 个职位，条件筛选后 3 条；每个关键词取官网首屏",
+      "httpStatus": null,
+      "durationMs": 1046,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 4,
+        "discovered": 32,
+        "confirmedOpen": 32
+      },
+      "providers": []
+    },
+    {
+      "key": "tencent",
+      "name": "腾讯招聘官网",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "官方接口可用，但当前条件下没有匹配岗位",
+      "httpStatus": 200,
+      "durationMs": 125,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    },
+    {
+      "key": "greenhouse",
+      "name": "公司招聘官网（Greenhouse ATS）",
+      "status": "AVAILABLE",
+      "count": 10,
+      "message": "ATS 官方接口返回 709 条",
+      "httpStatus": null,
+      "durationMs": 3796,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    }
+  ],
+  "queryPlan": {
+    "keyword": "AI Agent 开发实习",
+    "expansions": [
+      "AI Agent 开发实习",
+      "智能体应用开发实习",
+      "AI 应用开发实习",
+      "大模型应用开发实习",
+      "LLM 应用开发实习",
+      "RAG 开发实习",
+      "LangChain 开发实习",
+      "LangGraph 开发实习"
+    ],
+    "cities": [
+      "440100",
+      "440300",
+      "441900"
+    ],
+    "candidateTypes": [
+      "INTERNSHIP"
+    ],
+    "companySizes": [],
+    "includeUnknownSize": true,
+    "freshnessDays": 30,
+    "searchProviders": [
+      "tavily"
+    ],
+    "queries": [
+      {
+        "query": "广州 AI Agent 开发实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "AI Agent 开发实习",
+        "category": "AI Agent 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "深圳 智能体应用开发实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "智能体应用开发实习",
+        "category": "AI Agent 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "东莞 AI 应用开发实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "AI 应用开发实习",
+        "category": "AI 应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "广州 大模型应用开发实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "大模型应用开发实习",
+        "category": "大模型应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "深圳 LLM 应用开发实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "LLM 应用开发实习",
+        "category": "大模型应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "东莞 RAG 开发实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "RAG 开发实习",
+        "category": "RAG 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "广州 LangChain 开发实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "LangChain 开发实习",
+        "category": "LangChain 开发实习",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "深圳 LangGraph 开发实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "LangGraph 开发实习",
+        "category": "LangGraph 开发实习",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      }
+    ],
+    "coverage": {
+      "cities": {
+        "广州": 30,
+        "深圳": 30,
+        "东莞": 20
+      },
+      "categories": {
+        "AI Agent 开发": 20,
+        "AI 应用开发": 10,
+        "大模型应用开发": 20,
+        "RAG 开发": 10,
+        "LangChain 开发实习": 10,
+        "LangGraph 开发实习": 10
+      },
+      "cells": [
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "AI Agent 开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "AI Agent 开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "AI 应用开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "大模型应用开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "大模型应用开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "RAG 开发",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "LangChain 开发实习",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "LangGraph 开发实习",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 10,
+          "completed": true
+        }
+      ],
+      "completedCells": 8,
+      "totalCells": 8
+    },
+    "adjustments": [],
+    "version": "job-search-query-v4"
+  },
+  "warnings": [
+    "SOME_SOURCES_PARTIAL_FAILURE",
+    "SEARCH_INCOMPLETE"
+  ],
+  "dedupe": {
+    "rawCount": 13,
+    "validCount": 13,
+    "uniqueCount": 13,
+    "mergedCount": 0,
+    "methods": {},
+    "duplicateRate": 0.0
+  },
+  "metrics": {
+    "funnel": {
+      "searchResults": {
+        "tavily": 80
+      },
+      "uniqueUrls": 13,
+      "jobDetailPages": 0,
+      "extractionAttempted": 13,
+      "extractionSuccess": 13,
+      "verification": {
+        "counts": {
+          "ACTIVE_CONFIRMED": 13,
+          "ACTIVE_PROBABLE": 0,
+          "UNKNOWN": 0,
+          "CLOSED": 0
+        },
+        "reasons": {
+          "ACTIVE_EVIDENCE_FOUND": 13
+        },
+        "records": 13,
+        "rates": {
+          "officialVerificationRate": 1.0,
+          "unknownRate": 0.0,
+          "closedRate": 0.0
+        }
+      },
+      "hardFilterPass": 13,
+      "finalRecommendations": 13
+    },
+    "counts": {
+      "ACTIVE_CONFIRMED": 13,
+      "ACTIVE_PROBABLE": 0,
+      "UNKNOWN": 0,
+      "CLOSED": 0
+    },
+    "reasons": {
+      "ACTIVE_EVIDENCE_FOUND": 13
+    },
+    "failures": {},
+    "stageMs": {
+      "plan": 1828,
+      "search": 1920,
+      "normalize": 0
+    },
+    "sourceCounts": {
+      "web": 0,
+      "baidu": 3,
+      "tencent": 0,
+      "greenhouse": 10
+    },
+    "cityCoverage": {
+      "广州": 30,
+      "深圳": 30,
+      "东莞": 20
+    },
+    "jobCategoryCoverage": {
+      "AI Agent 开发": 20,
+      "AI 应用开发": 10,
+      "大模型应用开发": 20,
+      "RAG 开发": 10,
+      "LangChain 开发实习": 10,
+      "LangGraph 开发实习": 10
+    },
+    "sourceDiversity": {
+      "sources": 2,
+      "providers": [],
+      "uniqueDomains": 2
+    },
+    "rates": {
+      "officialVerificationRate": 1.0,
+      "unknownRate": 0.0,
+      "closedRate": 0.0,
+      "extractionSuccessRate": 1.0,
+      "duplicateRate": 0.0,
+      "staleRate": 0.0769
+    },
+    "freshnessLagDays": 28.13,
+    "evaluation": {
+      "status": "NOT_MEASURED",
+      "reason": "缺少人工标注的相关岗位全集，未计算 Recall@K / NDCG@10"
+    },
+    "postingIds": [
+      "d0552f8dd4dfe641bfab6173e640c687",
+      "715549a6ec7131a42ddee01a5cc041c1",
+      "86b9386a9de21fc1f05deeae78bd3877",
+      "8f4e5f66d4d6874824c36e9b22743c21",
+      "8f4e5f66d4d6874824c36e9b22743c21",
+      "eddd8b51d9b85ab1a318ccbbd1cefffa",
+      "05b303b50b3e07070ec30fba376c2c39",
+      "600bdc5ffa00263cd333a03af47fa570",
+      "a3fd88f9fc98735522217f36da4205ab",
+      "b05daa3613ca95494725215063c50566",
+      "d0552f8dd4dfe641bfab6173e640c687",
+      "6406c512567f0766773de3edd1e5cefb",
+      "a864a77a3374cc488e1c718aefa00424"
+    ]
+  },
+  "meta": {
+    "graph": "job-search-graph-v3",
+    "modelCalls": 2,
+    "modelDegraded": false,
+    "budget": {
+      "rounds": 1,
+      "queries": 8,
+      "pages": 20,
+      "detailChecks": 0,
+      "apiCalls": 8,
+      "cacheHits": 0,
+      "elapsedMs": 20000,
+      "limits": {
+        "maxQueriesPerRound": 12,
+        "maxPagesPerRound": 20,
+        "maxDetailPages": 20,
+        "maxApiCalls": 60,
+        "maxElapsedSeconds": 150.0,
+        "maxRounds": 3,
+        "targetResults": 10,
+        "minResults": 5
+      },
+      "stages": {
+        "plan": 1828,
+        "search": 1920,
+        "normalize": 0
+      }
+    },
+    "companyRegistry": {
+      "companies": [
+        {
+          "key": "greenhouse:stripe",
+          "lastCollectedAt": "2026-11-06T16:14:58.861733+00:00",
+          "lastStatus": "AVAILABLE",
+          "lastCount": 764
+        }
+      ],
+      "registered": [
+        {
+          "key": "greenhouse:stripe",
+          "company": "Stripe",
+          "platform": "greenhouse"
+        }
+      ]
+    }
+  },
+  "itemCount": 13,
+  "items": [
+    {
+      "title": "Account Executive, AI Sales",
+      "company": "Stripe",
+      "city": "San Francisco, CA",
+      "salary": [
+        200000,
+        800000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-11-06T15:32:55+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.867740+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8332467",
+      "semanticScore": 0.05
+    },
+    {
+      "title": "Account Executive, Benelux",
+      "company": "Stripe",
+      "city": "Dublin",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-11-02T14:47:39+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.868885+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8322584",
+      "semanticScore": 0.05
+    },
+    {
+      "title": "AI产品实习生（J106929）",
+      "company": "百度",
+      "city": "深圳市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-10-27T00:00:00+00:00",
+      "fetchedAt": "2026-11-06T16:14:56.611521+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/066f9984-1dd8-4108-a8c7-6f810791a365",
+      "semanticScore": 0.3
+    },
+    {
+      "title": "Abuse Investigator",
+      "company": "Stripe",
+      "city": "Dublin",
+      "salary": [
+        300000,
+        300000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.865740+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8172508",
+      "semanticScore": 0.1
+    },
+    {
+      "title": "Abuse Investigator",
+      "company": "Stripe",
+      "city": "Dublin",
+      "salary": [
+        300000,
+        300000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.866732+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8172487",
+      "semanticScore": 0.1
+    },
+    {
+      "title": "Abuse Investigator",
+      "company": "Stripe",
+      "city": "Seattle, San Francisco, New York City",
+      "salary": [
+        300000,
+        300000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.861733+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8172510",
+      "semanticScore": 0.1
+    },
+    {
+      "title": "Account Executive - Bridge",
+      "company": "Stripe",
+      "city": "SF, NYC, CHI, ATL, SEA",
+      "salary": [
+        500000,
+        800000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.869883+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8215824",
+      "semanticScore": 0.05
+    },
+    {
+      "title": "Account Executive, Bridge",
+      "company": "Stripe",
+      "city": "SF, NYC, SEA, CHI",
+      "salary": [
+        500000,
+        800000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.870883+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8077887",
+      "semanticScore": 0.05
+    },
+    {
+      "title": "Account Executive, Bridge - Hunter (Stripe Crypto and Stablecoins)",
+      "company": "Stripe",
+      "city": "London",
+      "salary": [
+        400000,
+        1000000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_0_20",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.871884+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8299647",
+      "semanticScore": 0.05
+    },
+    {
+      "title": "Account Executive, AI Startups - Grower",
+      "company": "Stripe",
+      "city": "San Francisco",
+      "salary": [
+        500000,
+        500000
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "greenhouse",
+      "searchProviders": [],
+      "publishedAt": "2026-10-29T14:42:09+00:00",
+      "fetchedAt": "2026-11-06T16:14:58.868885+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_INFERRED",
+        "CITY_UNKNOWN",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://stripe.com/jobs/search?gh_jid=8238731",
+      "semanticScore": 0.05
+    }
+  ]
+}

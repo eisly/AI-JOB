@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,8 @@ import com.aijob.backend.common.PageResult;
 
 @Service
 public class TaskService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskService.class);
 
     private static final Set<String> STATUSES = Set.of("QUEUED", "RUNNING", "SUCCEEDED", "FAILED",
             "CANCEL_REQUESTED", "CANCELLED", "EXPIRED");
@@ -85,6 +89,8 @@ public class TaskService {
             task.setRetryOfTaskId(retryOfTaskId);
             task.setDeadlineAt(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(deadlineSeconds));
             mapper.insertTask(task);
+            log.info("task created task={} operation={} resourceType={} resourceId={} user={}",
+                    taskId, operation, resourceType, resourceId, userId);
             placeholder.accept(taskId);
             appendEvent(taskId, 1, "accepted", Map.of("type", operation, "resourceId", resourceId));
             mapper.insertOutbox(UUID.randomUUID().toString(), "AI_DISPATCH", taskId,
@@ -103,6 +109,8 @@ public class TaskService {
         if (mapper.transition(taskId, task.getStatus(), "CANCEL_REQUESTED") == 0) {
             throw BusinessException.conflict("任务状态已变化", "INVALID_STATE");
         }
+        log.info("task cancel requested task={} operation={} previousStatus={}",
+                taskId, task.getOperation(), task.getStatus());
         mapper.insertOutbox(UUID.randomUUID().toString(), "AI_CANCEL", taskId,
                 "AI_CANCEL:" + taskId, json.stringify(Map.of("taskId", taskId)));
         return vo(mapper.find(taskId));

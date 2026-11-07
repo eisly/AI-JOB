@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -8,6 +9,8 @@ from typing import Any, Protocol
 import httpx
 
 from .config import Settings
+
+logger = logging.getLogger("agent.llm")
 
 
 class LLMProviderError(Exception):
@@ -90,6 +93,12 @@ class DeepSeekClient:
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         started = time.monotonic()
+        logger.info(
+            "provider request provider=deepseek model=%s system_chars=%s user_chars=%s",
+            self._settings.deepseek_model,
+            len(request.system_prompt),
+            len(request.user_prompt),
+        )
         try:
             response = await self._client.chat.completions.create(
                 model=self._settings.deepseek_model,
@@ -102,14 +111,21 @@ class DeepSeekClient:
                 max_tokens=self._settings.llm_max_output_tokens,
             )
         except Exception as exc:  # provider errors must not leak request content
+            logger.error(
+                "provider failed provider=deepseek model=%s duration_ms=%s error=%s",
+                self._settings.deepseek_model,
+                int((time.monotonic() - started) * 1000),
+                type(exc).__name__,
+            )
             raise LLMProviderError(f"模型调用失败: {type(exc).__name__}", retryable=True) from exc
 
         choice = response.choices[0] if response.choices else None
         content = choice.message.content if choice and choice.message else None
         if not content:
+            logger.warning("provider empty response provider=deepseek model=%s", self._settings.deepseek_model)
             raise LLMProviderError("模型返回空内容", retryable=True)
         usage = getattr(response, "usage", None)
-        return LLMResponse(
+        result = LLMResponse(
             text=content,
             model=response.model or self._settings.deepseek_model,
             prompt_version="",
@@ -117,6 +133,15 @@ class DeepSeekClient:
             input_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
             output_tokens=getattr(usage, "completion_tokens", None) if usage else None,
         )
+        logger.info(
+            "provider response provider=deepseek model=%s latency_ms=%s tokens=%s/%s chars=%s",
+            result.model,
+            result.latency_ms,
+            result.input_tokens,
+            result.output_tokens,
+            len(result.text),
+        )
+        return result
 
 
 def create_llm(settings: Settings) -> LLMClient:

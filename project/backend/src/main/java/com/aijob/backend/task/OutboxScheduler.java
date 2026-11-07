@@ -3,6 +3,8 @@ package com.aijob.backend.task;
 import java.util.Map;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -12,6 +14,8 @@ import com.aijob.backend.common.Data;
 
 @Component
 public class OutboxScheduler {
+
+    private static final Logger log = LoggerFactory.getLogger(OutboxScheduler.class);
 
     private final OutboxService outbox;
     private final AgentClient agent;
@@ -46,8 +50,12 @@ public class OutboxScheduler {
             }
             try {
                 Map<String, Object> run = agent.submit(task);
-                outbox.completeDispatch(outboxId, owner, taskId, validRun(task, run));
+                String runId = validRun(task, run);
+                outbox.completeDispatch(outboxId, owner, taskId, runId);
+                log.info("outbox dispatched task={} operation={} run={}", taskId, task.getOperation(), runId);
             } catch (Exception ex) {
+                log.warn("outbox dispatch failed task={} operation={} error={}",
+                        taskId, task.getOperation(), ex.getClass().getSimpleName());
                 recoverDispatch(outboxId, owner, taskId, ex);
             }
         }
@@ -77,7 +85,9 @@ public class OutboxScheduler {
                 }
                 agent.cancel(runId, taskId);
                 outbox.done(outboxId, owner);
+                log.info("outbox cancel dispatched task={} run={}", taskId, runId);
             } catch (Exception ex) {
+                log.warn("outbox cancel failed task={} error={}", taskId, ex.getClass().getSimpleName());
                 outbox.fail(outboxId, owner, ex.getClass().getSimpleName());
             } finally {
                 // Java cancellation must not wait for an unavailable or not-yet-created Agent run.
@@ -97,15 +107,20 @@ public class OutboxScheduler {
                 validRun(task, run);
                 String status = String.valueOf(run.get("status"));
                 if (Set.of("SUCCEEDED", "FAILED", "CANCELLED").contains(status)) {
+                    log.info("reconcile terminal task={} operation={} status={}",
+                            task.getId(), task.getOperation(), status);
                     results.submitRun(task.getId(), run);
                 }
             } catch (Exception ignored) {
+                log.debug("reconcile skipped task={} reason={}", task.getId(), ignored.getClass().getSimpleName());
             }
         }
         for (AiTask task : tasks.expiredTasks()) {
             try {
                 results.expire(task.getId());
+                log.info("reconcile expired task={} operation={}", task.getId(), task.getOperation());
             } catch (Exception ignored) {
+                log.debug("reconcile expire skipped task={} reason={}", task.getId(), ignored.getClass().getSimpleName());
             }
         }
     }
@@ -115,13 +130,20 @@ public class OutboxScheduler {
         try {
             if (task != null) {
                 Map<String, Object> run = agent.findByTask(taskId);
-                outbox.completeDispatch(outboxId, owner, taskId, validRun(task, run));
+                String runId = validRun(task, run);
+                outbox.completeDispatch(outboxId, owner, taskId, runId);
+                log.info("outbox dispatch recovered task={} run={} after={}",
+                        taskId, runId, original.getClass().getSimpleName());
                 return;
             }
         } catch (Exception ignored) {
+            log.debug("outbox recovery lookup failed task={} reason={}", taskId, ignored.getClass().getSimpleName());
         }
         int attempts = outbox.fail(outboxId, owner, original.getClass().getSimpleName());
+        log.warn("outbox dispatch retry scheduled task={} attempts={} lastError={}",
+                taskId, attempts, original.getClass().getSimpleName());
         if (attempts >= 4) {
+            log.error("outbox dispatch exhausted task={} attempts={}", taskId, attempts);
             results.transportFailure(taskId, "Agent 暂不可用");
         }
     }

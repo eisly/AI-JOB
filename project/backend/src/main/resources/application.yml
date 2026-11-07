@@ -81,7 +81,7 @@ app:
     deadline-seconds: ${AI_TASK_DEADLINE_SECONDS:300}
     sse-heartbeat-seconds: ${AI_TASK_SSE_HEARTBEAT_SECONDS:15}
   job-search:
-    sources: ${JOB_SEARCH_SOURCES:web,tencent,greenhouse}
+    sources: ${JOB_SEARCH_SOURCES:web,baidu,tencent,greenhouse}
     per-source: ${JOB_SEARCH_PER_SOURCE:20}
     max-total: ${JOB_SEARCH_MAX_TOTAL:60}
     concurrency: ${JOB_SEARCH_CONCURRENCY:4}

@@ -15,10 +15,14 @@ from ..models import (
     parse_salary,
 )
 from ..security import ensure_public_url
-from .base import SourceAdapter, SourceContext, filter_postings, query_terms
+from ..relevance import keyword_relevant
+from ..verification import official_list
+from .base import SourceAdapter, SourceContext, filter_postings
+from .detail import canonical_detail, closed_text
 
 GREENHOUSE_HOSTS = frozenset({"boards-api.greenhouse.io"})
 DEFAULT_BOARDS = {"stripe": "Stripe"}
+MAX_BOARD_QUERIES = 3
 
 
 class GreenhouseSource(SourceAdapter):
@@ -49,11 +53,12 @@ class GreenhouseSource(SourceAdapter):
         if context.client is None:
             return self.result("FAILED", message="HTTP 客户端未初始化", started=started)
         boards = self.boards(context.settings)
+        board_limit = int(context.extra.get("greenhouse_board_limit", MAX_BOARD_QUERIES))
         postings: list[SourcePosting] = []
-        failures: list[str] = []
+        failures: list[str] = ["已达到职位列表查询预算"] if len(boards) > board_limit else []
         successes = 0
         per_board = max(1, context.limit)
-        for token, company in boards.items():
+        for token, company in list(boards.items())[:board_limit]:
             url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
             try:
                 await ensure_public_url(url, allowed_hosts=set(GREENHOUSE_HOSTS))
@@ -75,18 +80,26 @@ class GreenhouseSource(SourceAdapter):
             except ValueError:
                 failures.append(f"{company}: 非 JSON 响应")
                 continue
+            jobs = body.get("jobs") if isinstance(body, dict) else None
+            if not isinstance(jobs, list):
+                failures.append(f"{company}: 缺少当前岗位列表")
+                continue
             successes += 1
-            jobs = (body or {}).get("jobs") or []
+            registry = context.extra.get("company_registry")
+            if registry is not None:
+                registry.record(f"greenhouse:{token}", "AVAILABLE", len(jobs))
             for job in jobs:
                 posting = _to_posting(job, company)
                 if posting is not None:
                     postings.append(posting)
-            if len(postings) >= per_board:
+            if len(_filter_keyword(filter_postings(postings, context.filters), context.keyword)) >= per_board:
                 break
         postings = _filter_keyword(filter_postings(postings, context.filters), context.keyword)
         if not postings:
             if successes == 0:
                 return self.result("FAILED", message="; ".join(failures)[:400] or "ATS 接口不可用", started=started)
+            if failures:
+                return self.result("PARTIAL", message="; ".join(failures)[:400], started=started)
             return self.result("EMPTY", message="ATS 官方接口可用，但当前条件下没有匹配岗位", started=started)
         if failures:
             return self.result("PARTIAL", postings[: context.limit], message="; ".join(failures)[:400], started=started)
@@ -94,23 +107,18 @@ class GreenhouseSource(SourceAdapter):
 
 
 def _filter_keyword(postings: list[SourcePosting], keyword: str) -> list[SourcePosting]:
-    terms = [item.lower() for item in query_terms(keyword)]
-    if not terms:
-        return postings
-    result = []
-    for posting in postings:
-        haystack = f"{posting.title} {posting.jd_text}".lower()
-        if any(term in haystack for term in terms):
-            result.append(posting)
-    return result
+    return [posting for posting in postings if keyword_relevant(posting, keyword)]
 
 
 def _to_posting(job: dict[str, Any], company: str) -> SourcePosting | None:
+    if not isinstance(job, dict) or not str(job.get("id", "")).isdigit():
+        return None
     title = str(job.get("title") or "").strip()
     raw_content = str(job.get("content") or "").strip()
-    url = str(job.get("absolute_url") or "").strip()
+    url = canonical_detail(str(job.get("absolute_url") or ""))
     jd = _strip_html(raw_content)
-    if not title or not jd or not url.startswith(("http://", "https://")):
+    checked_at = datetime.now(timezone.utc)
+    if not title or not jd or not url or closed_text(f"{title} {jd}", checked_at):
         return None
     location = str((job.get("location") or {}).get("name") or "").strip() or None
     candidate_type, inferred = infer_candidate_type(title, jd)
@@ -121,7 +129,7 @@ def _to_posting(job: dict[str, Any], company: str) -> SourcePosting | None:
         warnings.append("CANDIDATE_TYPE_INFERRED")
     if published is None:
         warnings.append("MISSING_PUBLISHED_AT")
-    return SourcePosting(
+    return posting_with_evidence(SourcePosting(
         source_key=GreenhouseSource.key,
         source_name=GreenhouseSource.name,
         source_type=GreenhouseSource.type,
@@ -141,10 +149,16 @@ def _to_posting(job: dict[str, Any], company: str) -> SourcePosting | None:
         education_min=None,
         company_size=parse_company_size(jd),
         published_at=published,
-        fetched_at=datetime.now(timezone.utc),
+        fetched_at=checked_at,
         verification="VERIFIED",
+        recruitment_evidence="OFFICIAL_LIST",
         warnings=warnings,
-    )
+    ), checked_at)
+
+
+def posting_with_evidence(posting: SourcePosting, checked_at: datetime) -> SourcePosting:
+    official_list(posting.source_url, checked_at=checked_at).apply(posting)
+    return posting
 
 
 def _strip_html(value: str) -> str:

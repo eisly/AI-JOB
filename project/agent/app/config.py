@@ -94,16 +94,34 @@ class Settings(BaseSettings):
     file_download_timeout_seconds: float = 10.0
 
     tavily_api_key: str | None = Field(default=None, repr=False, validation_alias="TAVILY_API_KEY")
-    job_search_sources: str = "web,tencent,greenhouse"
+    brave_search_api_key: str | None = Field(default=None, repr=False, validation_alias="BRAVE_SEARCH_API_KEY")
+    job_search_sources: str = "web,baidu,tencent,greenhouse"
     job_search_timeout_seconds: float = 12.0
     job_search_concurrency: int = 4
     job_search_per_source: int = 20
     job_search_max_total: int = 60
     job_search_max_jd_chars: int = 30000
     job_search_greenhouse_boards: str = "stripe:Stripe"
+    job_search_lever_boards: str = ""
     job_search_user_agent: str = "AI-JOB-Agent/1.0 (+job-search; contact: local-agent)"
     job_search_trust_env: bool = False
     job_search_allow_http: bool = False
+    # 动态搜索预算：集中配置，避免散落在来源实现中。
+    job_search_max_queries_per_round: int = 12
+    job_search_max_pages_per_round: int = 20
+    job_search_max_detail_pages: int = 20
+    job_search_max_api_calls: int = 60
+    job_search_max_elapsed_seconds: float = 150.0
+    job_search_max_rounds: int = 3
+    job_search_target_results: int = 10
+    job_search_min_results: int = 5
+    job_search_min_new_urls: int = 3
+    job_search_cache_ttl_seconds: int = 900
+    job_search_provider_retries: int = 1
+    job_search_freshness_days: int = 30
+    job_search_detail_concurrency: int = 4
+    job_search_detail_verification: bool = True
+    job_search_labels_path: str | None = None
 
     @field_validator("log_level")
     @classmethod

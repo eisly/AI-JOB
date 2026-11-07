@@ -16,10 +16,11 @@ public interface JobSearchMapper {
     String sourceId(@Param("code") String code);
 
     @Insert("""
-            INSERT INTO job_source (id,code,name,type,base_url,verification_status,verified_at)
-            VALUES (#{id},#{code},#{name},#{type},#{baseUrl},#{verification},IF(#{verification}='VERIFIED',UTC_TIMESTAMP(3),NULL))
+            INSERT INTO job_source (id,code,name,type,base_url,verification_status,verified_at,last_collected_at)
+            VALUES (#{id},#{code},#{name},#{type},#{baseUrl},#{verification},IF(#{verification}='VERIFIED',UTC_TIMESTAMP(3),NULL),UTC_TIMESTAMP(3))
             ON DUPLICATE KEY UPDATE name=VALUES(name),type=VALUES(type),base_url=VALUES(base_url),
-              verification_status=VALUES(verification_status),verified_at=VALUES(verified_at)
+              verification_status=VALUES(verification_status),verified_at=VALUES(verified_at),
+              last_collected_at=UTC_TIMESTAMP(3)
             """)
     int upsertSource(@Param("id") String id, @Param("code") String code, @Param("name") String name,
                      @Param("type") String type, @Param("baseUrl") String baseUrl,

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any, Callable
 
 from .llm import LLMRequest, LLMResponse, LLMProviderError
+
+logger = logging.getLogger("agent.fake_model")
 
 RUBRIC = {
     "version": "technical-answer-v1",
@@ -589,13 +592,21 @@ class FakeLLM:
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         self.calls.append(request)
+        logger.info(
+            "fake request operation=%s model=%s user_chars=%s",
+            request.operation,
+            self._model_name,
+            len(request.user_prompt),
+        )
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
         if self.fail_times > 0:
             self.fail_times -= 1
+            logger.warning("fake provider failure operation=%s", request.operation)
             raise LLMProviderError("simulated provider failure", retryable=True)
         if self.invalid_json_times > 0:
             self.invalid_json_times -= 1
+            logger.warning("fake invalid json operation=%s", request.operation)
             return LLMResponse(
                 text="这不是 JSON",
                 model=self._model_name,
@@ -611,6 +622,7 @@ class FakeLLM:
             text = data
         else:
             text = json.dumps(data, ensure_ascii=False)
+        logger.info("fake response operation=%s chars=%s", request.operation, len(text))
         return LLMResponse(
             text=text,
             model=self._model_name,

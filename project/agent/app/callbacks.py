@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Protocol
@@ -10,6 +11,7 @@ import httpx
 
 from .config import Settings
 from .errors import HandlerError
+from .logging_config import log_context
 from .security import create_callback_token
 from .storage import RunRecord, RunRepository, utcnow
 
@@ -43,6 +45,7 @@ class HttpxCallbackTransport:
         try:
             response = await self._client.post(url, json=json, headers=headers)
         except httpx.HTTPError as exc:
+            logger.warning("callback transport error url=%s error=%s", url, type(exc).__name__)
             return CallbackResponse(status_code=0, error=f"{type(exc).__name__}")
         try:
             body = response.json()
@@ -71,6 +74,11 @@ class CallbackDispatcher:
         if not self._settings.callback_enabled:
             logger.warning("callback disabled; terminal runs stay PENDING")
             return
+        logger.info(
+            "callback dispatcher started base_url=%s max_attempts=%s",
+            self._settings.callback_base_url,
+            self._settings.callback_max_attempts,
+        )
         self._task = asyncio.create_task(self._loop(), name="agent-callback-dispatcher")
 
     async def stop(self) -> None:
@@ -119,39 +127,55 @@ class CallbackDispatcher:
             "Content-Type": "application/json",
             "X-Trace-Id": run.trace_id or run.run_id,
         }
-        response = await self._transport.post(url, run.callback_body(), headers)
+        with log_context(task=run.task_id, run=run.run_id, op=run.operation):
+            logger.info("callback send url=%s attempts=%s", url, attempts)
+            started = time.monotonic()
+            response = await self._transport.post(url, run.callback_body(), headers)
+            elapsed = int((time.monotonic() - started) * 1000)
 
-        if 200 <= response.status_code < 300:
-            accepted = True
-            if isinstance(response.body, dict):
-                data = response.body.get("data")
-                if isinstance(data, dict) and data.get("accepted") is False:
-                    accepted = False
-            note = None if accepted else "Java 返回 accepted=false（迟到结果不接纳）"
-            await self._repo.update_callback(run.run_id, "DELIVERED", attempts, None, note)
-            logger.info("callback delivered run=%s attempts=%s accepted=%s", run.run_id, attempts, accepted)
-            return
+            if 200 <= response.status_code < 300:
+                accepted = True
+                if isinstance(response.body, dict):
+                    data = response.body.get("data")
+                    if isinstance(data, dict) and data.get("accepted") is False:
+                        accepted = False
+                note = None if accepted else "Java 返回 accepted=false（迟到结果不接纳）"
+                await self._repo.update_callback(run.run_id, "DELIVERED", attempts, None, note)
+                logger.info(
+                    "callback delivered status=%s accepted=%s attempts=%s duration_ms=%s",
+                    response.status_code,
+                    accepted,
+                    attempts,
+                    elapsed,
+                )
+                return
 
-        if response.status_code in PERMANENT_STATUS:
-            error = f"HTTP {response.status_code}: 回调被 Java 拒绝，不再重试"
-            await self._repo.update_callback(run.run_id, "REJECTED", attempts, None, error)
-            logger.error("callback rejected run=%s status=%s", run.run_id, response.status_code)
-            return
+            if response.status_code in PERMANENT_STATUS:
+                error = f"HTTP {response.status_code}: 回调被 Java 拒绝，不再重试"
+                await self._repo.update_callback(run.run_id, "REJECTED", attempts, None, error)
+                logger.error("callback rejected status=%s duration_ms=%s", response.status_code, elapsed)
+                return
 
-        if attempts >= self._settings.callback_max_attempts:
-            error = f"HTTP {response.status_code or 'network'} 回调重试耗尽"
-            await self._repo.update_callback(run.run_id, "REJECTED", attempts, None, error)
-            logger.error("callback exhausted run=%s attempts=%s", run.run_id, attempts)
-            return
+            if attempts >= self._settings.callback_max_attempts:
+                error = f"HTTP {response.status_code or 'network'} 回调重试耗尽"
+                await self._repo.update_callback(run.run_id, "REJECTED", attempts, None, error)
+                logger.error("callback exhausted attempts=%s last_status=%s", attempts, response.status_code)
+                return
 
-        delay = min(
-            self._settings.callback_backoff_max_seconds,
-            self._settings.callback_backoff_base_seconds * (2 ** (attempts - 1)),
-        )
-        next_at = now + timedelta(seconds=delay)
-        error = f"HTTP {response.status_code}" if response.status_code else (response.error or "network error")
-        await self._repo.update_callback(run.run_id, "PENDING", attempts, next_at, error)
-        logger.warning("callback retry scheduled run=%s attempts=%s delay=%ss", run.run_id, attempts, delay)
+            delay = min(
+                self._settings.callback_backoff_max_seconds,
+                self._settings.callback_backoff_base_seconds * (2 ** (attempts - 1)),
+            )
+            next_at = now + timedelta(seconds=delay)
+            error = f"HTTP {response.status_code}" if response.status_code else (response.error or "network error")
+            await self._repo.update_callback(run.run_id, "PENDING", attempts, next_at, error)
+            logger.warning(
+                "callback retry scheduled attempts=%s delay=%ss status=%s error=%s",
+                attempts,
+                delay,
+                response.status_code,
+                error,
+            )
 
 
 def callback_error_from(exc: HandlerError) -> dict[str, Any]:

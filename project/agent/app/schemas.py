@@ -702,6 +702,15 @@ CompanySize = Literal[
 ]
 SearchSourceType = Literal["OFFICIAL", "AUTHORIZED", "PUBLIC_SEARCH", "USER_INPUT"]
 SearchVerification = Literal["VERIFIED", "UNVERIFIED"]
+SearchVerificationStatus = Literal["ACTIVE_CONFIRMED", "ACTIVE_PROBABLE", "UNKNOWN", "CLOSED"]
+SearchVerificationEvidence = Literal[
+    "OFFICIAL_LIST",
+    "DETAIL_APPLY_LINK",
+    "DETAIL_TEXT",
+    "SEARCH_SNIPPET",
+    "OFFICIAL_CLOSED",
+    "EXPIRED",
+]
 
 
 class JobSearchFilters(APIModel):
@@ -757,6 +766,8 @@ class SearchAlias(APIModel):
     published_at: datetime | None = None
     fetched_at: datetime | None = None
     verification: SearchVerification
+    verification_status: SearchVerificationStatus | None = None
+    search_providers: list[str] = Field(default_factory=list, max_length=5)
 
 
 class SearchGap(APIModel):
@@ -774,6 +785,8 @@ class SearchSourceStatus(APIModel):
     duration_ms: int = Field(default=0, ge=0)
     verification: SearchVerification = "UNVERIFIED"
     requires_credentials: bool = False
+    verification_counts: dict[str, Any] = Field(default_factory=dict)
+    providers: list[str] = Field(default_factory=list, max_length=5)
 
 
 class AIJobSearchItem(APIModel):
@@ -797,6 +810,17 @@ class AIJobSearchItem(APIModel):
     company_size_label: str | None = Field(default=None, max_length=50)
     published_at: datetime | None = None
     fetched_at: datetime
+    recruitment_status: Literal["OPEN", "PROBABLE", "CLOSED", "UNKNOWN"] | None = None
+    recruitment_checked_at: datetime | None = None
+    recruitment_evidence: SearchVerificationEvidence | None = None
+    verification_status: SearchVerificationStatus | None = None
+    verification_reason: str | None = Field(default=None, max_length=64)
+    verification_evidence: SearchVerificationEvidence | None = None
+    verification_checked_at: datetime | None = None
+    verification_http_status: int | None = Field(default=None, ge=100, le=599)
+    verification_history: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
+    search_providers: list[str] = Field(default_factory=list, max_length=5)
+    query: str | None = Field(default=None, max_length=300)
     jd_text: str = Field(min_length=1, max_length=30000)
     requirements: Requirement | None = None
     semantic_score: float | None = Field(default=None, ge=0, le=1)
@@ -831,6 +855,7 @@ class AIJobSearchResult(APIModel):
     query_plan: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list, max_length=60)
     dedupe: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

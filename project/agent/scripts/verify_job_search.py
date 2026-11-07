@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import sys
@@ -17,17 +18,30 @@ from app.llm import create_llm
 from app.search.pipeline import JobSearchPipeline, SearchRuntime
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="使用真实搜索与模型执行一次岗位搜索验证")
+    parser.add_argument("--keyword", default="Java")
+    parser.add_argument("--cities", default="440300", help="逗号分隔的 6 位城市编码")
+    parser.add_argument("--candidate-types", default="EXPERIENCED", help="逗号分隔：INTERNSHIP,CAMPUS,EXPERIENCED")
+    parser.add_argument("--sources", default="tencent,greenhouse,liepin,boss,zhaopin")
+    parser.add_argument("--max-results", type=int, default=10)
+    parser.add_argument("--target-role", default="JAVA_BACKEND")
+    parser.add_argument("--output", default="", help="将完整结果写入指定 JSON 文件")
+    return parser.parse_args()
+
+
 async def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    args = parse_args()
     settings = Settings()
     payload = {
         "profile": {
             "userId": "10000000-0000-4000-8000-00000000d001",
             "profileVersion": 1,
-            "targetRole": "JAVA_BACKEND",
-            "candidateType": "EXPERIENCED",
-            "cities": ["440300"],
+            "targetRole": args.target_role,
+            "candidateType": args.candidate_types.split(",")[0],
+            "cities": args.cities.split(","),
             "minMonthlySalaryCents": None,
             "maxMonthlySalaryCents": None,
             "facts": {
@@ -44,14 +58,14 @@ async def main() -> int:
             "activeResumeVersionId": "10000000-0000-4000-8000-00000000r001",
         },
         "filters": {
-            "keyword": "Java",
-            "cities": ["440300"],
-            "candidateTypes": ["EXPERIENCED"],
+            "keyword": args.keyword,
+            "cities": args.cities.split(","),
+            "candidateTypes": args.candidate_types.split(","),
             "companySizes": [],
             "includeUnknownSize": True,
-            "maxResults": 10,
+            "maxResults": args.max_results,
         },
-        "sources": ["tencent", "greenhouse", "liepin", "boss", "zhaopin"],
+        "sources": args.sources.split(","),
         "skillCatalog": [
             {"code": "JAVA", "name": "Java"},
             {"code": "SPRING_BOOT", "name": "Spring Boot"},
@@ -90,6 +104,8 @@ async def main() -> int:
         "queryPlan": result["queryPlan"],
         "warnings": result["warnings"],
         "dedupe": result["dedupe"],
+        "metrics": result.get("metrics"),
+        "meta": result.get("meta"),
         "itemCount": len(result["items"]),
         "items": [
             {
@@ -101,17 +117,46 @@ async def main() -> int:
                 "education": item["educationMin"],
                 "companySize": item["companySize"],
                 "source": item["sourceKey"],
+                "searchProviders": item.get("searchProviders"),
                 "publishedAt": item["publishedAt"],
                 "fetchedAt": item["fetchedAt"],
                 "verification": item["verification"],
+                "verificationStatus": item.get("verificationStatus"),
+                "verificationReason": item.get("verificationReason"),
                 "warnings": item["warnings"],
                 "url": item["sourceUrl"],
                 "semanticScore": item["semanticScore"],
             }
-            for item in result["items"][:5]
+            for item in result["items"][:30]
         ],
     }
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.output:
+        target = Path(args.output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        compact = {
+            "provider": summary["provider"],
+            "itemCount": summary["itemCount"],
+            "warnings": summary["warnings"],
+            "sources": [
+                {
+                    "key": item["key"],
+                    "status": item["status"],
+                    "count": item["count"],
+                    "verificationCounts": item["verificationCounts"],
+                    "message": item["message"],
+                }
+                for item in summary["sourceStatus"]
+            ],
+            "dedupe": summary["dedupe"],
+            "funnel": summary["metrics"]["funnel"],
+            "rates": summary["metrics"]["rates"],
+            "budget": summary["meta"]["budget"],
+            "output": str(target),
+        }
+        print(json.dumps(compact, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if result["items"] else 1
 
 

@@ -4,6 +4,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 from ..models import (
     SourcePosting,
@@ -13,7 +14,9 @@ from ..models import (
     parse_salary,
 )
 from ..security import ensure_public_url
+from ..verification import official_list
 from .base import SourceAdapter, SourceContext, filter_postings
+from .detail import closed_text
 
 TENCENT_HOSTS = frozenset({"careers.tencent.com"})
 LIST_URL = "https://careers.tencent.com/tencentcareer/api/post/Query"
@@ -63,7 +66,10 @@ class TencentCareerSource(SourceAdapter):
             body = response.json()
         except ValueError:
             return self.result("FAILED", message="官方接口返回非 JSON 内容", http_status=response.status_code, started=started)
-        posts = ((body or {}).get("Data") or {}).get("Posts") or []
+        data = body.get("Data") if isinstance(body, dict) and body.get("Code") == 200 else None
+        posts = data.get("Posts") if isinstance(data, dict) else None
+        if not isinstance(posts, list):
+            return self.result("FAILED", message="官方接口未确认岗位列表", started=started)
         postings: list[SourcePosting] = []
         for post in posts:
             posting = _to_posting(post)
@@ -76,11 +82,15 @@ class TencentCareerSource(SourceAdapter):
 
 
 def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
+    if not isinstance(post, dict):
+        return None
     title = str(post.get("RecruitPostName") or "").strip()
     jd = str(post.get("Responsibility") or "").strip()
-    url = str(post.get("PostURL") or "").strip()
-    if not title or not jd or not url.startswith(("http://", "https://")):
+    post_id = str(post.get("PostId") or "")
+    checked_at = datetime.now(timezone.utc)
+    if not title or not jd or not re.fullmatch(r"[0-9]+", post_id) or closed_text(f"{title} {jd}", checked_at):
         return None
+    url = "https://careers.tencent.com/jobdesc.html?" + urlencode({"postId": post_id})
     city_name = str(post.get("LocationName") or "").strip() or None
     company = str(post.get("ComName") or "").strip() or "腾讯"
     candidate_type, inferred = infer_candidate_type(title, post.get("RequireWorkYearsName"))
@@ -94,7 +104,7 @@ def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
     if not experience_text:
         warnings.append("MISSING_EXPERIENCE")
     salary_min, salary_max = parse_salary(None)
-    return SourcePosting(
+    posting = SourcePosting(
         source_key=TencentCareerSource.key,
         source_name=TencentCareerSource.name,
         source_type=TencentCareerSource.type,
@@ -114,10 +124,13 @@ def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
         education_min=None,
         company_size="SIZE_UNKNOWN",
         published_at=published,
-        fetched_at=datetime.now(timezone.utc),
+        fetched_at=checked_at,
         verification="VERIFIED",
+        recruitment_evidence="OFFICIAL_LIST",
         warnings=warnings,
     )
+    official_list(url, checked_at=checked_at).apply(posting)
+    return posting
 
 
 def _parse_date(value: Any) -> datetime | None:

@@ -95,7 +95,7 @@ if (-not $SkipTests) {
     Write-Host "Java rule tests passed."
 
     Push-Location $agent
-    conda run -n ai-job python -m pytest tests/test_job_search.py tests/test_job_search_sources.py -q
+    conda run -n ai-job python -m pytest tests/test_job_search.py tests/test_job_search_sources.py tests/test_job_search_dedupe.py tests/test_job_search_lever.py tests/test_job_search_verification_flow.py tests/test_search_providers.py tests/test_search_planning.py tests/test_verification.py tests/test_search_metrics.py -q
     $pythonTestExit = $LASTEXITCODE
     Pop-Location
     if ($pythonTestExit -ne 0) {

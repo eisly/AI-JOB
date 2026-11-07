@@ -6,9 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +20,8 @@ import tools.jackson.databind.JsonNode;
 
 @Service
 public class TaskResultService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskResultService.class);
 
     private final TaskMapper mapper;
     private final TaskService taskService;
@@ -48,12 +50,14 @@ public class TaskResultService {
         String digest = json.digest(request);
         if (task.getResultDigest() != null
                 && HexFormat.of().formatHex(task.getResultDigest()).equals(digest)) {
+            log.info("callback duplicate task={} status={}", taskId, task.getStatus());
             return response(true, taskId, task.getStatus());
         }
         if (taskService.terminal(task.getStatus()) || "CANCEL_REQUESTED".equals(task.getStatus())) {
             if (task.getResultDigest() != null && ("SUCCEEDED".equals(task.getStatus()) || "FAILED".equals(task.getStatus()))) {
                 throw BusinessException.conflict("同一运行返回了不同结果", "IDEMPOTENCY_CONFLICT");
             }
+            log.warn("callback ignored task={} status={}", taskId, task.getStatus());
             return response(false, taskId, task.getStatus());
         }
         String runId = Data.uuid(request, "runId", true);
@@ -62,6 +66,7 @@ public class TaskResultService {
         if (!Set.of("SUCCEEDED", "FAILED", "CANCELLED").contains(status)) {
             throw BusinessException.validation("status", "非法回调状态");
         }
+        log.info("callback received task={} operation={} run={} status={}", taskId, operation, runId, status);
         if (!task.getOperation().equals(operation)) {
             throw BusinessException.aiSchema("回调 operation 与任务不一致");
         }
@@ -96,6 +101,7 @@ public class TaskResultService {
                 throw BusinessException.conflict("任务状态已变化", "INVALID_STATE");
             }
             taskService.appendEvent(task, "done", reference);
+            log.info("callback succeeded task={} operation={} run={}", taskId, operation, runId);
             return response(true, taskId, "SUCCEEDED");
         }
         if (result != null && !result.isNull()) {
@@ -111,6 +117,7 @@ public class TaskResultService {
         String javaStatus = "CANCELLED".equals(status) || "CANCEL_REQUESTED".equals(task.getStatus())
                 ? "CANCELLED" : "FAILED";
         finish(task, javaStatus, error, digest);
+        log.warn("callback finished task={} operation={} run={} status={}", taskId, operation, runId, javaStatus);
         return response(true, taskId, javaStatus);
     }
 
@@ -136,6 +143,8 @@ public class TaskResultService {
         if (task == null || taskService.terminal(task.getStatus()) || "CANCEL_REQUESTED".equals(task.getStatus())) {
             return;
         }
+        log.error("task transport failure task={} operation={} message={}",
+                taskId, task.getOperation(), message);
         TaskResultHandler handler = handlers.get(task.getOperation());
         JsonNode error = json.tree(Map.of("code", "MODEL_UNAVAILABLE", "message", message, "retryable", true));
         if (handler != null) {
@@ -150,6 +159,7 @@ public class TaskResultService {
         if (task == null || !"CANCEL_REQUESTED".equals(task.getStatus())) {
             return;
         }
+        log.info("task cancellation completed task={} operation={}", taskId, task.getOperation());
         TaskResultHandler handler = handlers.get(task.getOperation());
         JsonNode error = json.tree(Map.of("code", "CANCELLED", "message", "任务已取消", "retryable", false));
         if (handler != null) {
@@ -168,6 +178,7 @@ public class TaskResultService {
             completeCancellation(taskId);
             return;
         }
+        log.warn("task expired task={} operation={}", taskId, task.getOperation());
         TaskResultHandler handler = handlers.get(task.getOperation());
         JsonNode error = json.tree(Map.of("code", "DEADLINE_EXCEEDED", "message", "任务已超过截止时间", "retryable", true));
         if (handler != null) {

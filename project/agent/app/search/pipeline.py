@@ -6,14 +6,27 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, TypedDict
+from urllib.parse import urlsplit
 
 from langgraph.graph import END, START, StateGraph
 
 from ..llm import LLMRequest, LLMResponse, parse_json_object
 from ..schemas import Requirement
 from ..skills import get_skill
+from .budget import BudgetConfig, SearchBudget
+from .dedupe import dedupe_postings, ranking_score
+from .evaluation import evaluate_ranked, load_labels
+from .expansion import (
+    CoverageMatrix,
+    build_gap_queries,
+    build_query_specs,
+    expand_keyword,
+    keyword_category,
+    match_gap_queries,
+    strip_candidate_suffix,
+)
+from .metrics import SearchFunnel, build_metrics
 from .models import (
     COMPANY_SIZE_LABELS,
     ROLE_KEYWORDS,
@@ -22,11 +35,18 @@ from .models import (
     company_size_matches,
     normalize_company_size,
 )
+from .providers import resolve_providers
+from .relevance import keyword_relevant as _keyword_relevant
 from .sources import SourceAdapter, SourceContext, resolve_sources
 from .sources.base import DEFAULT_USER_AGENT, DEFAULT_TIMEOUT_SECONDS
+from .sources.baidu import MAX_LIST_QUERIES
+from .sources.greenhouse import MAX_BOARD_QUERIES, GreenhouseSource
+from .sources.company_registry import CompanyRegistry
+from .sources.web import MAX_QUERIES
+from .verification import summarize
 
 logger = logging.getLogger("agent.search")
-SEARCH_GRAPH_VERSION = "job-search-graph-v2"
+SEARCH_GRAPH_VERSION = "job-search-graph-v3"
 UNDERSTAND_BATCH = 8
 MODEL_JD_CHARS = 3000
 
@@ -57,6 +77,10 @@ class SearchState(TypedDict, total=False):
     was_adjusted: bool
     model_calls: int
     model_degraded: bool
+    metrics: dict[str, Any]
+    coverage: Any
+    last_round_new: int
+    executed_queries: set[str]
 
 
 def build_filters(payload: dict[str, Any], profile: dict[str, Any]) -> tuple[SearchFilters, str]:
@@ -95,6 +119,17 @@ class JobSearchPipeline:
         self.source_timeout = max(1.0, min(float(limits.get("sourceTimeoutSeconds") or getattr(self.settings, "job_search_timeout_seconds", DEFAULT_TIMEOUT_SECONDS)), 30.0))
         self.max_jd_chars = max(500, int(getattr(self.settings, "job_search_max_jd_chars", 30000)))
         self.adapters = resolve_sources(runtime.payload.get("sources") or [], self.settings)
+        self.budget_config = BudgetConfig.from_settings(self.settings)
+        self.budget = SearchBudget(self.budget_config)
+        self.funnel = SearchFunnel()
+        self.company_registry = CompanyRegistry.from_settings(self.settings)
+        self.label_path = getattr(self.settings, "job_search_labels_path", None)
+        source_keys = {adapter.key for adapter in self.adapters}
+        greenhouse = next((adapter for adapter in self.adapters if isinstance(adapter, GreenhouseSource)), None)
+        self.greenhouse_board_limit = min(MAX_BOARD_QUERIES, len(greenhouse.boards(self.settings))) if greenhouse else 0
+        self.web_query_limit = (MAX_QUERIES - (MAX_LIST_QUERIES if "baidu" in source_keys else 0)
+                                - int("tencent" in source_keys) - self.greenhouse_board_limit)
+        self.web_budget = {"queries": set(), "urls": set()}
         self.graph = self._build_graph()
 
     def _build_graph(self):
@@ -115,6 +150,7 @@ class JobSearchPipeline:
         return builder.compile()
 
     async def run(self) -> dict[str, Any]:
+        self.understanding_deadline = time.monotonic() + 240
         state: SearchState = {
             "runtime": self.runtime,
             "filters": self.filters,
@@ -135,30 +171,50 @@ class JobSearchPipeline:
             "queryPlan": final.get("query_plan") or {},
             "warnings": _dedupe_values(final.get("warnings") or [], 50),
             "dedupe": final.get("dedupe") or {},
+            "metrics": final.get("metrics") or {},
             "meta": {
                 "graph": SEARCH_GRAPH_VERSION,
                 "modelCalls": final.get("model_calls", 0),
                 "modelDegraded": bool(final.get("model_degraded")),
+                "budget": self.budget.snapshot(),
+                "companyRegistry": self.company_registry.report(),
             },
         }
 
     async def _plan(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("search_planning", 10)
+        self.budget.start_stage("plan")
         adjustments: list[str] = []
         keyword = state["keyword"]
         if not keyword:
             raise ValueError("缺少岗位关键词：请在求职画像中设置目标岗位，或填写岗位关键词")
+        expansions = expand_keyword(keyword, limit=8)
+        freshness = self.budget_config.freshness_days
+        specs = build_query_specs(
+            state["filters"],
+            keyword,
+            limit=max(self.budget_config.max_queries_per_round, len(state["filters"].cities) or 1),
+            freshness="pw" if freshness <= 7 else None,
+            freshness_days=freshness,
+        )
+        providers = resolve_providers(self.settings) if any(adapter.key == "web" for adapter in self.adapters) else []
+        coverage = CoverageMatrix(specs, [provider.key for provider in providers])
         plan = {
             "keyword": keyword,
+            "expansions": expansions,
             "cities": list(state["filters"].cities),
             "candidateTypes": list(state["filters"].candidate_types),
             "companySizes": list(state["filters"].company_sizes),
             "includeUnknownSize": state["filters"].include_unknown_size,
+            "freshnessDays": freshness,
+            "searchProviders": [provider.key for provider in providers],
+            "queries": [spec.as_dict() for spec in specs],
+            "coverage": coverage.report(),
             "adjustments": adjustments,
-            "version": "job-search-query-v1",
+            "version": "job-search-query-v4",
         }
         alternative = ""
-        if any(adapter.key == "web" for adapter in self.adapters) and getattr(self.settings, "tavily_api_key", None):
+        if providers:
             try:
                 response = await asyncio.wait_for(self.runtime.llm.complete(LLMRequest(
                     operation="JOB_SEARCH",
@@ -175,18 +231,24 @@ class JobSearchPipeline:
                     alternative = " ".join(value.split())
             except Exception as exc:
                 logger.info("job search synonym generation unavailable: %s", type(exc).__name__)
-            if keyword == "AI 应用开发" and "大模型" not in alternative and "Agent" not in alternative:
-                alternative = "大模型应用开发 AI Agent"
-            elif not alternative or alternative.casefold() == keyword.casefold():
-                if "Java 后端" in keyword:
-                    alternative = keyword.replace("Java 后端", "Java 服务端")
-                else:
-                    alternative = keyword
-        return {"query_plan": plan, "keyword": keyword, "alternative_keyword": alternative}
+        self.budget.end_stage("plan")
+        return {
+            "query_plan": plan,
+            "keyword": keyword,
+            "alternative_keyword": alternative,
+            "coverage": coverage,
+        }
 
     async def _search(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("searching_sources", 30)
+        self.budget.begin_round()
         keyword = state["keyword"]
+        executed_queries = state.get("executed_queries")
+        if executed_queries is None:
+            executed_queries = set()
+            state["executed_queries"] = executed_queries
+        plan = state.get("query_plan") or {}
+        spec_dicts = [*(plan.get("queries") or []), *(plan.get("supplementalQueries") or [])]
         context = SourceContext(
             filters=state["filters"],
             keyword=keyword,
@@ -195,7 +257,16 @@ class JobSearchPipeline:
             user_agent=str(getattr(self.settings, "job_search_user_agent", DEFAULT_USER_AGENT)),
             client=self.runtime.client,
             settings=self.settings,
-            extra={"llm": self.runtime.llm, "concurrency": self.concurrency},
+            extra={"llm": self.runtime.llm, "concurrency": self.concurrency,
+                   "web_budget": self.web_budget, "supplemental": state.get("was_adjusted"),
+                   "web_query_limit": self.web_query_limit,
+                   "greenhouse_board_limit": self.greenhouse_board_limit,
+                   "alternative_keyword": state.get("alternative_keyword"),
+                   "budget": self.budget,
+                   "coverage": state.get("coverage"),
+                   "company_registry": self.company_registry,
+                   "executed_queries": executed_queries,
+                   "query_specs": [_spec_from_dict(item) for item in spec_dicts] if spec_dicts else None},
         )
         semaphore = asyncio.Semaphore(self.concurrency)
         adapters = [adapter for adapter in state["adapters"] if not state.get("was_adjusted") or adapter.key == "web"]
@@ -206,22 +277,31 @@ class JobSearchPipeline:
             async with semaphore:
                 started = time.monotonic()
                 try:
-                    timeout = self.source_timeout + (90 if adapter.key == "web" else 3)
+                    timeout = min(90, self.source_timeout + 78) if adapter.key == "web" else self.source_timeout + 3
                     result = await asyncio.wait_for(adapter.search(context), timeout=timeout)
                 except asyncio.TimeoutError:
                     result = adapter.result("FAILED", message="来源检索超时", started=started)
                 except Exception as exc:
                     logger.warning("job search source failed source=%s error=%s", adapter.key, type(exc).__name__)
                     result = adapter.result("FAILED", message=f"来源检索失败: {type(exc).__name__}", started=started)
-                if adapter.key != "web" and any(source.key == "web" for source in self.adapters):
+                if adapter.key != "web" or "".join(self.keyword.casefold().split()) in {"java后端", "ai应用开发"}:
                     original_count = len(result.postings)
                     result.postings = [posting for posting in result.postings if _keyword_relevant(posting, self.keyword)]
                     if len(result.postings) != original_count:
                         result.message += f"；其中 {len(result.postings)} 条符合岗位关键词"
                         if not result.postings and result.status == "AVAILABLE":
                             result.status = "EMPTY"
+                if adapter.key != "web":
+                    result.postings = result.postings[:self.per_source]
                 if result.status not in {"AVAILABLE", "EMPTY", "PARTIAL"}:
                     logger.info("job search source status source=%s status=%s count=%s", adapter.key, result.status, len(result.postings))
+                logger.info(
+                    "source result source=%s status=%s count=%s duration_ms=%s",
+                    adapter.key,
+                    result.status,
+                    len(result.postings),
+                    result.duration_ms,
+                )
                 return result.as_status(), result.postings
 
         started_all = time.monotonic()
@@ -232,6 +312,31 @@ class JobSearchPipeline:
             if prior:
                 status["count"] += prior["count"]
                 status["durationMs"] += prior["durationMs"]
+                counts = dict(prior.get("verificationCounts") or {})
+                sum_keys = {
+                    "queries", "discovered", "checked", "confirmedOpen", "probable", "closed", "unknown",
+                    "cacheHits", "pagesSelected", "extractionSuccess", "pagesExtracted",
+                    "pagesWithPosting", "hardFilterPass", "detailChecks", "extractionFailures",
+                    "providerFailures",
+                }
+                for key, count in (status.get("verificationCounts") or {}).items():
+                    if key in sum_keys and isinstance(count, (int, float)) and not isinstance(count, bool):
+                        counts[key] = counts.get(key, 0) + count
+                    elif key == "providerCount":
+                        counts[key] = max(int(counts.get(key) or 0), int(count or 0))
+                    elif key in {"uniqueUrls"}:
+                        counts[key] = max(int(counts.get(key) or 0), int(count or 0))
+                    elif isinstance(count, dict):
+                        merged = dict(counts.get(key) or {})
+                        for sub_key, sub_count in count.items():
+                            if isinstance(sub_count, (int, float)) and not isinstance(sub_count, bool):
+                                merged[sub_key] = merged.get(sub_key, 0) + sub_count
+                            else:
+                                merged[sub_key] = sub_count
+                        counts[key] = merged
+                    else:
+                        counts[key] = count
+                status["verificationCounts"] = counts
                 status["message"] = f'首轮：{prior["message"]}；补搜：{status["message"]}'
                 if status["status"] in {"FAILED", "PARTIAL", "UNAVAILABLE"} or prior["status"] == "PARTIAL":
                     status["status"] = "PARTIAL"
@@ -240,7 +345,32 @@ class JobSearchPipeline:
             source_status[status["key"]] = status
         sources = list(source_status.values())
         fresh = [posting for item in results for posting in item[1]]
+        previous = {posting.fingerprint for posting in state.get("raw") or [] if posting.source_key == "web"}
+        current = previous | {
+            posting.fingerprint for posting in fresh if posting.source_key == "web" and _valid_posting(posting)
+        }
+        # 补搜只重跑 Web 来源，因此以 Web 新增岗位作为是否继续的判据。
+        last_round_new = len(current) - len(previous)
+        for status, postings in results:
+            for provider, count in ((status.get("verificationCounts") or {}).get("searchResults") or {}).items():
+                self.funnel.search_results[provider] = self.funnel.search_results.get(provider, 0) + int(count)
+            self.funnel.source_counts[status["key"]] = self.funnel.source_counts.get(status["key"], 0) + len(postings)
+            metrics_counts = status.get("verificationCounts") or {}
+            self.funnel.unique_urls = max(self.funnel.unique_urls, int(metrics_counts.get("uniqueUrls") or 0))
+            diagnostics = metrics_counts.get("extractionDiagnostics") or {}
+            for reason, count in (diagnostics.get("rejected") or {}).items():
+                if count:
+                    self.funnel.fail("extract", str(reason), int(count))
+            filter_stats = metrics_counts.get("filterStats") or {}
+            for reason in ("rejectedCity", "rejectedType", "rejectedSize"):
+                if filter_stats.get(reason):
+                    self.funnel.fail("filter", reason, int(filter_stats[reason]))
+            self.funnel.detail_pages += int(metrics_counts.get("detailChecks") or 0)
+            self.funnel.detail_pages_success += int(metrics_counts.get("probable") or 0) + int(
+                metrics_counts.get("confirmedOpen") or 0
+            )
         elapsed = int((time.monotonic() - started_all) * 1000)
+        self.budget.record_api_call(0)
         raw = list(state.get("raw") or []) + fresh
         warnings = list(state.get("warnings") or [])
         if elapsed > self.source_timeout * 2000:
@@ -251,7 +381,8 @@ class JobSearchPipeline:
             len(raw),
             elapsed,
         )
-        return {"sources": sources, "raw": raw, "warnings": warnings}
+        return {"sources": sources, "raw": raw, "warnings": warnings,
+                "last_round_new": last_round_new, "executed_queries": executed_queries}
 
     def _route_after_search(self, state: SearchState) -> str:
         web_ready = any(
@@ -259,29 +390,69 @@ class JobSearchPipeline:
             for source in state.get("sources") or []
         )
         unique = {posting.fingerprint for posting in state.get("raw") or [] if _valid_posting(posting)}
-        alternative = state.get("alternative_keyword")
-        if not state.get("was_adjusted") and web_ready and alternative and alternative != state["keyword"]:
-            if len(unique) < state["filters"].max_results:
+        coverage = state.get("coverage")
+        uncovered = len(coverage.uncovered()) if coverage is not None else 0
+        has_pending = bool(self.web_budget.get("pending"))
+        if web_ready and self.budget.round_no < self.budget_config.max_rounds:
+            if (uncovered or has_pending) and self.budget.should_continue(
+                len(unique), uncovered=uncovered,
+                last_round_new=int(state.get("last_round_new") or 0),
+            ):
                 return "adjust"
         return "normalize"
 
     async def _adjust(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("search_adjusting", 45)
-        keyword = state["alternative_keyword"]
+        coverage = state.get("coverage")
         plan = dict(state["query_plan"])
-        plan["adjustments"] = [f"在原筛选范围内补搜同义岗位词「{keyword}」"]
+        adjustments: list[str] = []
+        executed = set(state.get("executed_queries") or set())
+        for item in [*(plan.get("queries") or []), *(plan.get("supplementalQueries") or [])]:
+            query = str(item.get("query") or "")
+            if query:
+                executed.add(query)
+        if coverage is not None:
+            gaps = coverage.uncovered()
+            gap_specs = build_gap_queries(
+                gaps, self.keyword, executed=executed,
+                limit=self.budget_config.max_queries_per_round,
+            )
+            if gap_specs:
+                plan["supplementalQueries"] = [
+                    *(plan.get("supplementalQueries") or []),
+                    *(spec.as_dict() for spec in gap_specs),
+                ]
+                cities = sorted({spec.city_name for spec in gap_specs if spec.city_name})
+                keywords = sorted({spec.keyword for spec in gap_specs if spec.keyword})
+                adjustments.append(
+                    f"补搜未产出维度：城市 {','.join(cities) or '全部'}；"
+                    f"同义词 {','.join(keywords) or '全部'}"
+                )
+            else:
+                coverage.mark_exhausted()
+                adjustments.append("同义词与剩余候选已用尽，本轮停止补搜")
+        plan["adjustments"] = adjustments
+        plan["coverage"] = coverage.report() if coverage is not None else plan.get("coverage")
+        keyword = state.get("alternative_keyword") or self.keyword
+        if keyword == self.keyword:
+            expansions = expand_keyword(self.keyword, limit=8)
+            if expansions:
+                keyword = expansions[-1]
         return {
             "keyword": keyword,
             "query_plan": plan,
             "warnings": [*(state.get("warnings") or []), "QUERY_ADJUSTED"],
             "was_adjusted": True,
+            # 显式回传，确保下一轮 Web 不会重复发送已执行查询。
+            "executed_queries": executed,
         }
 
     async def _normalize(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("search_normalizing", 55)
+        self.budget.start_stage("normalize")
         raw = state.get("raw") or []
         valid = [posting for posting in raw if _valid_posting(posting)]
-        deduped, merged = _dedupe(valid)
+        deduped, stats = dedupe_postings(valid)
         # The web source gathers candidates before the Java ranker applies the requested limit.
         candidate_limit = 100 if any(source["key"] == "web" for source in state.get("sources") or []) else self.max_total
         truncated = len(deduped) > candidate_limit
@@ -289,9 +460,19 @@ class JobSearchPipeline:
         warnings = list(state.get("warnings") or [])
         if truncated:
             warnings.append(f"RESULT_TRUNCATED_TO_LIMIT:{candidate_limit}")
-        if merged:
-            warnings.append(f"MULTI_SOURCE_MERGED:{merged}")
-        dedupe_info = {"rawCount": len(raw), "validCount": len(valid), "uniqueCount": len(deduped), "mergedCount": merged}
+        if stats["mergedCount"]:
+            warnings.append(f"MULTI_SOURCE_MERGED:{stats['mergedCount']}")
+        self.funnel.unique_postings = stats["uniqueCount"]
+        self.funnel.duplicate_count = stats["mergedCount"]
+        self.budget.end_stage("normalize")
+        dedupe_info = {
+            "rawCount": len(raw),
+            "validCount": len(valid),
+            "uniqueCount": len(deduped),
+            "mergedCount": stats["mergedCount"],
+            "methods": stats.get("methods") or {},
+            "duplicateRate": stats.get("duplicateRate", 0.0),
+        }
         return {"deduped": deduped, "warnings": warnings, "dedupe": dedupe_info}
 
     async def _understand(self, state: SearchState) -> SearchState:
@@ -338,7 +519,11 @@ class JobSearchPipeline:
                 ],
             }
             try:
-                response = await self.runtime.llm.complete(
+                logger.info("understanding batch=%s size=%s", start // UNDERSTAND_BATCH + 1, len(batch))
+                remaining = self.understanding_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("岗位理解预算已用完")
+                response = await asyncio.wait_for(self.runtime.llm.complete(
                     LLMRequest(
                         operation="JOB_SEARCH",
                         system_prompt=skill.system_prompt,
@@ -346,8 +531,14 @@ class JobSearchPipeline:
                         schema_hint=skill.schema_hint,
                         context={"payload": body},
                     )
-                )
+                ), timeout=min(15, remaining))
                 calls += 1
+                logger.info(
+                    "understanding response batch=%s latency_ms=%s chars=%s",
+                    start // UNDERSTAND_BATCH + 1,
+                    response.latency_ms,
+                    len(response.text),
+                )
                 parsed = parse_json_object(response.text)
                 by_key = {
                     (str(item.get("sourceKey")), str(item.get("sourceUrl"))): item
@@ -362,6 +553,8 @@ class JobSearchPipeline:
         for posting in understood:
             if posting.semantic_score is None and "SEMANTIC_SCORE_UNAVAILABLE" not in warnings:
                 warnings.append("SEMANTIC_SCORE_UNAVAILABLE")
+        self.funnel.extraction_attempted = len(postings)
+        self.funnel.extraction_success = len(understood)
         return {
             "deduped": understood,
             "warnings": _dedupe_values(warnings, 50),
@@ -372,13 +565,17 @@ class JobSearchPipeline:
     async def _finalize(self, state: SearchState) -> SearchState:
         await self.runtime.emit_stage("finalizing_result", 90)
         postings = state.get("deduped") or []
-        postings.sort(key=lambda item: (item.fingerprint, item.source_key, item.source_url))
+        postings.sort(key=lambda item: (-ranking_score(item, self.keyword), item.fingerprint))
         warnings = list(state.get("warnings") or [])
         sources = state.get("sources") or []
+        unchecked = len(self.web_budget.get("pending") or [])
+        if unchecked:
+            warnings.append("SEARCH_INCOMPLETE")
         if any(item.get("status") == "UNAVAILABLE" for item in sources):
             warnings.append("SOME_SOURCES_UNAVAILABLE")
         if any(item.get("status") in {"FAILED", "PARTIAL"} for item in sources):
             warnings.append("SOME_SOURCES_PARTIAL_FAILURE")
+            warnings.append("SEARCH_INCOMPLETE")
         if not postings:
             successful = {"AVAILABLE", "EMPTY", "PARTIAL"}
             web = next((source for source in sources if source["key"] == "web"), None)
@@ -390,22 +587,78 @@ class JobSearchPipeline:
                 warnings.append("SEARCH_INCOMPLETE")
             else:
                 warnings.append("EMPTY_RESULT")
+        verification = summarize(postings)
+        if verification.unknown:
+            warnings.append(f"UNKNOWN_VERIFICATION:{verification.unknown}")
+        if verification.probable:
+            warnings.append(f"PROBABLE_VERIFICATION:{verification.probable}")
         for posting in postings:
             _annotate_posting(posting, warnings)
-        return {"deduped": postings, "warnings": _dedupe_values(warnings, 60), "sources": sources}
-
-
-def _keyword_relevant(posting: SourcePosting, keyword: str) -> bool:
-    # Some official APIs match individual words against any field, including unrelated jobs.
-    title = posting.title.casefold()
-    terms = keyword.casefold().split()
-    if terms == ["java", "后端"]:
-        return "java" in title or (
-            any(word in title for word in ("后端", "后台", "服务端", "服务器"))
-            and re.search(r"\bjava\b", posting.jd_text, flags=re.IGNORECASE) is not None
+            if _is_stale(posting, self.budget_config.freshness_days):
+                self.funnel.stale_count += 1
+                posting.warnings.append("STALE_POSTING")
+        self.funnel.hard_filter_pass = len(postings)
+        self.funnel.final_recommendations = sum(1 for posting in postings if not posting.is_closed)
+        if not self.funnel.unique_urls:
+            self.funnel.unique_urls = len({posting.source_url for posting in postings})
+        self.funnel.posting_ids = [posting.fingerprint for posting in postings]
+        self.funnel.city_coverage = _group_count(postings, lambda item: item.city_name or item.city_code or "未知")
+        self.funnel.job_category_coverage = _group_count(postings, lambda item: keyword_category(item.title))
+        self.funnel.stage_ms = dict(self.budget._stage_durations)
+        coverage = state.get("coverage")
+        coverage_report = coverage.report() if coverage is not None else None
+        metrics = build_metrics(
+            funnel=self.funnel,
+            postings=postings,
+            coverage=coverage_report,
+            evaluation=evaluate_ranked(postings, load_labels(self.label_path)),
         )
-    combined = f"{title} {posting.jd_text.casefold()}"
-    return all(term in combined for term in terms)
+        plan = dict(state.get("query_plan") or {})
+        plan["coverage"] = coverage_report or plan.get("coverage")
+        plan["expansions"] = plan.get("expansions") or expand_keyword(self.keyword, limit=8)
+        return {
+            "deduped": postings,
+            "warnings": _dedupe_values(warnings, 60),
+            "sources": sources,
+            "metrics": metrics,
+            "query_plan": plan,
+        }
+
+
+def _spec_from_dict(value: dict[str, Any]):
+    from .expansion import QuerySpec
+
+    return QuerySpec(
+        query=str(value.get("query") or ""),
+        city_code=str(value.get("cityCode") or ""),
+        city_name=str(value.get("cityName") or ""),
+        keyword=str(value.get("keyword") or ""),
+        category=str(value.get("category") or ""),
+        candidate_type=str(value.get("candidateType") or ""),
+        freshness=value.get("freshness"),
+    )
+
+
+def _is_stale(posting: SourcePosting, freshness_days: int) -> bool:
+    if posting.published_at is None:
+        return False
+    published = posting.published_at
+    if published.tzinfo is None:
+        from datetime import timezone
+
+        published = published.replace(tzinfo=timezone.utc)
+    from datetime import datetime, timezone
+
+    return (datetime.now(timezone.utc) - published).days > max(1, freshness_days * 3)
+
+
+def _group_count(postings: list[SourcePosting], key) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for posting in postings:
+        value = str(key(posting) or "未知")
+        result[value] = result.get(value, 0) + 1
+    return result
+
 
 
 def _valid_posting(posting: SourcePosting) -> bool:
@@ -413,61 +666,9 @@ def _valid_posting(posting: SourcePosting) -> bool:
         posting.title.strip()
         and posting.company_name.strip()
         and posting.jd_text.strip()
-        and posting.source_url.startswith(("http://", "https://"))
+        and posting.source_url.startswith("https://")
     )
 
-
-def _dedupe(postings: list[SourcePosting]) -> tuple[list[SourcePosting], int]:
-    order = {"OFFICIAL": 0, "AUTHORIZED": 1, "PUBLIC_SEARCH": 2, "USER_INPUT": 3}
-    by_fingerprint: dict[str, list[SourcePosting]] = {}
-    for posting in postings:
-        by_fingerprint.setdefault(posting.fingerprint, []).append(posting)
-    merged_count = 0
-    result: list[SourcePosting] = []
-    for group in by_fingerprint.values():
-        group.sort(key=lambda item: (order.get(item.source_type, 9), -len(item.jd_text)))
-        primary = group[0]
-        aliases: list[dict[str, Any]] = []
-        for other in group:
-            aliases.append(
-                {
-                    "sourceKey": other.source_key,
-                    "sourceName": other.source_name,
-                    "sourceType": other.source_type,
-                    "sourceUrl": other.source_url,
-                    "publishedAt": other.published_at.isoformat() if other.published_at else None,
-                    "fetchedAt": other.fetched_at.isoformat(),
-                    "verification": other.verification,
-                }
-            )
-            _fill_missing(primary, other)
-            primary.warnings.extend(other.warnings)
-        primary.aliases = _dedupe_dicts(aliases)
-        primary.warnings = _dedupe_values(primary.warnings, 20)
-        if len(group) > 1:
-            merged_count += len(group) - 1
-        result.append(primary)
-    return result, merged_count
-
-
-def _fill_missing(primary: SourcePosting, other: SourcePosting) -> None:
-    for field in (
-        "city_name",
-        "city_code",
-        "candidate_type",
-        "salary_min_monthly_cents",
-        "salary_max_monthly_cents",
-        "salary_text",
-        "experience_text",
-        "experience_months_min",
-        "education_text",
-        "education_min",
-        "published_at",
-    ):
-        if getattr(primary, field) in (None, "") and getattr(other, field) not in (None, ""):
-            setattr(primary, field, getattr(other, field))
-    if len(other.jd_text) > len(primary.jd_text):
-        primary.jd_text = other.jd_text
 
 
 def _dedupe_values(values: list[str], limit: int) -> list[str]:
@@ -494,6 +695,7 @@ def _dedupe_dicts(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         result.append(item)
     return result
+
 
 
 def _apply_understanding(
@@ -616,8 +818,6 @@ def _annotate_posting(posting: SourcePosting, warnings: list[str]) -> None:
         posting.warnings.append("MISSING_SALARY")
     if posting.published_at is None:
         posting.warnings.append("MISSING_PUBLISHED_AT")
-    elif (datetime.now(timezone.utc) - posting.published_at).days > 90:
-        posting.warnings.append("POSSIBLY_EXPIRED")
     if not posting.education_min:
         posting.warnings.append("MISSING_EDUCATION")
     if not posting.experience_text and posting.experience_months_min is None:
@@ -652,6 +852,19 @@ def _items_to_result(postings: list[SourcePosting]) -> list[dict[str, Any]]:
                 "companySizeLabel": COMPANY_SIZE_LABELS.get(normalize_company_size(posting.company_size)),
                 "publishedAt": posting.published_at.isoformat() if posting.published_at else None,
                 "fetchedAt": posting.fetched_at.isoformat(),
+                "recruitmentStatus": posting.recruitment_status,
+                "recruitmentCheckedAt": posting.verification_checked_at.isoformat()
+                if posting.verification_checked_at else None,
+                "recruitmentEvidence": posting.recruitment_evidence,
+                "verificationStatus": posting.verification_status,
+                "verificationReason": posting.verification_reason,
+                "verificationEvidence": posting.verification_evidence,
+                "verificationCheckedAt": posting.verification_checked_at.isoformat()
+                if posting.verification_checked_at else None,
+                "verificationHttpStatus": posting.verification_http_status,
+                "verificationHistory": posting.verification_history[-10:],
+                "searchProviders": posting.search_providers,
+                "query": posting.query,
                 "jdText": posting.jd_text[:30000],
                 "requirements": posting.requirements,
                 "semanticScore": posting.semantic_score,
