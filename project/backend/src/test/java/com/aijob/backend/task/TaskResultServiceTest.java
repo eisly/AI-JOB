@@ -25,7 +25,7 @@ class TaskResultServiceTest {
         task.setStatus("RUNNING");
         when(mapper.lock("task")).thenReturn(task);
         TaskResultService service = new TaskResultService(mapper, mock(TaskService.class),
-                new JsonService(JsonMapper.builder().build()), List.of());
+                new JsonService(JsonMapper.builder().build()), mock(AgentEventSyncService.class), List.of());
 
         service.completeCancellation("task");
 
@@ -55,7 +55,8 @@ class TaskResultServiceTest {
         task.setOperation("RESUME_DIAGNOSE");
         task.setStatus(taskStatus);
         when(mapper.lock("task")).thenReturn(task);
-        TaskResultService service = new TaskResultService(mapper, tasks, json, List.of(handler));
+        TaskResultService service = new TaskResultService(mapper, tasks, json,
+                mock(AgentEventSyncService.class), List.of(handler));
         Map<String, Object> callback = Map.of("runId", java.util.UUID.randomUUID().toString(),
                 "operation", "RESUME_DIAGNOSE", "status", "SUCCEEDED", "inputVersions", Map.of(),
                 "result", Map.of("items", List.of()), "error", Map.of());

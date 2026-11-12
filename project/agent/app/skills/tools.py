@@ -80,13 +80,35 @@ def build_model_input(
             "candidates": candidates,
         }
     if operation == "LEARNING_PLAN":
+        resume = payload.get("resume") or None
+        match_item = payload.get("matchItem") or None
         return {
+            "planSource": payload.get("planSource") or "MATCH",
+            "targetDirection": payload.get("targetDirection"),
             "matchItem": {
-                "jobId": (payload.get("matchItem") or {}).get("jobId"),
-                "title": (payload.get("matchItem") or {}).get("title"),
-                "gaps": (payload.get("matchItem") or {}).get("gaps") or [],
-                "reasons": (payload.get("matchItem") or {}).get("reasons") or [],
-            },
+                "jobId": match_item.get("jobId"),
+                "title": match_item.get("title"),
+                "gaps": match_item.get("gaps") or [],
+                "reasons": match_item.get("reasons") or [],
+                "matchScore": match_item.get("matchScore"),
+            }
+            if match_item
+            else None,
+            "resume": {
+                "versionId": resume.get("versionId"),
+                "versionNo": resume.get("versionNo"),
+                "title": resume.get("title"),
+                "education": resume.get("education"),
+                "experienceMonths": resume.get("experienceMonths"),
+                "major": resume.get("major"),
+                "skills": resume.get("skills") or [],
+                "projectsText": str(resume.get("projectsText") or "")[:12000],
+            }
+            if resume
+            else None,
+            "trainingHistory": payload.get("trainingHistory") or None,
+            "limitations": payload.get("limitations") or [],
+            "github": context.get("github") or {"status": "UNAVAILABLE"},
             "dailyMinutes": payload.get("dailyMinutes"),
             "days": payload.get("days"),
             "allowedSkillCodes": payload.get("allowedSkillCodes") or [],

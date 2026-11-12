@@ -76,6 +76,7 @@ async function verify(server) {
   const jobs = buildTargetJobsModel({ batches, detail, profile })
   assert.strictEqual(jobs.phase, 'READY')
   assert.deepStrictEqual(jobs.jobs.map((job) => job.id), ['i2', 'i5', 'i4'])
+  assert.deepStrictEqual(jobs.jobs[0].action, { name: 'jobs', query: { tab: 'matches', matchId: 'b2' } })
   assert.strictEqual(jobs.jobs[0].companyLabel, '公司信息待补充')
   assert.strictEqual(jobs.stale, false)
 
@@ -100,10 +101,12 @@ async function verify(server) {
     plans: [],
     growth: { recentEvidence: [] },
     interviews: [{ id: 'iv1', status: 'COMPLETED' }],
+    applicationTotal: 0,
     availability: { profile: true, resumes: true, batches: true, plans: true, growth: true, interviews: true },
   })
   assert.strictEqual(progress.completedCount, 4)
-  assert.strictEqual(progress.percent, 80)
+  assert.strictEqual(progress.percent, 66)
+  assert.strictEqual(progress.stages.find((stage) => stage.key === 'APPLICATION').status, 'PENDING')
 
   const progressUnknown = buildProgress({
     profile,
@@ -112,9 +115,11 @@ async function verify(server) {
     plans: [],
     growth: { recentEvidence: [] },
     interviews: [{ id: 'iv1', status: 'COMPLETED' }],
+    applicationTotal: 1,
     availability: { profile: true, resumes: false, batches: true, plans: true, growth: true, interviews: true },
   })
   assert.strictEqual(progressUnknown.percent, undefined)
+  assert.strictEqual(progressUnknown.stages.find((stage) => stage.key === 'APPLICATION').status, 'DONE')
 
   const activities = buildActivities({
     resumes: [{ id: 'r1', latestVersion: { id: 'v1', status: 'CONFIRMED', createdAt: now } }],

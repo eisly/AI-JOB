@@ -95,7 +95,7 @@ const optimizationDirty = computed(() => {
 const canEditOptimization = computed(() => !!currentOptimization.value && ['READY', 'ACCEPTED'].includes(currentOptimization.value.status))
 const canExport = computed(() => currentOptimization.value?.status === 'ACCEPTED' && !optimizationDirty.value && !exporting.value)
 
-const { task, deltaText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
+const { task, deltaText, reasoningText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
   onDone: async currentTask => {
     const id = currentTask.result?.resourceId || currentTask.resourceId
     if (!id) {
@@ -635,7 +635,7 @@ onMounted(() => {
 
     <section v-if="task || taskError || taskAuthorityError || taskRetryError" class="panel">
       <div class="panel__heading"><h2>当前 AI 任务</h2><el-tag v-if="taskRunning" type="warning">任务处理中</el-tag></div>
-      <TaskStatus :task="task">
+      <TaskStatus :task="task" :reasoning="reasoningText">
         <template #actions>
           <el-button v-if="task?.status === 'FAILED'" type="primary" :loading="taskActionLoading" @click="retryFailedTask">按原参数重试任务</el-button>
         </template>

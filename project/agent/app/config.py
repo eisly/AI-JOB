@@ -62,14 +62,27 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DEEPSEEK_BASE_URL", "AGENT_DEEPSEEK_BASE_URL"),
     )
     deepseek_model: str = Field(
-        default="deepseek-chat",
+        default="deepseek-v4-pro",
         validation_alias=AliasChoices("DEEPSEEK_MODEL", "AGENT_DEEPSEEK_MODEL"),
     )
+    deepseek_thinking: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("DEEPSEEK_THINKING", "AGENT_DEEPSEEK_THINKING"),
+    )
+    deepseek_reasoning_effort: Literal["low", "high", "max"] = Field(
+        default="high",
+        validation_alias=AliasChoices("DEEPSEEK_REASONING_EFFORT", "AGENT_DEEPSEEK_REASONING_EFFORT"),
+    )
     llm_timeout_seconds: float = 45.0
-    llm_max_output_tokens: int = 4000
+    llm_thinking_read_timeout_seconds: float = Field(default=120.0, gt=0)
+    llm_max_output_tokens: int = 16384
+    llm_resume_thinking_max_output_tokens: int = Field(default=8192, gt=0)
     llm_temperature: float = 0.2
     llm_trust_env: bool = False
     llm_provider_max_retries: int = 1
+
+    reasoning_display_enabled: bool = True
+    reasoning_max_chars: int = 4000
 
     callback_enabled: bool = True
     callback_base_url: str = "http://127.0.0.1:8080"
@@ -95,7 +108,8 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = Field(default=None, repr=False, validation_alias="TAVILY_API_KEY")
     brave_search_api_key: str | None = Field(default=None, repr=False, validation_alias="BRAVE_SEARCH_API_KEY")
-    job_search_sources: str = "web,baidu,tencent,greenhouse"
+    job_search_company_sites: str = "{}"
+    job_search_sources: str = "company_official,web,baidu,tencent,greenhouse"
     job_search_timeout_seconds: float = 12.0
     job_search_concurrency: int = 4
     job_search_per_source: int = 20
@@ -110,6 +124,7 @@ class Settings(BaseSettings):
     job_search_max_queries_per_round: int = 12
     job_search_max_pages_per_round: int = 20
     job_search_max_detail_pages: int = 20
+    job_search_max_page_fetch: int = 20
     job_search_max_api_calls: int = 60
     job_search_max_elapsed_seconds: float = 150.0
     job_search_max_rounds: int = 3
@@ -118,10 +133,32 @@ class Settings(BaseSettings):
     job_search_min_new_urls: int = 3
     job_search_cache_ttl_seconds: int = 900
     job_search_provider_retries: int = 1
+    job_search_provider_pages: int = 2
+    job_search_provider_results: int = 20
     job_search_freshness_days: int = 30
     job_search_detail_concurrency: int = 4
     job_search_detail_verification: bool = True
+    job_search_web_batch_pages: int = 3
+    job_search_web_batch_chars: int = 9000
+    job_search_web_page_chars: int = 2800
+    job_search_extraction_timeout_seconds: float = 18.0
+    job_search_extraction_retries: int = 1
+    job_search_extraction_reasoning_effort: str = "low"
+    job_search_extraction_max_output_tokens: int = 2400
+    job_search_synonym_timeout_seconds: float = 5.0
+    job_search_understanding_timeout_seconds: float = 20.0
+    job_search_tencent_pages: int = 2
+    job_search_company_official_queries: int = 4
+    job_search_company_official_pages: int = 6
     job_search_labels_path: str | None = None
+
+    github_search_enabled: bool = True
+    github_token: str | None = Field(default=None, repr=False, validation_alias="GITHUB_TOKEN")
+    github_search_timeout_seconds: float = 8.0
+    github_search_per_page: int = 8
+    github_search_cache_ttl_seconds: int = 3600
+    github_search_trust_env: bool = False
+    github_search_user_agent: str = "AI-JOB-Agent/1.0 (+learning-plan; contact: local-agent)"
 
     @field_validator("log_level")
     @classmethod

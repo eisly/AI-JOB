@@ -68,7 +68,7 @@ function taskAction(task: TaskVO): NavigationTarget {
     case 'RESUME_PARSE':
       return { name: 'resume', query: resource ? { resumeId: resource } : undefined }
     case 'JOB_MATCH':
-      return { name: 'job-match', query: resource ? { batchId: resource } : undefined }
+      return { name: 'jobs', query: { tab: 'matches', ...(resource ? { matchId: resource } : {}) } }
     case 'LEARNING_PLAN':
       return { name: 'training', query: resource ? { planId: resource } : undefined }
     case 'INTERVIEW_QUESTION':
@@ -78,7 +78,7 @@ function taskAction(task: TaskVO): NavigationTarget {
     case 'GROWTH_SUMMARY':
       return { name: 'growth' }
     default:
-      return { name: 'tasks', fallback: { name: 'job-match' } }
+      return { name: 'tasks', query: { taskId: task.id } }
   }
 }
 

@@ -14,7 +14,8 @@ const activeMenu = computed(() => '/' + (route.path.split('/')[1] || 'dashboard'
   <aside class="sidebar">
     <div class="sidebar__logo">AI-JOB</div>
     <el-menu :default-active="activeMenu" class="sidebar__menu" router>
-      <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+      <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path"
+        :title="item.title" :aria-label="item.title">
         <el-icon><component :is="item.icon" /></el-icon>
         <span class="sidebar__menu-title">{{ item.title }}</span>
         <span v-if="item.badge" class="sidebar__badge">{{ item.badge }}</span>
@@ -45,5 +46,5 @@ const activeMenu = computed(() => '/' + (route.path.split('/')[1] || 'dashboard'
 .sidebar__user-name { font-weight:600; color:#101d4b; }
 .sidebar__user-major { max-width:125px; overflow:hidden; text-overflow:ellipsis; font-size:11px; color:#7184a6; margin-top:4px; white-space:nowrap; }
 .sidebar__edit-link { display:inline-block; color:#1764f5; font-size:13px; margin-top:10px; }
-@media(max-width:700px) { .sidebar{width:64px}.sidebar__logo{font-size:13px;padding:24px 6px;text-align:center}.sidebar__menu{padding:0 7px}.sidebar__menu :deep(.el-menu-item){justify-content:center;padding:0 !important}.sidebar__menu :deep(.el-menu-item .el-icon){margin:0}.sidebar__menu-title,.sidebar__badge,.sidebar__user > div{display:none}.sidebar__user{padding:12px 11px} }
+@media(max-width:700px) { .sidebar{width:64px}.sidebar__logo{font-size:13px;padding:24px 6px;text-align:center}.sidebar__menu{padding:0 7px}.sidebar__menu :deep(.el-menu-item){justify-content:center;padding:0 !important}.sidebar__menu :deep(.el-menu-item .el-icon){margin:0}.sidebar__menu-title{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.sidebar__badge,.sidebar__user > div{display:none}.sidebar__user{padding:12px 11px} }
 </style>

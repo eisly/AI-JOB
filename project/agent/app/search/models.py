@@ -200,7 +200,10 @@ class SourcePosting:
     education_text: str | None = None
     education_min: str | None = None
     company_size: str | None = None
+    company_size_text: str | None = None
+    field_sources: dict[str, Any] = field(default_factory=dict)
     published_at: datetime | None = None
+    updated_at: datetime | None = None
     fetched_at: datetime = field(default_factory=datetime.utcnow)
     verification: str = "UNVERIFIED"
     verification_status: str = "UNKNOWN"
@@ -293,15 +296,18 @@ def parse_company_size(text: str | None) -> str:
     ranges = re.findall(r"(\d{1,6})\s*(?:-|~|至|到|—)\s*(\d{1,6})", compact)
     for raw_low, raw_high in ranges:
         low, high = int(raw_low), int(raw_high)
+        if low > high:
+            low, high = high, low
         for name, (min_value, max_value) in COMPANY_SIZE_BOUNDS.items():
-            if min_value is None or max_value is None:
+            if min_value is None:
                 continue
-            if low == min_value and high == max_value:
+            if max_value is None:
+                if low >= min_value:
+                    return name
+                continue
+            if min_value <= low and high <= max_value:
                 return name
-        if 0 <= low <= 20 and 0 <= high <= 20:
-            return "SIZE_0_20"
-        if low <= 99 and high >= 21 and low >= 21:
-            return "SIZE_21_99"
+        return "SIZE_UNKNOWN"
     count = re.search(r"(\d{1,6})\s*人", compact)
     if count:
         return size_for_headcount(int(count.group(1)))

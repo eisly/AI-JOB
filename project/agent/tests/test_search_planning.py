@@ -71,7 +71,7 @@ def test_coverage_matrix_tracks_missing_dimensions() -> None:
         matrix.mark_query(spec, "brave")
     assert matrix.all_covered()
     gaps = matrix.report()
-    assert gaps["totalCells"] == len(specs)
+    assert gaps["totalCells"] == len({(s.city_code, s.category, s.candidate_type) for s in specs})
     assert gaps["completedCells"] == gaps["totalCells"]
     assert gaps["cities"].get("深圳", 0) > 0
 

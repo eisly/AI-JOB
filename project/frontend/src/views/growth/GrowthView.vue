@@ -92,6 +92,7 @@ const {
   task: suggestionTask,
   loading: suggestionTaskLoading,
   error: suggestionTaskError,
+  reasoningText,
   restart: restartSuggestionTask,
 } = useTask(suggestionTaskId, {
   onDone: async () => {
@@ -384,7 +385,7 @@ onMounted(() => {
       </div>
       <div v-if="suggestionTaskId" class="task-block">
         <el-skeleton v-if="suggestionTaskLoading && !suggestionTask" :rows="2" animated />
-        <TaskStatus v-else :task="suggestionTask">
+        <TaskStatus v-else :task="suggestionTask" :reasoning="reasoningText">
           <template #actions>
             <el-button v-if="suggestionTask?.status === 'FAILED'" size="small" :loading="suggestionSubmitting" @click="retrySuggestionTask">按原参数重试</el-button>
           </template>

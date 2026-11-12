@@ -53,6 +53,9 @@ class ProviderResult:
     duration_ms: int = 0
     query: str = ""
     attempts: int = 0
+    page: int = 0
+    next_page: int | None = None
+    credits: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -68,6 +71,9 @@ class ProviderResult:
             "httpStatus": self.http_status,
             "durationMs": self.duration_ms,
             "attempts": self.attempts,
+            "page": self.page,
+            "nextPage": self.next_page,
+            "credits": self.credits,
         }
 
 
@@ -76,12 +82,14 @@ class SearchProvider:
     name = ""
     requires_credentials = True
     max_results = 20
+    supports_pagination = False
 
     def configured(self, settings: Any) -> bool:
         return True
 
     async def search(self, client: Any, query: str, *, settings: Any, limit: int, timeout: float,
-                     freshness: str | None = None, retries: int = 1) -> ProviderResult:
+                     freshness: str | None = None, retries: int = 1,
+                     page: int = 0) -> ProviderResult:
         raise NotImplementedError
 
     def unconfigured(self, query: str = "") -> ProviderResult:

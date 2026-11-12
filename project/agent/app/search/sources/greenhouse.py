@@ -16,6 +16,7 @@ from ..models import (
 )
 from ..security import ensure_public_url
 from ..relevance import keyword_relevant
+from ..text_extract import extract_job_fields
 from ..verification import official_list
 from .base import SourceAdapter, SourceContext, filter_postings
 from .detail import canonical_detail, closed_text
@@ -62,6 +63,9 @@ class GreenhouseSource(SourceAdapter):
             url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
             try:
                 await ensure_public_url(url, allowed_hosts=set(GREENHOUSE_HOSTS))
+                if not context.reserve_request():
+                    failures.append("来源请求预算已用完")
+                    break
                 response = await context.client.get(
                     url,
                     params={"content": "true"},
@@ -122,8 +126,11 @@ def _to_posting(job: dict[str, Any], company: str) -> SourcePosting | None:
         return None
     location = str((job.get("location") or {}).get("name") or "").strip() or None
     candidate_type, inferred = infer_candidate_type(title, jd)
+    fields = extract_job_fields(jd, title=title)
     salary_min, salary_max = parse_salary(jd)
-    published = _parse_time(job.get("updated_at") or job.get("first_published"))
+    if salary_min is None:
+        salary_min, salary_max = fields.salary_min_monthly_cents, fields.salary_max_monthly_cents
+    published = _parse_time(job.get("updated_at") or job.get("first_published")) or fields.published_at
     warnings: list[str] = []
     if inferred:
         warnings.append("CANDIDATE_TYPE_INFERRED")
@@ -137,17 +144,17 @@ def _to_posting(job: dict[str, Any], company: str) -> SourcePosting | None:
         title=title,
         company_name=company,
         jd_text=jd[:30000],
-        city_name=location,
-        city_code=city_code_for(location),
+        city_name=location or fields.city_name,
+        city_code=city_code_for(location) or fields.city_code,
         candidate_type=candidate_type,
         salary_min_monthly_cents=salary_min,
         salary_max_monthly_cents=salary_max,
-        salary_text=None,
-        experience_text=None,
-        experience_months_min=parse_experience_months(jd),
-        education_text=None,
-        education_min=None,
-        company_size=parse_company_size(jd),
+        salary_text=fields.salary_text,
+        experience_text=fields.experience_text,
+        experience_months_min=parse_experience_months(jd) or fields.experience_months_min,
+        education_text=fields.education_text,
+        education_min=fields.education_min,
+        company_size=parse_company_size(jd) if parse_company_size(jd) != "SIZE_UNKNOWN" else fields.company_size,
         published_at=published,
         fetched_at=checked_at,
         verification="VERIFIED",

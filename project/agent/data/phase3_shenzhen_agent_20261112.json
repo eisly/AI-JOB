@@ -1,0 +1,1298 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "now": "2026-11-12T07:54:08.177046+00:00",
+  "sourceStatus": [
+    {
+      "key": "company_official",
+      "name": "企业招聘官网",
+      "status": "PARTIAL",
+      "count": 0,
+      "message": "引擎 tavily 发现 52 个链接（34 个域名），分析 6 页，筛选后 1 个岗位；模型批次失败 4 次，确定性兜底 2 条；4 页未提取到岗位（规则拒绝 8 条，主要原因 DETERMINISTIC_INSUFFICIENT）；仍有 46 个候选页面待处理；官网归属确认 0 条",
+      "httpStatus": null,
+      "durationMs": 7438,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 4,
+        "providerCount": 1,
+        "discovered": 53,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 0,
+        "cacheHits": 0,
+        "fetchAttempted": 4,
+        "fetchSucceeded": 3,
+        "fetchFailed": 1,
+        "fetchFailureReasons": {
+          "PAGE_ACCESS_FAILED": 1
+        },
+        "fetchBodyChars": 5365,
+        "renderUsed": 0,
+        "searchResults": {
+          "tavily": 71
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3985,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3985,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 4047,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3985,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          }
+        ],
+        "rejectedNonJobUrls": 1,
+        "uniqueUrls": 53,
+        "pagesSelected": 6,
+        "pagesFetched": 4,
+        "pagesAnalyzed": 6,
+        "pagesWithPosting": 2,
+        "extractionSuccess": 2,
+        "pagesExtracted": 2,
+        "modelPagesAccepted": 0,
+        "deterministicPagesAccepted": 2,
+        "hardFilterPass": 1,
+        "filterStats": {
+          "input": 2,
+          "kept": 1,
+          "rejectedCity": 1,
+          "rejectedType": 0,
+          "rejectedSize": 0,
+          "unknownCity": 0,
+          "unknownType": 0
+        },
+        "extractionDiagnostics": {
+          "modelRows": 0,
+          "modelAccepted": 0,
+          "deterministicAccepted": 2,
+          "accepted": 2,
+          "rejected": {
+            "DETERMINISTIC_INSUFFICIENT": 4,
+            "MODEL_FAILED": 4
+          },
+          "noRowPages": 4,
+          "modelErrors": 4,
+          "modelFailures": 4,
+          "modelLatencyMs": 0,
+          "modelInputTokens": 0,
+          "modelOutputTokens": 0,
+          "missingCompany": 0,
+          "missingType": 0,
+          "fuzzyJd": 0,
+          "modelAttempts": 4
+        },
+        "detailChecks": 1,
+        "extractionFailures": 0,
+        "pendingUrls": 46
+      },
+      "providers": [
+        "tavily"
+      ]
+    },
+    {
+      "key": "baidu",
+      "name": "百度招聘官网",
+      "status": "PARTIAL",
+      "count": 0,
+      "message": "官网当前列表确认 32 个职位，条件筛选后 1 条；每个关键词取官网首屏；其中 0 条符合岗位关键词",
+      "httpStatus": null,
+      "durationMs": 4188,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 4,
+        "discovered": 32,
+        "confirmedOpen": 32
+      },
+      "providers": []
+    },
+    {
+      "key": "tencent",
+      "name": "腾讯招聘官网",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "官方接口返回 20 条，筛选后 0 条",
+      "httpStatus": 200,
+      "durationMs": 953,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 2,
+        "discovered": 20,
+        "normalized": 20,
+        "hardFilterPass": 0
+      },
+      "providers": []
+    },
+    {
+      "key": "greenhouse",
+      "name": "公司招聘官网（Greenhouse ATS）",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "ATS 官方接口可用，但当前条件下没有匹配岗位",
+      "httpStatus": null,
+      "durationMs": 3969,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    },
+    {
+      "key": "web",
+      "name": "AI 全网搜索",
+      "status": "PARTIAL",
+      "count": 3,
+      "message": "首轮：首轮：引擎 tavily 发现 66 个链接（45 个域名），分析 14 页，筛选后 0 个岗位；模型批次失败 10 次，确定性兜底 2 条；12 页未提取到岗位（规则拒绝 24 条，主要原因 DETERMINISTIC_INSUFFICIENT）；仍有 52 个候选页面待处理；补搜：官网归属未确认的候选保留为普通网页来源；补搜：引擎 tavily 发现 81 个链接（51 个域名），分析 20 页，筛选后 6 个岗位；模型批次失败 12 次，确定性兜底 6 条；14 页未提取到岗位（规则拒绝 28 条，主要原因 DETERMINISTIC_INSUFFICIENT）；仍有 61 个候选页面待处理；其中 2 条符合岗位关键词",
+      "httpStatus": null,
+      "durationMs": 28952,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 10,
+        "providerCount": 1,
+        "discovered": 96,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 6,
+        "cacheHits": 0,
+        "fetchAttempted": 16,
+        "fetchSucceeded": 8,
+        "fetchFailed": 8,
+        "fetchFailureReasons": {
+          "HTTP_403": 3,
+          "PAGE_ACCESS_FAILED": 2,
+          "DETAIL_NOT_FOUND": 1,
+          "TIMEOUT": 2
+        },
+        "fetchBodyChars": 21069,
+        "renderUsed": 1,
+        "searchResults": {
+          "tavily": 142
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1937,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3514,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3500,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2828,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3296,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2217,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2000,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2453,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 20,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1610,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 19,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 1703,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          }
+        ],
+        "rejectedNonJobUrls": 1,
+        "uniqueUrls": 96,
+        "pagesSelected": 34,
+        "pagesFetched": 16,
+        "pagesAnalyzed": 34,
+        "pagesWithPosting": 8,
+        "extractionSuccess": 8,
+        "pagesExtracted": 8,
+        "modelPagesAccepted": 0,
+        "deterministicPagesAccepted": 8,
+        "hardFilterPass": 6,
+        "filterStats": {
+          "input": 8,
+          "kept": 6,
+          "rejectedCity": 0,
+          "rejectedType": 2,
+          "rejectedSize": 0,
+          "unknownCity": 5,
+          "unknownType": 2
+        },
+        "extractionDiagnostics": {
+          "modelRows": 0,
+          "modelAccepted": 0,
+          "deterministicAccepted": 8,
+          "accepted": 8,
+          "rejected": {
+            "DETERMINISTIC_INSUFFICIENT": 26,
+            "MODEL_FAILED": 26
+          },
+          "noRowPages": 26,
+          "modelErrors": 26,
+          "modelFailures": 22,
+          "modelLatencyMs": 0,
+          "modelInputTokens": 0,
+          "modelOutputTokens": 0,
+          "missingCompany": 0,
+          "missingType": 0,
+          "fuzzyJd": 0,
+          "modelAttempts": 22
+        },
+        "detailChecks": 6,
+        "extractionFailures": 0,
+        "pendingUrls": 61
+      },
+      "providers": [
+        "tavily"
+      ]
+    }
+  ],
+  "queryPlan": {
+    "keyword": "AI Agent RAG 应用开发",
+    "expansions": [
+      "AI Agent RAG 应用开发",
+      "AI Agent 开发",
+      "智能体应用开发",
+      "AI 应用开发",
+      "大模型应用开发",
+      "LLM 应用开发",
+      "RAG 开发",
+      "LangChain 开发"
+    ],
+    "cities": [
+      "440300"
+    ],
+    "candidateTypes": [
+      "INTERNSHIP"
+    ],
+    "companySizes": [],
+    "includeUnknownSize": true,
+    "freshnessDays": 30,
+    "searchProviders": [
+      "tavily"
+    ],
+    "queries": [
+      {
+        "query": "深圳 AI Agent RAG 应用开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "AI Agent RAG 应用开发",
+        "category": "AI Agent 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 AI Agent 开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "AI Agent 开发",
+        "category": "AI Agent 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 智能体应用开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "智能体应用开发",
+        "category": "AI Agent 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 AI 应用开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "AI 应用开发",
+        "category": "AI 应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 大模型应用开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "大模型应用开发",
+        "category": "大模型应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 LLM 应用开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "LLM 应用开发",
+        "category": "大模型应用开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 RAG 开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "RAG 开发",
+        "category": "RAG 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 LangChain 开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "LangChain 开发",
+        "category": "LangChain 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      }
+    ],
+    "coverage": {
+      "cities": {
+        "深圳": 1
+      },
+      "categories": {
+        "AI Agent 开发": 0,
+        "AI 应用开发": 0,
+        "大模型应用开发": 0,
+        "RAG 开发": 1,
+        "LangChain 开发": 0,
+        "知识库问答开发": 0
+      },
+      "cells": [
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "AI Agent 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 34,
+          "analyzed": 16,
+          "extracted": 0,
+          "rejected": 14,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "AI 应用开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 2,
+          "extracted": 0,
+          "rejected": 2,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "大模型应用开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 2,
+          "providers": [
+            "tavily"
+          ],
+          "found": 17,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 3,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "RAG 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 2,
+          "providers": [
+            "tavily"
+          ],
+          "found": 36,
+          "analyzed": 23,
+          "extracted": 1,
+          "rejected": 17,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "LangChain 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 2,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "知识库问答开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 19,
+          "analyzed": 7,
+          "extracted": 0,
+          "rejected": 5,
+          "completed": false
+        }
+      ],
+      "completedCells": 2,
+      "totalCells": 6
+    },
+    "adjustments": [
+      "补搜未产出维度：城市 深圳；同义词 检索增强生成,知识库问答开发"
+    ],
+    "version": "job-search-query-v4",
+    "supplementalQueries": [
+      {
+        "query": "深圳 检索增强生成 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "检索增强生成",
+        "category": "RAG 开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      },
+      {
+        "query": "深圳 知识库问答开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "知识库问答开发",
+        "category": "知识库问答开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": null
+      }
+    ]
+  },
+  "warnings": [
+    "SEARCH_SLOW",
+    "QUERY_ADJUSTED",
+    "MODEL_UNDERSTANDING_DEGRADED:1",
+    "SEMANTIC_SCORE_UNAVAILABLE",
+    "SEARCH_INCOMPLETE",
+    "SOME_SOURCES_PARTIAL_FAILURE",
+    "UNKNOWN_VERIFICATION:3"
+  ],
+  "dedupe": {
+    "rawCount": 3,
+    "validCount": 3,
+    "uniqueCount": 3,
+    "mergedCount": 0,
+    "methods": {},
+    "duplicateRate": 0.0
+  },
+  "metrics": {
+    "funnel": {
+      "searchResults": {
+        "tavily": 213
+      },
+      "uniqueUrls": 129,
+      "uniquePostings": 3,
+      "jobDetailPages": 7,
+      "extractionAttempted": 3,
+      "extractionSuccess": 0,
+      "verification": {
+        "counts": {
+          "ACTIVE_CONFIRMED": 0,
+          "ACTIVE_PROBABLE": 0,
+          "UNKNOWN": 3,
+          "CLOSED": 0
+        },
+        "reasons": {
+          "DETAIL_NOT_FOUND": 2,
+          "HTTP_403": 1
+        },
+        "records": 6,
+        "rates": {
+          "officialVerificationRate": 0.0,
+          "unknownRate": 1.0,
+          "closedRate": 0.0
+        }
+      },
+      "hardFilterPass": 3,
+      "finalRecommendations": 3
+    },
+    "counts": {
+      "ACTIVE_CONFIRMED": 0,
+      "ACTIVE_PROBABLE": 0,
+      "UNKNOWN": 3,
+      "CLOSED": 0
+    },
+    "reasons": {
+      "DETAIL_NOT_FOUND": 2,
+      "HTTP_403": 1
+    },
+    "failures": {
+      "source:modelFailures": 26,
+      "extract:DETERMINISTIC_INSUFFICIENT": 30,
+      "extract:MODEL_FAILED": 30,
+      "filter:rejectedCity": 1,
+      "filter:rejectedType": 2
+    },
+    "stageMs": {
+      "plan": 1453,
+      "search": 4715,
+      "detail": 4681,
+      "normalize": 0
+    },
+    "sourceCounts": {
+      "company_official": 0,
+      "baidu": 0,
+      "tencent": 0,
+      "greenhouse": 0,
+      "web": 3
+    },
+    "cityCoverage": {
+      "深圳": 1,
+      "未知": 2
+    },
+    "jobCategoryCoverage": {
+      "AI Agent 开发": 1,
+      "RAG 开发": 1,
+      "AI 应用开发": 1
+    },
+    "queryCoverage": {
+      "cities": {
+        "深圳": 1
+      },
+      "categories": {
+        "AI Agent 开发": 0,
+        "AI 应用开发": 0,
+        "大模型应用开发": 0,
+        "RAG 开发": 1,
+        "LangChain 开发": 0,
+        "知识库问答开发": 0
+      },
+      "cells": [
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "AI Agent 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 34,
+          "analyzed": 16,
+          "extracted": 0,
+          "rejected": 14,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "AI 应用开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 2,
+          "extracted": 0,
+          "rejected": 2,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "大模型应用开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 2,
+          "providers": [
+            "tavily"
+          ],
+          "found": 17,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 3,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "RAG 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 2,
+          "providers": [
+            "tavily"
+          ],
+          "found": 36,
+          "analyzed": 23,
+          "extracted": 1,
+          "rejected": 17,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "LangChain 开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 2,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "知识库问答开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 19,
+          "analyzed": 7,
+          "extracted": 0,
+          "rejected": 5,
+          "completed": false
+        }
+      ],
+      "completedCells": 2,
+      "totalCells": 6
+    },
+    "sourceDiversity": {
+      "sources": 1,
+      "providers": [
+        "tavily"
+      ],
+      "uniqueDomains": 3
+    },
+    "rates": {
+      "officialVerificationRate": 0.0,
+      "unknownRate": 1.0,
+      "closedRate": 0.0,
+      "extractionSuccessRate": 0.0,
+      "duplicateRate": 0.0,
+      "staleRate": 0.0
+    },
+    "freshnessLagDays": null,
+    "evaluation": {
+      "status": "NOT_MEASURED",
+      "reason": "缺少人工标注的相关岗位全集，未计算 Recall@K / NDCG@10"
+    },
+    "postingIds": [
+      "fde84940ea7efbf0f6ace3d704e2de8b",
+      "48180f989b54915f6ad28edcb36f2145",
+      "1230d11c26d0f57fdb56c7f39fa7af3d"
+    ],
+    "collection": {
+      "stopReason": "API_LIMIT",
+      "pendingBySource": {
+        "company_official": 46,
+        "web": 61
+      }
+    },
+    "jdUnderstanding": {
+      "attempted": 3,
+      "modelMatched": 0,
+      "ruleFallback": 3,
+      "failedBatches": 1
+    }
+  },
+  "meta": {
+    "graph": "job-search-graph-v3",
+    "modelCalls": 0,
+    "modelDegraded": true,
+    "budget": {
+      "rounds": 2,
+      "queries": 14,
+      "pages": 40,
+      "detailChecks": 3,
+      "pagesFetched": 20,
+      "apiCalls": 60,
+      "cacheHits": 0,
+      "elapsedMs": 34875,
+      "limits": {
+        "maxQueriesPerRound": 12,
+        "maxPagesPerRound": 20,
+        "maxDetailPages": 20,
+        "maxPageFetch": 20,
+        "maxApiCalls": 60,
+        "maxElapsedSeconds": 150.0,
+        "maxRounds": 3,
+        "targetResults": 10,
+        "minResults": 5
+      },
+      "stages": {
+        "plan": 1453,
+        "search": 4715,
+        "detail": 4681,
+        "normalize": 0
+      }
+    },
+    "companyRegistry": {
+      "companies": [
+        {
+          "key": "greenhouse:stripe",
+          "lastCollectedAt": "2026-11-12T07:53:36.809651+00:00",
+          "lastStatus": "AVAILABLE",
+          "lastCount": 787
+        }
+      ],
+      "registered": [
+        {
+          "key": "greenhouse:stripe",
+          "company": "Stripe",
+          "platform": "greenhouse"
+        }
+      ]
+    }
+  },
+  "llmDiagnostics": [
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "keyword",
+      "systemChars": 119,
+      "userChars": 32,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 1453
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 552,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 500
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6053,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 907
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 552,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6053,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 500
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6307,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 515
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5789,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 531
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6292,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 546
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6456,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 577
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6307,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5789,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 420
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6292,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 438
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6456,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 438
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 794,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 422
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 794,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 452
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 1826,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3300,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 830,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 420
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 530,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 437
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 1826,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 389
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3300,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 422
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 830,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 530,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 390
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5111,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3948,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5111,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 421
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3948,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "{\n  \"items\": [\n    {\n      \"sourceKey\": \"输入中的来源 key\",\n      \"sourceUrl\": \"输入中的原始岗位链接\",\n      \"requirements\": {\n        \"educationMin\": null,\n        \"graduationYearMin\": null,\n        \"graduationYearMax\": null,\n        \"experienceMonthsMin\": null,\n        \"skills\": [\"skillCatalog 中的 code\"],\n        \"requiredSkillLevels\": {},\n        \"quotes\": {}\n      },\n      \"semanticScore\": 0.7,\n      \"reasons\": [\"仅引用输入事实的解释\"],\n      \"gaps\": [\n        {\n          \"skillCode\": \"requirements.skills 中的 code\",\n          \"suggestion\": \"针对该技能的训练建议\"\n        }\n      ]\n    }\n  ]\n}",
+      "systemChars": 1322,
+      "userChars": 5942,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 406
+    }
+  ],
+  "httpAttempts": {
+    "api.tavily.com": 14,
+    "careers.tencent.com": 3,
+    "boards-api.greenhouse.io": 1,
+    "talent.baidu.com": 4,
+    "offerseek.ai": 3,
+    "www.yingjiesheng.com": 3,
+    "www.wondercv.com": 3,
+    "www.nowcoder.com": 2,
+    "offerwing.cn": 9,
+    "cn.indeed.com": 1,
+    "www.hotjob.cn": 1,
+    "zhuanlan.zhihu.com": 1,
+    "x.com": 1,
+    "www.hp.gov.cn": 1,
+    "blog.csdn.net": 1,
+    "oss.offerwing.cn": 3,
+    "cdnjs.cloudflare.com": 1,
+    "yuancheng.work": 1,
+    "jobs.bytedance.com": 1,
+    "github.com": 1,
+    "xyzp.51job.com": 1,
+    "carc.hitsz.edu.cn": 1,
+    "cn.linkedin.com": 1,
+    "www.ncss.cn": 1,
+    "www.shixiseng.com": 1
+  },
+  "itemCount": 3,
+  "items": [
+    {
+      "title": "Ai Agent开发_哔哩哔哩实习_牛客网",
+      "company": "上海宽娱数码科技有限公司",
+      "city": "深圳",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "web",
+      "searchProviders": [
+        "tavily"
+      ],
+      "publishedAt": null,
+      "fetchedAt": "2026-11-12T07:53:40.835661+00:00",
+      "verification": "UNVERIFIED",
+      "verificationStatus": "UNKNOWN",
+      "verificationReason": "DETAIL_NOT_FOUND",
+      "warnings": [
+        "EDUCATION_FROM_TEXT",
+        "DETERMINISTIC_EXTRACTION",
+        "UNVERIFIED_SOURCE",
+        "MISSING_SALARY",
+        "MISSING_PUBLISHED_AT",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://www.nowcoder.com/jobs/detail/466423?channel=npJobTab&deliverSource=1&logid=e2acff24ea3d333a004ae2bebdb2fe41&pageSource=5001",
+      "semanticScore": null
+    },
+    {
+      "title": "LLM 与 RAG 应用实习生实习招聘",
+      "company": "哲源科技",
+      "city": null,
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "web",
+      "searchProviders": [
+        "tavily"
+      ],
+      "publishedAt": null,
+      "fetchedAt": "2026-11-12T07:54:04.418053+00:00",
+      "verification": "UNVERIFIED",
+      "verificationStatus": "UNKNOWN",
+      "verificationReason": "HTTP_403",
+      "warnings": [
+        "SALARY_FROM_TEXT",
+        "EDUCATION_FROM_TEXT",
+        "DETERMINISTIC_EXTRACTION",
+        "CITY_UNKNOWN",
+        "UNVERIFIED_SOURCE",
+        "MISSING_SALARY",
+        "MISSING_PUBLISHED_AT",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://www.shixiseng.com/intern/inn_jnrawk4ftwze?pcm=pc_SearchList",
+      "semanticScore": null
+    },
+    {
+      "title": "AI应用开发岗",
+      "company": "请勿随意泄露银行",
+      "city": null,
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_1000_9999",
+      "source": "web",
+      "searchProviders": [
+        "tavily"
+      ],
+      "publishedAt": null,
+      "fetchedAt": "2026-11-12T07:54:04.416056+00:00",
+      "verification": "UNVERIFIED",
+      "verificationStatus": "UNKNOWN",
+      "verificationReason": "DETAIL_NOT_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_UNKNOWN",
+        "COMPANY_SIZE_FROM_TEXT",
+        "EDUCATION_FROM_TEXT",
+        "DETERMINISTIC_EXTRACTION",
+        "CITY_UNKNOWN",
+        "UNVERIFIED_SOURCE",
+        "MISSING_SALARY",
+        "MISSING_PUBLISHED_AT",
+        "MISSING_EXPERIENCE"
+      ],
+      "url": "https://www.ncss.cn/student/jobs/KcVfdA3yrZRPETVr7Ns6mm/detail.html",
+      "semanticScore": null
+    }
+  ]
+}

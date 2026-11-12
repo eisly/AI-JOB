@@ -119,7 +119,7 @@ def test_settings_host_scheme_sets_and_model_name():
     assert settings.effective_llm_provider == "fake"
     assert settings.effective_model_name == "fake-llm"
     deepseek = Settings(llm_provider="deepseek", deepseek_api_key="sk")
-    assert deepseek.effective_model_name == "deepseek-chat"
+    assert deepseek.effective_model_name == "deepseek-v4-pro"
 
 
 def test_prod_runtime_security_rules():

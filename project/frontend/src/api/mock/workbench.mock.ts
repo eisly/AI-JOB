@@ -22,6 +22,7 @@ export type MockSourceKey =
   | 'growth'
   | 'tasks'
   | 'resumes'
+  | 'applications'
 
 export interface WorkbenchMockScenario {
   user: UserVO
@@ -33,6 +34,7 @@ export interface WorkbenchMockScenario {
   growth: GrowthVO
   tasks: TaskVO[]
   resumes: ResumeVO[]
+  applicationTotal: number
   failures: Partial<Record<MockSourceKey, ApiErrorCategory>>
 }
 
@@ -191,6 +193,7 @@ const emptyScenario: WorkbenchMockScenario = {
   growth: { skills: [], recentEvidence: [], suggestions: [] },
   tasks: [],
   resumes: [],
+  applicationTotal: 0,
   failures: {},
 }
 
@@ -221,6 +224,7 @@ const normalScenario: WorkbenchMockScenario = {
   growth,
   tasks: [task],
   resumes: [resume],
+  applicationTotal: 0,
   failures: {},
 }
 

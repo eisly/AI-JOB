@@ -24,8 +24,8 @@ const emptyHint = computed(() =>
     ? '可前往岗位匹配查看资格未通过的原因。'
     : '设置求职方向后，查看适合你的岗位。',
 )
-const emptyAction = computed<NavigationTarget>(() => ({ name: 'job-match', label: '去岗位匹配' }))
-const jobMatchRoute = computed(() => resolveRoute({ name: 'job-match', label: '查看岗位匹配' }, (name) => router.hasRoute(name)))
+const emptyAction: NavigationTarget = { name: 'jobs', query: { tab: 'matches' }, label: '去岗位匹配' }
+const jobMatchRoute = computed(() => resolveRoute({ ...emptyAction, label: '查看岗位匹配' }, (name) => router.hasRoute(name)))
 const showLoading = computed(() => props.status === 'IDLE' || props.status === 'LOADING' || props.status === 'ERROR')
 
 function go(target: NavigationTarget | null): void {
@@ -71,7 +71,7 @@ function go(target: NavigationTarget | null): void {
 
       <div v-if="model?.phase === 'GENERATING'" class="job-state">
         <strong>正在为你匹配岗位</strong>
-        <p>匹配完成后会自动展示结果，也可以进入岗位匹配查看进度。</p>
+        <p>可进入岗位匹配查看进度，完成后刷新工作台查看结果。</p>
         <button v-if="jobMatchRoute" type="button" class="panel__button" @click="go(jobMatchRoute)">进入岗位匹配</button>
       </div>
 

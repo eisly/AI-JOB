@@ -63,6 +63,11 @@ class CompanyRegistry:
                     platform=platform,
                     token=token,
                 ))
+        import json
+        sites = json.loads(getattr(settings, "job_search_company_sites", "{}") or "{}")
+        for company, domain in sites.items():
+            entries.append(CompanySource(key="official:" + domain, company=company,
+                                         platform="company_official", official_domain=domain))
         return cls(entries)
 
     def for_platform(self, platform: str) -> list[CompanySource]:

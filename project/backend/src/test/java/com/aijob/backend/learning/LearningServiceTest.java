@@ -16,6 +16,7 @@ import com.aijob.backend.common.JsonService;
 import com.aijob.backend.job.JobMapper;
 import com.aijob.backend.job.JobService;
 import com.aijob.backend.profile.ProfileService;
+import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.AiTask;
 import com.aijob.backend.task.TaskMapper;
 import com.aijob.backend.task.TaskService;
@@ -31,7 +32,7 @@ class LearningServiceTest {
         TaskService tasks = mock(TaskService.class);
         JsonService json = new JsonService(JsonMapper.builder().build());
         LearningService service = new LearningService(mapper, mock(JobMapper.class), mock(JobService.class),
-                mock(ProfileService.class), tasks, taskMapper, json, new ApiView(json));
+                mock(ProfileService.class), mock(ResumeMapper.class), tasks, taskMapper, json, new ApiView(json));
         Map<String, Object> body = Map.of("content", "原回答", "expectedVersion", 2);
         when(mapper.lockSession("session", "user")).thenReturn(Map.of("id", "session", "version", 2, "status", "ACTIVE"));
         when(mapper.sessionAnswer("session")).thenReturn(Map.of("id", "answer", "status", "FAILED",

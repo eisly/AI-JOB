@@ -32,6 +32,7 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
   const taskId = computed(() => toValue(taskIdSource) || '')
   const task = ref<TaskVO | null>(null)
   const deltaText = ref('')
+  const reasoningText = ref('')
   const loading = ref(false)
   const connected = ref(false)
   const error = ref<unknown>(null)
@@ -122,6 +123,8 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
       applyTask({ ...task.value, stage: payload.name ?? task.value.stage, progress: payload.progress ?? null, lastEventId: Math.max(task.value.lastEventId, seq) })
     } else if (eventName === 'delta') {
       deltaText.value += payload.text || ''
+    } else if (eventName === 'reasoning') {
+      reasoningText.value = payload.text || ''
     } else if (eventName === 'done' || eventName === 'error' || eventName === 'cancelled') {
       try {
         await refreshAuthority(run)
@@ -233,6 +236,7 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
     const run = generation
     task.value = null
     deltaText.value = ''
+    reasoningText.value = ''
     error.value = null
     connected.value = false
     lastSeq.value = 0
@@ -259,6 +263,7 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
   return {
     task,
     deltaText,
+    reasoningText,
     loading,
     connected,
     error,

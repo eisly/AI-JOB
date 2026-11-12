@@ -34,3 +34,6 @@ python-docx==1.2.0
 pytest==9.2.0
 pytest-asyncio==1.4.1.post1
 coverage==7.17.1
+
+# Anonymous job-page rendering; install browser with python -m playwright install chromium
+playwright==1.64.1

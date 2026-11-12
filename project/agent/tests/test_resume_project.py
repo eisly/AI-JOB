@@ -1,20 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from app.config import Settings
 from app.errors import ApiError, HandlerValidationError
 from app.fake_model import fake_llm_from_payload
 from app.handlers import (
+    ExecutionContext,
     ProjectPlanHandler,
     ProjectRecommendHandler,
     ResumeDiagnoseHandler,
     ResumeOptimizeHandler,
 )
-from app.llm import LLMRequest
+from app.graphs import CareerOrchestrator
+from app.llm import LLMProviderError, LLMRequest
 from app.operations import (
     INTERVIEW_TURN,
     PROJECT_PLAN,
@@ -199,6 +203,67 @@ def test_project_plan_checks_sequence_and_hour_budget():
     output.milestones[0].tasks[0].estimated_hours = 40
     with pytest.raises(HandlerValidationError, match="计划总工时"):
         handler.validate_business(_ctx(payload), output, {}, {})
+
+
+@pytest.mark.asyncio
+async def test_project_recommend_and_plan_degrade_through_result_contract():
+    stages = []
+
+    class BlockedProvider:
+        name = "deepseek"
+        calls = 0
+
+        async def complete(self, request):
+            self.calls += 1
+            assert request.thinking is False
+            raise LLMProviderError("model rejected request", retryable=False, http_status=402)
+
+    async def emit(name, progress):
+        stages.append(name)
+
+    provider = BlockedProvider()
+    recommend = project_recommend_envelope(uuid4())["payload"]
+    recommend.update(allowedSkillCodes=["JAVA"], difficulty="ADVANCED", maxDurationWeeks=1)
+    orchestrator = CareerOrchestrator()
+    settings = Settings(llm_provider="fake")
+    result, meta = await orchestrator.execute(ExecutionContext(
+        SimpleNamespace(operation=PROJECT_RECOMMEND), ProjectRecommendPayload.model_validate(recommend),
+        settings, provider, None, emit,
+    ))
+    item = result["items"][0]
+    assert item["title"] == "Java 投递进度看板"
+    assert (item["skillCodes"], item["difficulty"], item["estimatedWeeks"]) == (["JAVA"], "ADVANCED", 1)
+    assert item["reason"].startswith("本地规则建议")
+    assert (meta["fallbackReason"], meta["resultValidated"], provider.calls) == ("MODEL_HTTP_402", True, 1)
+    result, meta = await orchestrator.execute(ExecutionContext(
+        SimpleNamespace(operation=PROJECT_PLAN),
+        ProjectPlanPayload.model_validate({"recommendation": item, "weeklyHours": 1}),
+        settings, provider, None, emit,
+    ))
+    assert result["summary"].startswith("本地规则计划")
+    assert result["milestones"][0]["tasks"][0]["estimatedHours"] == 1
+    assert len(result["milestones"]) == 1
+    assert (meta["fallbackReason"], meta["resultValidated"], provider.calls) == ("MODEL_HTTP_402", True, 2)
+    assert stages.count("using_local_project_rules") == 2
+
+
+@pytest.mark.asyncio
+async def test_project_model_deadline_returns_local_recommendation():
+    class SlowProvider:
+        async def complete(self, request):
+            await asyncio.sleep(10)
+
+    async def emit(*_):
+        pass
+
+    handler = ProjectRecommendHandler()
+    handler.model_deadline_seconds = 0.05
+    payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
+    result, meta = await handler.execute(ExecutionContext(
+        None, payload, Settings(llm_provider="fake"), SlowProvider(), None, emit,
+    ))
+    assert result["items"]
+    assert meta["fallbackReason"] == "MODEL_TIMEOUT"
 
 
 def test_new_result_models_enforce_required_collections():

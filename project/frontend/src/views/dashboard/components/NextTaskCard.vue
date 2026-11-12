@@ -17,9 +17,9 @@ const router = useRouter()
 
 const suggestion = computed(() => props.model?.suggestion ?? null)
 const actionTarget = computed(() => resolveRoute(suggestion.value?.action, (name) => router.hasRoute(name)))
-const emptyAction = computed<NavigationTarget>(() => ({ name: 'job-match', label: '查看岗位匹配' }))
+const emptyAction: NavigationTarget = { name: 'jobs', query: { tab: 'matches' }, label: '查看岗位匹配' }
 const taskCenterTarget = computed<NavigationTarget | null>(() =>
-  resolveRoute({ name: 'tasks', fallback: { name: 'job-match', label: '前往岗位匹配' } }, (name) => router.hasRoute(name)),
+  resolveRoute({ name: 'tasks', fallback: emptyAction }, (name) => router.hasRoute(name)),
 )
 const showLoading = computed(() => props.status === 'IDLE' || props.status === 'LOADING' || props.status === 'ERROR')
 

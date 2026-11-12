@@ -26,13 +26,15 @@ public class TaskResultService {
     private final TaskMapper mapper;
     private final TaskService taskService;
     private final JsonService json;
+    private final AgentEventSyncService agentEventSync;
     private final Map<String, TaskResultHandler> handlers;
 
     public TaskResultService(TaskMapper mapper, TaskService taskService, JsonService json,
-                             List<TaskResultHandler> handlerList) {
+                             AgentEventSyncService agentEventSync, List<TaskResultHandler> handlerList) {
         this.mapper = mapper;
         this.taskService = taskService;
         this.json = json;
+        this.agentEventSync = agentEventSync;
         this.handlers = new HashMap<>();
         for (TaskResultHandler handler : handlerList) {
             for (String operation : handler.operations()) {
@@ -100,6 +102,7 @@ public class TaskResultService {
             if (mapper.succeed(taskId, json.stringify(reference), digest) == 0) {
                 throw BusinessException.conflict("任务状态已变化", "INVALID_STATE");
             }
+            agentEventSync.syncTask(taskId, runId);
             taskService.appendEvent(task, "done", reference);
             log.info("callback succeeded task={} operation={} run={}", taskId, operation, runId);
             return response(true, taskId, "SUCCEEDED");
@@ -116,6 +119,7 @@ public class TaskResultService {
         handler.failure(task, error);
         String javaStatus = "CANCELLED".equals(status) || "CANCEL_REQUESTED".equals(task.getStatus())
                 ? "CANCELLED" : "FAILED";
+        agentEventSync.syncTask(taskId, runId);
         finish(task, javaStatus, error, digest);
         log.warn("callback finished task={} operation={} run={} status={}", taskId, operation, runId, javaStatus);
         return response(true, taskId, javaStatus);

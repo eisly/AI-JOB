@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import httpx
 
 from ..security import UnsafeUrlError, resolve_public_ipv4
+from ..text_extract import extract_listing_fields
 from ..verification import STATUS_CLOSED, STATUS_PROBABLE, STATUS_UNKNOWN
 
 MAX_DETAIL_BYTES = 512 * 1024
@@ -22,6 +23,10 @@ APPLY = re.compile(r"^(?:立即申请|申请职位|立即投递|投递简历|申
 APPLY_ROUTE = re.compile(r"(?:^|[/_.-])(?:apply|application|submitapplication)(?:$|[/_.-])", re.I)
 JOB_ID_KEYS = {"id", "jobid", "positionid", "postid", "requisitionid", "gh_jid"}
 DEADLINE = re.compile(r"(?:投递截止日期|截止日期|过期时间)[:： ]*(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})")
+APPLICATION_PERIOD = re.compile(
+    r"(?:投递时间|申请时间)\s*[:：]\s*20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*[-~～至]\s*"
+    r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})"
+)
 CHINA = timezone(timedelta(hours=8))
 
 
@@ -120,7 +125,7 @@ def _past_deadline(value: str, now: datetime) -> bool:
 def closed_text(body: str, now: datetime) -> bool:
     if CLOSED.search(body):
         return True
-    for y, m, d in DEADLINE.findall(body):
+    for y, m, d in [*DEADLINE.findall(body), *APPLICATION_PERIOD.findall(body[:1600])]:
         try:
             if _past_deadline(f"{y}-{int(m):02}-{int(d):02}", now):
                 return True
@@ -133,37 +138,55 @@ def _job_ids(url) -> set[str]:
     return {value for key, value in parse_qsl(url.query) if key.casefold() in JOB_ID_KEYS and value}
 
 
+def _html_title(html: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if match and match.group(1).strip():
+        return " ".join(re.sub(r"<[^>]+>", " ", match.group(1)).split())[:300]
+    from ..page_body import Tree
+    for node in Tree(html).root.walk():
+        if node.tag == "meta" and (node.attrs.get("property") or node.attrs.get("name")) in {"og:title", "twitter:title"}:
+            return " ".join((node.attrs.get("content") or "").split())[:300]
+    return ""
+
+
 def read_detail_result(url: str, html: str, now: datetime) -> DetailResult:
     page = _Detail()
     page.feed(html)
-    body = " ".join(" ".join(page.text).split())
+    from ..page_body import job_body, listing_fields, structured_job
+    body = job_body(html)
+    matched = structured_job(html, url)
+    page_data = {"title": _html_title(html), "body": body, "fields": listing_fields(html, url),
+                 "html": html, "job": matched}
     if closed_text(body, now):
-        return _result(STATUS_CLOSED, "OFFICIAL_CLOSED", url, http_status=200, detail="页面明确声明岗位下线或截止")
+        return _result(STATUS_CLOSED, "OFFICIAL_CLOSED", url, http_status=200,
+                       page=page_data, detail="页面明确声明岗位下线或截止")
     jobs = []
     for block in page.structured:
         try:
             jobs.extend(_job_postings(json.loads(block)))
         except (ValueError, RecursionError):
             continue
+    if matched:
+        jobs = [matched]
     if len(jobs) != 1:
         return _result(STATUS_UNKNOWN, "DETAIL_NOT_FOUND", url, http_status=200,
-                       detail="页面未提供唯一的 JobPosting 结构化数据")
+                       page=page_data, detail="页面未提供唯一的 JobPosting 结构化数据")
     job = jobs[0]
     if job.get("url") and canonical_detail(urljoin(url, str(job["url"]))) != url:
         return _result(STATUS_UNKNOWN, "DETAIL_NOT_FOUND", url, http_status=200,
-                       detail="页面结构化岗位链接与候选链接不一致")
+                       page=page_data, detail="页面结构化岗位链接与候选链接不一致")
     if job.get("validThrough"):
         try:
             if _past_deadline(str(job["validThrough"]), now):
                 return _result(STATUS_CLOSED, "EXPIRED", url, http_status=200,
-                               detail="岗位投递截止日期已过")
+                               page=page_data, detail="岗位投递截止日期已过")
         except ValueError:
             return _result(STATUS_UNKNOWN, "DETAIL_NOT_FOUND", url, http_status=200,
-                           detail="岗位截止日期无法解析")
+                           page=page_data, detail="岗位截止日期无法解析")
     title = job.get("title")
     if not isinstance(title, str) or not title.strip() or title.strip().casefold() not in body.casefold():
         return _result(STATUS_UNKNOWN, "DETAIL_NOT_FOUND", url, http_status=200,
-                       detail="页面标题与岗位标题不一致")
+                       page=page_data, detail="页面标题与岗位标题不一致")
     # Limit positive evidence to a job-specific apply route on the same origin.
     detail = urlsplit(url)
     path = detail.path.rstrip("/")
@@ -180,10 +203,10 @@ def read_detail_result(url: str, html: str, now: datetime) -> DetailResult:
             continue
         if detail_ids & (set(target.path.split("/")) | target_ids):
             return _result(STATUS_PROBABLE, "ACTIVE_EVIDENCE_FOUND", url, http_status=200,
-                           page={"title": title, "body": body}, apply_link=True,
+                           page={**page_data, "title": title}, apply_link=True,
                            detail="详情页包含岗位正文与岗位专属投递入口")
     return _result(STATUS_PROBABLE, "APPLY_LINK_MISSING", url, http_status=200,
-                   page={"title": title, "body": body},
+                   page={**page_data, "title": title},
                    detail="详情页包含岗位正文，但未识别到岗位专属投递入口")
 
 
@@ -194,16 +217,20 @@ def read_detail(url: str, html: str, now: datetime) -> tuple[str, dict | None]:
     return status, result.page
 
 
-async def fetch_detail(client, url: str, timeout: float) -> DetailResult:
+async def fetch_detail(client, url: str, timeout: float, *, budget=None) -> DetailResult:
     original = url
     try:
-        for _ in range(3):
+        for redirect_count in range(3):
             url = canonical_detail(url)
             if not url:
                 return _result(STATUS_UNKNOWN, "PAGE_ACCESS_FAILED", original, detail="候选链接无法规范化")
             destination = urlsplit(url)
             host = destination.hostname or ""
             address = await resolve_public_ipv4(host)
+            if budget and redirect_count:
+                if not budget.can_call():
+                    return _result(STATUS_UNKNOWN, "BUDGET_EXHAUSTED", original)
+                budget.record_api_call()
             # Pin the connection to the checked address; validate TLS against the original host.
             pinned = urlunsplit(destination._replace(netloc=address))
             async with client.stream("GET", pinned, timeout=timeout, follow_redirects=False,

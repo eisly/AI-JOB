@@ -8,32 +8,38 @@ import httpx
 from .base import ProviderResult, SearchHit, SearchProvider
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
-BRAVE_FRESHNESS = {"pd": "pd", "pw": "pw", "pm": "pm", "py": "py"}
+BRAVE_FRESHNESS = {"pd": "pd", "pw": "pw", "pm": "pm", "py": "py",
+                    "day": "pd", "week": "pw", "month": "pm", "year": "py"}
 
 
 class BraveProvider(SearchProvider):
     key = "brave"
     name = "Brave Search"
     requires_credentials = True
+    supports_pagination = True
 
     def configured(self, settings: Any) -> bool:
         return bool(getattr(settings, "brave_search_api_key", None))
 
     async def search(self, client: Any, query: str, *, settings: Any, limit: int, timeout: float,
-                     freshness: str | None = None, retries: int = 1) -> ProviderResult:
+                     freshness: str | None = None, retries: int = 1,
+                     page: int = 0) -> ProviderResult:
         api_key = getattr(settings, "brave_search_api_key", None)
         if not api_key:
             return self.unconfigured(query)
         started = time.monotonic()
+        count = max(1, min(limit, self.max_results))
         params = {
             "q": query,
-            "count": max(1, min(limit, self.max_results)),
+            "count": count,
             "country": "cn",
             "search_lang": "zh-hans",
             "safesearch": "moderate",
             "text_decorations": "false",
             "spellcheck": "true",
         }
+        if page > 0:
+            params["offset"] = page * count
         if freshness in BRAVE_FRESHNESS:
             params["freshness"] = BRAVE_FRESHNESS[freshness]
         attempts = 0
@@ -86,6 +92,7 @@ class BraveProvider(SearchProvider):
                     key=self.key, name=self.name, status="OK" if hits else "EMPTY", hits=hits,
                     message="" if hits else "Brave 未返回结果", http_status=response.status_code,
                     duration_ms=int((time.monotonic() - started) * 1000), query=query, attempts=attempts,
+                    page=page, next_page=page + 1 if len(hits) >= count and page < 9 else None,
                 )
             except httpx.TimeoutException:
                 last_error = httpx.TimeoutException("timeout")

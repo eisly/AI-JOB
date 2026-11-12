@@ -474,3 +474,258 @@
 **遗留问题：** 改造样本的 7 条最终 Web 岗位均未确认城市；修正证据保留和未知类型展示后再做结果质量验收。隔离联调需验证 V7 迁移和结果持久化。
 
 ---
+### [2026-11-07] 修复岗位卡片字段提取与“未明确/域名”展示
+
+**任务目标：** 解决卡片显示“xxx.com / 未明确 / 实习校招”，以及薪资、公司规模、经验、学历未从 JD 和详情页提取的问题；只在原文或结构化来源可确认时填写，不编造。
+
+**执行行为：**
+
+1. 扩展网页提取提示词：新增 `salaryText`、`companySizeText`、`experienceText`、`educationText`、`publishedDate`，要求逐字引用原文，缺失填 null；`cityName` 优先取“工作地点/工作城市/base/办公地点”。
+2. 新增通用 `text_extract.py`：从 JD/页面原文解析城市、薪资、公司规模、经验、学历、发布时间；找不到返回空值。
+3. Web 提取：标题/公司继续使用页面证据；城市、薪资、规模、经验、学历、发布时间支持正文兜底，并标记 `CITY_FROM_TEXT`、`SALARY_FROM_TEXT` 等；详情页可访问时用 `_enrich_from_page` 仅补齐缺失字段。
+4. 官方来源接入：百度、腾讯、Greenhouse、Lever 均使用通用解析；百度优先使用列表结构化 `education`/`workYears`，为空时再从 `serviceCondition` 原文解析。
+5. 前端：城市无 `cityCode` 时回退显示 `cityName`；薪资/经验/学历/规模缺失统一显示“来源未提供”，不再显示“未明确”；补齐 `JobSearchItemVO.cityName` 类型。
+6. 保留真实性边界：百度列表接口没有薪资和公司规模字段，Web 摘要/详情页 403/404 时不补造；只在原文或结构化字段存在时填写。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | project/agent/app/search/text_extract.py | JD 字段解析（城市/薪资/规模/经验/学历/发布时间） | 官方与网页来源共用 |
+| 新增 | project/agent/tests/test_job_search_field_extraction.py、test_job_search_official_fields.py | 字段提取、无证据不编造、结构化字段优先 | 固定样本验证 |
+| 修改 | project/agent/app/skills/prompts/job_search_extract.md | 输出结构增加字段与原文约束 | 提高提取完整度 |
+| 修改 | project/agent/app/search/sources/web.py | 正文兜底、详情补全、字段提取 | Web 岗位字段 |
+| 修改 | project/agent/app/search/sources/baidu.py | 结构化 education/workYears 优先，JD 兜底 | 百度官方岗位字段 |
+| 修改 | project/agent/app/search/sources/tencent.py、greenhouse.py、lever.py | 接入通用 JD 字段解析 | 官方来源字段 |
+| 修改 | project/frontend/src/views/job-search/JobSearchView.vue | 城市回退、“来源未提供”文案 | 避免“未明确/域名”误解 |
+| 修改 | project/frontend/src/api/types.ts | `JobSearchItemVO.cityName` | 类型检查 |
+
+**执行命令与验证：**
+
+- `conda run -n ai-job python -m pytest tests/test_job_search_field_extraction.py tests/test_job_search_official_fields.py -q`：10 项通过（含无证据不编造、百度结构化字段优先）。
+- 完整岗位测试集（12 个文件）：128 项通过。
+- `npx vue-tsc --noEmit`：通过。
+- 真实复跑（同条件：后端开发、杭州/北京/上海、实习、规模不限且包含未知、最多 30；Tavily 主搜索，Brave 未启用）：12 条（百度 8 + Web 4）。
+  - 城市：12/12 有值（北京 6、上海 2、杭州 4）。
+  - 公司：Web 4/4 已提取为公司名（如字节跳动、上海艾拉比智能科技有限公司），不再显示域名。
+  - 学历：9/12（百度 6/8、Web 3/4）。
+  - 薪资、经验、规模：0/12。证据：百度列表 JSON 的 `education`/`workYears` 为空，且没有 salary/companySize 字段；Web 4 条中 3 条 CLOSED、1 条 UNKNOWN，摘要或详情页（403/404）不含这些字段。
+- 说明：真实复跑执行于“百度结构化字段优先”修改之前；修改后的固定测试已验证结构化字段优先，且实测这些字段为空，因此不改变真实结果，但未再次真实复跑。
+
+**影响范围：** 岗位提取、官方来源适配、前端岗位卡片展示；未改数据库结构。
+
+**遗留问题：** 1）薪资/公司规模需要额外企业档案或详情页数据源，当前官方列表与可访问摘要不提供，不能编造；2）经验在实习 JD 中多数未要求，显示“来源未提供”是事实；3）Brave 未启用、Lever 未联调；4）公司档案抓取（官网/招聘平台公司详情）尚未实现。
+
+---
+### [2026-11-07] 补招聘平台详情页抓取与结构化字段解析
+
+**任务目标：** 用户指出此前只用了 Tavily 摘要和百度官方列表，没有真正抓取招聘平台详情页，导致页面中明明存在的薪资、公司规模、经验、学历没有进入结果。本轮补齐详情页抓取并按岗位主区块解析字段。
+
+**执行行为：**
+
+1. `detail.py` 在 200 HTML 详情页上即使没有 JobPosting JSON-LD，也返回页面正文与 `fields`；状态仍按四态规则判定，不因可访问就伪造在招。
+2. Web 提取阶段新增预抓正文：对候选页在独立预算内抓取详情页（`max_page_fetch` 默认 12），预抓与详情核验预算分开，避免预抓耗尽核验额度。
+3. 新增结构化解析：优先读取 `class="salary"`、`job-properties`（城市/实习/学历）、`人数规模`、`公司信息`，再回退到通用正则；避免整页推荐岗位污染。
+4. 支持日薪原文（如 `100-150元/天`），即使无法换算月薪也保留 `salaryText` 展示。
+5. Web 详情页补全时同时补城市、公司名、薪资、规模、学历、经验、发布时间，且只填空缺、不覆盖已有值。
+6. 详情核验范围改为所有候选（含摘要判 CLOSED 的候选），以详情页证据重新判定状态并补字段；避免摘要误判导致跳过详情页。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | project/agent/app/search/sources/detail.py | 200 HTML 返回正文与结构化 fields | 详情页字段来源 |
+| 修改 | project/agent/app/search/text_extract.py | 新增 `extract_listing_fields` 岗位主区块解析 | 避免整页正则误取 |
+| 修改 | project/agent/app/search/sources/web.py | 预抓正文、独立预算、结构化优先、全候选核验 | 让页面字段进入结果 |
+| 修改 | project/agent/app/search/budget.py、config.py | 新增 `max_page_fetch` | 预抓与核验预算分离 |
+| 新增 | project/agent/tests/test_job_search_detail_fetch.py | Tavily 摘要过短 → 抓详情页 → 字段补全 | 端到端固定样本 |
+| 修改 | project/frontend/src/api/types.ts、JobSearchView.vue | cityName 回退、缺失显示“来源未提供” | 展示准确性 |
+
+**执行命令与验证：**
+
+- `conda run -n ai-job python -m pytest tests/test_job_search_detail_fetch.py -q`：1 项通过；固定猎聘式页面可抽出 `100-150元/天`、杭州 330100、华创证券、规模 2000-5000 人、本科。
+- `conda run -n ai-job python -m pytest tests/test_job_search_detail_fetch.py tests/test_job_search_verification_flow.py -q`：5 项通过。
+- 真实复跑（同条件）：`pagesFetched=36`、`detailChecks=6`、`jobDetailPages=12`，说明确实发起了详情页抓取；最终 14 条（百度 8 + Web 6），城市 14/14、学历 12/14，薪资/经验/规模仍为 0。
+- 真实 Web 候选为实习僧、LinkedIn、牛客系、shushuqiuzhi、offerseek 等，页面多为 403/登录墙/JS 渲染或已被判定关闭；用户截图中的猎聘岗位本轮未进入候选集。
+- 直接实网复验猎聘已知 URL 时发生 TLS 握手超时，未能完成；结构化解析器仅在固定样本验证，未宣称实网验证完成。
+
+**影响范围：** 详情页抓取、字段解析与展示；增加外部请求量，受独立预算限制。
+
+**遗留问题：** 1）通用整页正则不可靠（实网曾把城市识别为郑州、薪资识别为 1000-2000），必须按平台结构化区块或平台 API/JSON 解析；2）招聘平台 JS 渲染与登录墙需要浏览器渲染或平台接口；3）当前搜索候选集未包含截图中的猎聘岗位，需扩展查询/来源；4）薪资/规模仍不能保证所有平台可得，不得编造。
+
+---
+
+### [2026-11-07 12:40] 官网优先修复：证据与合并基础
+
+**任务目标：** 官网主来源、第三方补缺且保留证据。
+
+**执行行为：** 新增字段组证据；薪资等关联字段整体补齐；跨域合并增加公司、城市和招聘类型限制；官网状态不被第三方提升；详情成功分支保留结构化字段。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | project/agent/app/search/evidence.py | 字段组与来源证据 | 防止混合薪资与来源丢失 |
+| 修改 | project/agent/app/search/models.py | field_sources | 来源传递 |
+| 修改 | project/agent/app/search/dedupe.py | 合并限制与字段组补全 | 防止误合并与官网状态覆盖 |
+| 修改 | project/agent/app/search/sources/detail.py | 成功分支保留 fields | 修复结构化字段丢失 |
+
+**执行命令与验证：** 使用 Python 定点修改上述文件；尚未运行测试，后续分阶段回归。
+
+**影响范围：** Agent 搜索合并与详情解析；保留任务开始时既有未提交改动。
+
+**遗留问题：** 官网发现、主体解析、渲染及跨模块传递待完成。
+
+---
+
+### [2026-11-07 12:42] 官网发现、岗位主体解析与渲染接入
+
+**任务目标：** 官网取数优先并支持 JS 页面。
+
+**执行行为：** 新增官网来源与企业入口链接核验；新增主体 HTML/JSON-LD 提取；串行执行官方阶段与 Web 阶段；详情缓存跨轮共享，按实际抓取计数；增加受限 Chromium 渲染，HTTP 请求通过公网解析后固定 IP 的客户端返回浏览器，禁用 Service Worker/WebSocket；模型模糊引文不再保留无证据内容。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | project/agent/app/search/page_body.py | 主体和结构化数据解析 | 减少推荐区污染 |
+| 新增 | project/agent/app/search/sources/company_official.py | 官网发现与归属核验 | 官方来源优先 |
+| 新增 | project/agent/app/search/sources/render.py | 匿名受限渲染 | 读取 JS 岗位 |
+| 修改 | project/agent/app/search/sources/web.py、detail.py | 字段消费、缓存与渲染 | 修复提取链路 |
+| 修改 | project/agent/app/search/sources/registry.py、pipeline.py、budget.py | 来源、跨轮状态与截止时间 | 统一取数预算 |
+| 修改 | requirements.txt | Playwright 依赖 | 提供 Chromium 运行能力 |
+
+**执行命令与验证：** 文件修改完成；本阶段尚未执行测试。当前主 Python 有 httpx，ai-job 环境探针未找到 httpx；后续使用已安装依赖的解释器验证。
+
+**影响范围：** Agent 搜索、外部页面读取和依赖；未修改本地业务数据。
+
+**遗留问题：** Java/前端证据传递、回归和真实页面验证待完成。
+
+---
+
+### [2026-11-07，Asia/Shanghai] Java 与卡片字段来源传递及首轮验证
+
+**任务目标：** 将官网身份、规模原文和字段证据保存并展示。
+
+**执行行为：** 修改 Java 来源归一化、快照、返回值与合并，前端增加可点击字段依据和规模原文。运行首轮专项验证。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | project/backend/src/main/java/com/aijob/backend/job/JobSearchResultHandler.java | 官网来源、证据归一化/快照、原子薪资合并 | 保留来源与关联字段 |
+| 修改 | project/backend/src/main/java/com/aijob/backend/job/JobSearchService.java | 返回规模原文与证据 | API 传递 |
+| 修改 | project/frontend/src/api/types.ts、src/views/job-search/JobSearchView.vue | 新类型与字段证据弹层 | 用户可核对原文 |
+
+**执行命令与验证：**
+
+- python -m pip install playwright：失败，当前网络/索引未返回可安装版本，尚未安装浏览器。
+- 主 Python 直接 pytest：缺 pytest_asyncio；加入既有 .testdeps 后运行 4 个岗位测试文件，14 通过、2 失败（详情核验样本提取为空），正在排查。
+- npm run type-check：通过。
+- Maven 三个搜索专项类：已启动，待结果。
+- git diff --check：通过。
+
+**影响范围：** Java 搜索快照与卡片；不需要数据库迁移。
+
+**遗留问题：** 修复回归失败、补新增功能测试、构建及真实页面验收。
+
+---
+
+### [2026-11-07，Asia/Shanghai] 回归修正与浏览器依赖安装
+
+**任务目标：** 修复回归暴露问题并验证构建。
+
+**执行行为：** 短详情页保留原摘要，模糊引文映射回真实原文；抓取计数改为搜索级共享；给官方首轮和 Web 留出页面配额；官网缺字段生成公司岗位定向补搜，第三方候选再查官网。补充字段来源 Java 快照测试和 Agent 官方优先测试。
+
+**文件变更：** 修改 web.py、pipeline.py、company_official.py、text_extract.py、requirements.txt；新增 tests/test_job_search_official_priority.py；修改 test_job_search_extraction_recovery.py 与 Java JobSearchResultHandlerTest.java。旧模糊引用用例的实际原文不足 35 字符，改为验证拒绝短原文，避免靠模型增写凑长度。
+
+**执行命令与验证：**
+
+- 通过显式 PyPI 索引安装 Playwright 1.64.1 到项目现有 .testdeps 成功；Chromium 下载进行中，中途 ECONNRESET 后安装器重试。
+- Agent 搜索专项首次 135 通过、2 失败；修正后 136 通过、1 失败（上述短原文用例），已修正预期，待复跑。
+- 新增 Java 测试首次因 Harness 未模拟新来源 ID 报错，已补模拟，待复跑；原有 8 项通过。
+- 前端普通构建因 esbuild 子进程权限失败，允许子进程后临时输出 .verify-dist 构建成功；存在既有大包体积提示。
+
+**影响范围：** 搜索取数与字段证据；未改数据库或业务记录。
+
+**遗留问题：** 最终回归、浏览器运行、真实页面和 UI 验证待完成。
+
+---
+
+### [2026-11-07，Asia/Shanghai] 浏览器运行验证与来源默认值修复
+
+**任务目标：** 验证真实 Chromium 执行和来源贯通。
+
+**执行行为：** Chromium 安装成功；最小启动探针成功。渲染回归发现 await 在生成器表达式中引发 TypeError，已提取为先读取正文后同步判断；微小剩余预算在启动浏览器前直接超时，避免进程清理挂起。补齐 Java 来源白名单、Java/Agent 默认来源配置。
+
+**文件变更：** 新增 tests/test_job_search_render.py；修改 render.py、page_body.py、detail.py、config.py、registry.py、JobSearchService.java、application.yml；新增来源/快照测试维护在 JobSearchResultHandlerTest.java。
+
+**执行命令与验证：** Agent 137 项搜索相关测试通过；Java 3 个专项类共 9 项通过（含新增官网身份和字段证据快照）；Chromium JS 字段和私网请求拦截通过、跳转拦截/依赖缺失/超时通过，登录墙用例因样本响应缺 UTF-8 charset 失败，已修正真实响应编码，待最终复跑。最初渲染组因极小超时测试子进程清理未返回而中断，未将中断运行报为通过。
+
+**影响范围：** 搜索默认来源与无登录渲染。
+
+**遗留问题：** 最终渲染全组、真实页面及页面交互验收。
+
+---
+
+### [2026-11-07，Asia/Shanghai] 搜索回归、真实页面核对与超时保留
+
+**任务目标：** 保留部分结果并核对实网取数字段。
+
+**执行行为：** 原文城市/规模/时间识别收紧为明确标签；新增同招聘主体的规模补全；超时来源保留已完成解析批次。新增可信企业域名配置入口。网页身份不匹配时不向旧岗位补字段。
+
+**文件变更：** 修改 Agent web.py、pipeline.py、dedupe.py、company_registry.py、config.py；新增 data/verify_official_priority_20261107.json（仅公开岗位字段）；更新浏览器测试样本编码。
+
+**执行命令与验证：** 142 项岗位搜索相关测试通过（含 5 个 Chromium 测试）。匿名真实页面探针调用 fetch_detail 和 render_detail：猎聘 /job/1985680015.shtml HTTP 200，可解析日薪 200-200元/天、深圳、学历/经验/发布时间；该 URL 当前内容与旧固定样本中的华创 AI 实习岗位不同，不把旧样本值当作实网结果。华创 hotjob 列表与字节指定链接 HTTP 200，但静态和渲染结果均没有可确认岗位字段，状态 UNKNOWN/DETAIL_NOT_FOUND。未运行外部模型分析或发送真实画像。前端临时服务 127.0.0.1:5187 已启动，虚构数据 UI 验收进行中。
+
+**影响范围：** 公网页面读取、证据合并和超时降级；未写业务库。
+
+**遗留问题：** 最新改动复跑与 UI 验收；尚无真实 Java—Agent HTTP 回调全链路验证。
+
+---
+
+### [2026-11-07，Asia/Shanghai] 前端交互验收与补充回归
+
+**任务目标：** 验证用户能看到公司规模原文并查看字段证据。
+
+**执行行为：** 按 frontend-testing-debugging / Playwright 技能验证。Browser plugin not available，使用已安装 Python Playwright。127.0.0.1:5187 的 /jobs?tab=search&searchId=fixture 注入虚构接口数据，点击薪资依据并确认第三方证据链接可见，保存截图并视觉检查。最初接口样本使用 code=0 与项目实际 code=200 不符导致页面未出现，改为真实响应信封后通过。
+
+**文件变更：** README.md 增加依赖安装、官网域名配置、预算与旧记录兼容说明；tests/test_job_search_official_priority.py 增加 ATS 租户关系和同主体规模补全测试；tests/test_job_search_sources.py 的城市/公司规模样本增加明确标签，避免把未标记数字范围当作企业规模。
+
+**执行命令与验证：** UI URL 和标题符合目标，页面内容正常、无框架错误层，pageerror=[]；规模原文 2000-5000人 可见，薪资依据点击后第三方链接可见。截图在本聊天可视化目录 official-priority-ui.png，未放入源码。最近 Agent 回归 141 通过、1 失败，原因为旧测试无标签的规模被收紧后的规则判未知；已补明确来源标签，待最终复跑。
+
+**影响范围：** 页面字段证据展示与部署说明。
+
+**遗留问题：** 真实 HTTP 回调/数据库全链路尚未验收；最终专项复跑与工作区清理待完成。
+
+---
+
+### [2026-11-07 13:00] 官网优先搜索修复最终验证与交付核对
+
+**任务目标：** 完成核心修复并明确验证边界。
+
+**执行行为：** 官网数量、城市/类型覆盖及字段均满足时跳过第三方，否则按缺口补搜；官网来源统计只计实际确认归属岗位。加入完整 Pipeline 的官网优先/补缺/无官网降级、超时保留批次及缓存复用回归。核对本次新增及修改文件，保留开始时已有的未提交改动与 agent_runs.db-wal。本次临时前端服务已停止，临时 .verify-dist 在核对绝对路径后删除。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | project/agent/app/search/pipeline.py、budget.py | 条件降级、部分结果保留与真实抓取计数 | 预算和行为准确 |
+| 修改 | project/agent/app/search/sources/company_official.py | 官方接受数统计 | 避免候选统计充当官网数量 |
+| 修改 | project/agent/tests/test_job_search_official_priority.py | 完整 Pipeline/超时/缓存回归 | 验证关键新分支 |
+| 删除 | project/frontend/.verify-dist（本次生成产物） | 移除临时构建输出 | 不污染工作区 |
+
+**执行命令与验证：**
+
+- 在 project/agent 设置 PYTHONPATH 为既有 .testdeps 和 Agent 根目录，执行 `python -m pytest tests -q -k 'job_search or search_planning or search_metrics or search_providers or verification' -p no:cacheprovider`：150 项通过，退出码 0；含真实 Chromium JS 提取/私网子请求拦截/非岗位跳转/登录墙/超时/依赖缺失测试。既有弃用提示不影响测试结果。
+- `mvn -Dtest=JobSearchResultHandlerTest,JobSearchLinksTest,JobSearchFingerprintTest test -q`：9 项通过，退出码 0。
+- `npm run type-check`：通过；`npm run build -- --outDir D:/py/AI-JOB/project/frontend/.verify-dist`：通过，存在大包体积提示。
+- Playwright 虚构数据页面：公司规模原文可见，点击薪资依据可查看第三方证据链接，pageerror=[]，截图已视觉检查。
+- 真实页面抓取结果保存在 project/agent/data/verify_official_priority_20261107.json。猎聘返回结构化字段，但链接当前内容不同于旧固定样本；华创列表/字节指定链接未取得可确认字段，未宣称全部抓取成功。
+- `git diff --check`：通过。
+
+**影响范围：** Agent 搜索、Java JSON 快照和前端岗位卡片；无需数据库迁移。依赖安装方式已写入 README。现有业务服务未重启；生产环境需在对应 Python 环境安装 requirements.txt 和 Chromium 后重启加载新代码。
+
+**遗留问题：** 未执行真实 Java—Agent HTTP 回调和数据库端到端验收；已有端到端脚本会操作 career_business 并停止当前端口服务，本轮未运行该脚本。外部站点的登录、验证码、空壳或网络限制仍会导致字段未知，不能保证官网岗位或薪资/规模全部可得。旧结果不自动更新，需要重新搜索。未运行整个项目全量测试，验证集中于改动相关模块。
+
+---

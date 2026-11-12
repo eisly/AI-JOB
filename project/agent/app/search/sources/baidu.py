@@ -8,8 +8,9 @@ from datetime import date, datetime, timezone
 
 import httpx
 
-from ..models import SourcePosting, SourceResult, city_code_for
+from ..models import SourcePosting, SourceResult, city_code_for, education_from_text, parse_experience_months
 from ..security import ensure_public_url
+from ..text_extract import extract_job_fields
 from ..verification import official_list
 from .base import SourceAdapter, SourceContext, filter_postings
 from .detail import closed_text
@@ -71,6 +72,8 @@ class BaiduCareerSource(SourceAdapter):
 
     async def _search_list(self, context: SourceContext, kind: str, keyword: str):
         await ensure_public_url(LIST_URL, allowed_hosts={BAIDU_HOST})
+        if not context.reserve_request():
+            raise TimeoutError("来源请求预算已用完")
         recruit_type = RECRUIT_TYPES[kind]
         response = await context.client.get(LIST_URL, params={"recruitType": recruit_type, "search": keyword},
                                             headers={"Cache-Control": "no-cache"}, timeout=3.0, follow_redirects=False)
@@ -102,14 +105,38 @@ def _postings(row, kind: str, checked_at: datetime):
         published = datetime.combine(date.fromisoformat(row["publishDate"]), datetime.min.time(), timezone.utc)
     except (KeyError, TypeError, ValueError):
         pass
+    updated = None
+    try:
+        updated = datetime.combine(date.fromisoformat(row["updateDate"]), datetime.min.time(), timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        pass
     locations = re.split(r"[,，、/;；]", str(row.get("workPlace") or ""))
+    fields = extract_job_fields(jd, title=title.strip())
+    education_text = str(row.get("education") or "").strip() or fields.education_text
+    education_min = education_from_text(education_text) if education_text else None
+    work_years = str(row.get("workYears") or "").strip()
+    experience_text = work_years or fields.experience_text
+    experience_months = parse_experience_months(experience_text) if experience_text else fields.experience_months_min
+    published = published or fields.published_at
     for city in dict.fromkeys(location.strip() for location in locations):
         source_url = f"https://{BAIDU_HOST}/jobs/detail/{RECRUIT_TYPES[kind]}/{post_id}"
+        resolved_city = city or fields.city_name
+        resolved_code = city_code_for(city) or fields.city_code
         posting = SourcePosting(
             source_key="baidu", source_name=BaiduCareerSource.name, source_type="OFFICIAL",
             source_url=source_url,
-            title=title.strip()[:200], company_name="百度", jd_text=jd, city_name=city[:100] or None,
-            city_code=city_code_for(city), candidate_type=kind, published_at=published, fetched_at=checked_at,
+            title=title.strip()[:200], company_name="百度", jd_text=jd,
+            city_name=resolved_city[:100] if resolved_city else None,
+            city_code=resolved_code, candidate_type=kind, published_at=published, updated_at=updated,
+            fetched_at=checked_at,
+            salary_text=fields.salary_text,
+            salary_min_monthly_cents=fields.salary_min_monthly_cents,
+            salary_max_monthly_cents=fields.salary_max_monthly_cents,
+            experience_text=experience_text,
+            experience_months_min=experience_months,
+            education_text=education_text,
+            education_min=education_min,
+            company_size=fields.company_size,
             verification="VERIFIED", recruitment_evidence="OFFICIAL_LIST",
         )
         official_list(source_url, checked_at=checked_at).apply(posting)

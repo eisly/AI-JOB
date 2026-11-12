@@ -132,6 +132,18 @@ class QuerySpec:
         }
 
 
+def freshness_window(days: int) -> str | None:
+    if days <= 1:
+        return "day"
+    if days <= 7:
+        return "week"
+    if days <= 31:
+        return "month"
+    if days <= 366:
+        return "year"
+    return None
+
+
 def build_query_specs(
     filters: SearchFilters,
     keyword: str,
@@ -144,31 +156,31 @@ def build_query_specs(
     cities = list(filters.cities) or [""]
     types = list(filters.candidate_types) or [""]
     kind_suffix = {"INTERNSHIP": "实习", "CAMPUS": "校招", "EXPERIENCED": "社招"}
+    time_range = freshness or freshness_window(freshness_days)
     specs: list[QuerySpec] = []
-    # 先按城市轮转，保证每个城市首轮都有覆盖，而不是被一个城市占满。
-    for candidate_type in types:
-        suffix = kind_suffix.get(candidate_type, "")
-        for index in range(max(len(expansions), len(cities))):
-            city_code = cities[index % len(cities)]
+    # 每一轮同义词优先覆盖全部城市和求职类型，再进入下一同义词，避免单城市占满预算。
+    for index in range(max(len(expansions), 1)):
+        variant = expansions[index % len(expansions)]
+        for city_code in cities:
             city_name = CITY_NAMES.get(city_code, city_code)
-            variant = expansions[index % len(expansions)]
-            # 扩展词可能已带“实习/校招/社招”，避免生成“实习 实习”。
-            label = "" if suffix and variant.endswith(suffix) else suffix
-            parts = [part for part in (city_name, variant, label, "招聘 职位") if part]
-            query = " ".join(parts)
-            spec = QuerySpec(
-                query=query,
-                city_code=city_code,
-                city_name=city_name,
-                keyword=variant,
-                category=keyword_category(variant),
-                candidate_type=candidate_type,
-                freshness=freshness if freshness_days <= 7 else None,
-            )
-            if spec.query not in {item.query for item in specs}:
-                specs.append(spec)
-            if len(specs) >= limit:
-                return specs
+            for candidate_type in types:
+                suffix = kind_suffix.get(candidate_type, "")
+                label = "" if suffix and variant.endswith(suffix) else suffix
+                parts = [part for part in (city_name, variant, label, "招聘 职位") if part]
+                query = " ".join(parts)
+                spec = QuerySpec(
+                    query=query,
+                    city_code=city_code,
+                    city_name=city_name,
+                    keyword=variant,
+                    category=keyword_category(variant),
+                    candidate_type=candidate_type,
+                    freshness=time_range,
+                )
+                if spec.query not in {item.query for item in specs}:
+                    specs.append(spec)
+                if len(specs) >= limit:
+                    return specs
     return specs
 
 
@@ -177,6 +189,7 @@ class CoverageCell:
     city_code: str
     city_name: str
     category: str
+    candidate_type: str = ""
     queries: set[str] = field(default_factory=set)
     providers: set[str] = field(default_factory=set)
     keywords: set[str] = field(default_factory=set)
@@ -198,15 +211,19 @@ class CoverageMatrix:
         self.providers = tuple(providers)
         self.attempt_limit = max(1, attempt_limit)
         self._exhausted = False
-        self.cells: dict[tuple[str, str], CoverageCell] = {}
+        self.cells: dict[tuple[str, str, str], CoverageCell] = {}
         for spec in specs:
-            key = (spec.city_code, spec.category)
-            self.cells.setdefault(key, CoverageCell(spec.city_code, spec.city_name, spec.category))
+            key = (spec.city_code, spec.category, spec.candidate_type)
+            self.cells.setdefault(
+                key,
+                CoverageCell(spec.city_code, spec.city_name, spec.category, spec.candidate_type),
+            )
 
     def _cell(self, spec: QuerySpec) -> CoverageCell:
+        key = (spec.city_code, spec.category, spec.candidate_type)
         return self.cells.setdefault(
-            (spec.city_code, spec.category),
-            CoverageCell(spec.city_code, spec.city_name, spec.category),
+            key,
+            CoverageCell(spec.city_code, spec.city_name, spec.category, spec.candidate_type),
         )
 
     def mark_query(self, spec: QuerySpec, provider: str) -> None:
@@ -238,10 +255,9 @@ class CoverageMatrix:
         expected = set(self.providers)
         for cell in self.cells.values():
             providers_ok = not expected or expected <= cell.providers
-            # 只有“分析过且产出岗位”或“已用尽同义词尝试”才算完成；
-            # 有链接但 0 提取仍视为覆盖缺口。
+            # 只有“分析过且产出岗位”或“确实已分析但仍无结果且尝试耗尽”才算完成。
             produced = cell.analyzed > 0 and cell.extracted > 0
-            exhausted = cell.attempt_count >= self.attempt_limit
+            exhausted = cell.analyzed > 0 and cell.attempt_count >= self.attempt_limit
             cell.completed = bool(cell.queries) and providers_ok and (produced or exhausted)
 
     def uncovered(self) -> list[CoverageCell]:
@@ -280,6 +296,7 @@ class CoverageMatrix:
                     "cityCode": cell.city_code,
                     "cityName": cell.city_name,
                     "category": cell.category,
+                    "candidateType": cell.candidate_type,
                     "queries": len(cell.queries),
                     "providers": sorted(cell.providers),
                     "found": cell.found,

@@ -2,8 +2,6 @@ package com.aijob.backend.job;
 
 import java.math.BigDecimal;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -15,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -36,6 +35,11 @@ public class JobSearchResultHandler implements TaskResultHandler {
 
     private static final Set<String> CANDIDATE_TYPES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
     private static final Set<String> EDUCATION = Set.of("HIGH_SCHOOL", "ASSOCIATE", "BACHELOR", "MASTER", "DOCTOR");
+    private static final Pattern EXPLICIT_DEGREE = Pattern.compile("(高中|大专|本科|硕士|博士)\\s*(?:及|或)?以上");
+    private static final Pattern GRADUATING_CLASS = Pattern.compile(
+            "(20\\d{2})\\s*届(?:\\s*(或|至|和|、|[-~～])\\s*(20\\d{2})\\s*届)?\\s*(?:应届)?毕业生");
+    private static final Pattern EXPLICIT_EXPERIENCE = Pattern.compile(
+            "(?:至少|拥有|具有|具备|要求)\\s*(\\d{1,2})\\s*年\\s*(?:及)?以上[^。；;]{0,24}(?:经验|经历)");
     private static final Set<String> SOURCE_TYPES = Set.of("OFFICIAL", "AUTHORIZED", "PUBLIC_SEARCH", "USER_INPUT");
     private static final Set<String> VERIFICATION_STATUSES = Set.of(
             "ACTIVE_CONFIRMED", "ACTIVE_PROBABLE", "UNKNOWN", "CLOSED");
@@ -137,15 +141,18 @@ public class JobSearchResultHandler implements TaskResultHandler {
         Map<String, Integer> bySource = new LinkedHashMap<>();
         Map<String, Integer> providers = new LinkedHashMap<>();
         int dropped = 0;
+        Map<String, Integer> rejected = new LinkedHashMap<>();
         int valid = 0;
         String fallbackType = fallbackCandidateType(types, profile);
         for (Map<String, Object> raw : rawItems) {
             SearchCandidate candidate = normalize(raw, catalog, fallbackType);
-            if (candidate == null || (!cities.isEmpty() && candidate.cityCode != null
-                    && !cities.contains(candidate.cityCode))
-                    || (!types.isEmpty() && !candidate.candidateTypeInferred && !types.contains(candidate.candidateType))
-                    || !matchesSize(candidate.companySize, sizes, includeUnknownSize)) {
+            String reject = candidate == null ? "INVALID_FIELDS" :
+                    (!cities.isEmpty() && candidate.cityCode != null && !cities.contains(candidate.cityCode)) ? "CITY" :
+                    (!types.isEmpty() && !candidate.candidateTypeInferred && !types.contains(candidate.candidateType)) ? "TYPE" :
+                    !matchesSize(candidate.companySize, sizes, includeUnknownSize) ? "SIZE" : null;
+            if (reject != null) {
                 dropped++;
+                rejected.merge(reject, 1, Integer::sum);
                 continue;
             }
             valid++;
@@ -161,8 +168,10 @@ public class JobSearchResultHandler implements TaskResultHandler {
             }
         }
         List<SearchCandidate> candidates = new ArrayList<>(unique.values());
+        Map<String, Integer> qualification = new LinkedHashMap<>(Map.of("PASS", 0, "UNKNOWN", 0, "FAIL", 0));
         for (SearchCandidate candidate : candidates) {
             prepare(candidate, profile, facts, snapshots);
+            qualification.merge(candidate.eligibilityStatus, 1, Integer::sum);
         }
         candidates.sort(Comparator
                 .comparingInt((SearchCandidate item) -> "CLOSED".equals(item.verificationStatus) ? 3
@@ -171,6 +180,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
                             case "UNKNOWN" -> 1;
                             default -> 2;
                         })
+                .thenComparing(item -> item.warnings.contains("STALE_POSTING"))
                 .thenComparing(item -> item.matchScore, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparingInt(item -> -verificationRank(item.verificationStatus))
                 .thenComparingInt(item -> -completeness(item))
@@ -211,6 +221,12 @@ public class JobSearchResultHandler implements TaskResultHandler {
         summary.put("validCount", valid);
         summary.put("uniqueCount", candidates.size());
         summary.put("droppedCount", dropped);
+        summary.put("rejectedByReason", rejected);
+        summary.put("qualification", qualification);
+        summary.put("uniqueBeforeLimit", uniqueCount);
+        summary.put("truncatedCount", uniqueCount - candidates.size());
+        summary.put("agentMetrics", root.get("metrics"));
+        summary.put("agentDedupe", root.get("dedupe"));
         summary.put("mergedCount", valid - uniqueCount);
         summary.put("multiSourceCount", multiSource);
         summary.put("unknownSizeCount", unknownSize);
@@ -276,7 +292,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         if (Set.of("baidu", "tencent", "greenhouse", "lever").contains(sourceKey)) {
             return "OFFICIAL_LIST".equals(evidence);
         }
-        return "web".equals(sourceKey) && Set.of("OFFICIAL_LIST", "DETAIL_APPLY_LINK", "DETAIL_TEXT").contains(evidence);
+        return Set.of("web", "company_official").contains(sourceKey) && Set.of("OFFICIAL_LIST", "DETAIL_APPLY_LINK", "DETAIL_TEXT").contains(evidence);
     }
 
     private boolean fresh(LocalDateTime checkedAt, Duration window, LocalDateTime now) {
@@ -400,6 +416,19 @@ public class JobSearchResultHandler implements TaskResultHandler {
             candidate.salaryMin = null;
             candidate.salaryMax = null;
         }
+        candidate.companySizeText = limitNullable(text(raw.get("companySizeText")), 200);
+        if (raw.get("fieldSources") instanceof Map<?, ?> sources) {
+            for (var entry : sources.entrySet()) {
+                if (Set.of("salary", "companySize", "city", "education", "experience", "publishedAt", "updatedAt", "companyName").contains(String.valueOf(entry.getKey()))
+                        && entry.getValue() instanceof Map<?, ?> value && httpUrl(text(value.get("sourceUrl")))) {
+                    Map<String, Object> proof = new LinkedHashMap<>();
+                    for (String key : List.of("sourceUrl", "sourceName", "sourceType", "rawText", "fetchedAt")) {
+                        proof.put(key, limitNullable(text(value.get(key)), key.equals("sourceUrl") ? 2000 : 500));
+                    }
+                    candidate.fieldSources.put(String.valueOf(entry.getKey()), proof);
+                }
+            }
+        }
         candidate.salaryText = limitNullable(text(raw.get("salaryText")), 200);
         candidate.experienceText = limitNullable(text(raw.get("experienceText")), 200);
         candidate.experienceMonths = integer(raw.get("experienceMonthsMin"));
@@ -407,6 +436,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         String education = text(raw.get("educationMin"));
         candidate.educationMin = education != null && EDUCATION.contains(education) ? education : null;
         candidate.publishedAt = time(raw.get("publishedAt"));
+        candidate.updatedAt = time(raw.get("updatedAt"));
         candidate.fetchedAt = time(raw.get("fetchedAt"));
         candidate.jdText = limit(jdText, 30000, candidate.warnings, "JD");
         candidate.requirements = requirements(raw.get("requirements"), candidate.jdText, catalog, candidate.warnings);
@@ -429,7 +459,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
     }
 
     private SourceDefaults sourceDefaults(String key, String type, String verification) {
-        if (Set.of("baidu", "tencent", "greenhouse").contains(key)) {
+        if (Set.of("baidu", "tencent", "greenhouse", "lever", "company_official").contains(key)) {
             return new SourceDefaults("OFFICIAL", "VERIFIED");
         }
         if (Set.of("web", "liepin", "boss", "zhaopin").contains(key)) {
@@ -497,13 +527,46 @@ public class JobSearchResultHandler implements TaskResultHandler {
                 }
             }
         }
+        if (education != null && quotes.get("educationMin") instanceof String evidence) {
+            var degree = EXPLICIT_DEGREE.matcher(evidence);
+            if (degree.find()) {
+                education = switch (degree.group(1)) {
+                    case "高中" -> "HIGH_SCHOOL";
+                    case "大专" -> "ASSOCIATE";
+                    case "本科" -> "BACHELOR";
+                    case "硕士" -> "MASTER";
+                    default -> "DOCTOR";
+                };
+            }
+        }
+        if (yearMin == null && yearMax == null) {
+            var graduation = GRADUATING_CLASS.matcher(jdText);
+            if (graduation.find()) {
+                String suffix = jdText.substring(graduation.end(), Math.min(jdText.length(), graduation.end() + 12));
+                int first = Integer.parseInt(graduation.group(1));
+                int second = graduation.group(3) == null ? first : Integer.parseInt(graduation.group(3));
+                boolean continuous = second - first <= 1 || "至".equals(graduation.group(2))
+                        || Set.of("-", "~", "～").contains(String.valueOf(graduation.group(2)));
+                if (continuous && first <= second && !suffix.matches("^\\s*(?:优先|不限).*")) {
+                    yearMin = first;
+                    yearMax = second;
+                    quotes.put("graduationYearMin", graduation.group());
+                    quotes.put("graduationYearMax", graduation.group());
+                }
+            }
+        }
         if (education != null && !quotes.containsKey("educationMin")) {
             education = null;
             warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:educationMin");
         }
         if (months != null && !quotes.containsKey("experienceMonthsMin")) {
-            months = null;
-            warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:experienceMonthsMin");
+            var experience = EXPLICIT_EXPERIENCE.matcher(jdText);
+            if (experience.find() && Integer.parseInt(experience.group(1)) * 12 == months) {
+                quotes.put("experienceMonthsMin", experience.group());
+            } else {
+                months = null;
+                warnings.add("REQUIREMENT_DROPPED_NO_QUOTE:experienceMonthsMin");
+            }
         }
         if (yearMin != null && !quotes.containsKey("graduationYearMin")) {
             yearMin = null;
@@ -595,8 +658,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         return requirements.get("educationMin") != null
                 || requirements.get("experienceMonthsMin") != null
                 || requirements.get("graduationYearMin") != null
-                || requirements.get("graduationYearMax") != null
-                || !((List<?>) requirements.getOrDefault("skills", List.of())).isEmpty();
+                || requirements.get("graduationYearMax") != null;
     }
 
     @SuppressWarnings("unchecked")
@@ -664,6 +726,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
         snapshot.put("candidateType", candidate.candidateType);
         snapshot.put("companySize", candidate.companySize);
         snapshot.put("publishedAt", iso(candidate.publishedAt));
+        snapshot.put("updatedAt", iso(candidate.updatedAt));
         snapshot.put("fetchedAt", iso(candidate.fetchedAt));
         snapshot.put("recruitmentStatus", candidate.recruitmentStatus);
         snapshot.put("recruitmentCheckedAt", iso(candidate.recruitmentCheckedAt));
@@ -678,6 +741,8 @@ public class JobSearchResultHandler implements TaskResultHandler {
         snapshot.put("salaryMinMonthlyCents", candidate.salaryMin);
         snapshot.put("salaryMaxMonthlyCents", candidate.salaryMax);
         snapshot.put("salaryText", candidate.salaryText);
+        snapshot.put("companySizeText", candidate.companySizeText);
+        snapshot.put("fieldSources", candidate.fieldSources);
         snapshot.put("experienceText", candidate.experienceText);
         snapshot.put("experienceMonthsMin", candidate.experienceMonths);
         snapshot.put("educationText", candidate.educationText);
@@ -975,12 +1040,15 @@ public class JobSearchResultHandler implements TaskResultHandler {
         private String companySize;
         private Integer salaryMin;
         private Integer salaryMax;
+        private String companySizeText;
+        private Map<String, Object> fieldSources = new LinkedHashMap<>();
         private String salaryText;
         private String experienceText;
         private Integer experienceMonths;
         private String educationText;
         private String educationMin;
         private LocalDateTime publishedAt;
+        private LocalDateTime updatedAt;
         private LocalDateTime fetchedAt;
         private String jdText;
         private Map<String, Object> requirements = Map.of();
@@ -1028,11 +1096,14 @@ public class JobSearchResultHandler implements TaskResultHandler {
                 this.salaryMin = other.salaryMin;
                 this.salaryMax = other.salaryMax;
                 this.salaryText = other.salaryText;
+                this.companySizeText = other.companySizeText;
+                this.fieldSources = new LinkedHashMap<>(other.fieldSources);
                 this.experienceText = other.experienceText;
                 this.experienceMonths = other.experienceMonths;
                 this.educationText = other.educationText;
                 this.educationMin = other.educationMin;
                 this.publishedAt = other.publishedAt;
+                this.updatedAt = other.updatedAt;
                 this.fetchedAt = other.fetchedAt;
                 this.jdText = other.jdText;
                 this.requirements = other.requirements;
@@ -1061,16 +1132,22 @@ public class JobSearchResultHandler implements TaskResultHandler {
         private void fillMissing(SearchCandidate other) {
             if (cityCode == null) cityCode = other.cityCode;
             if (cityName == null) cityName = other.cityName;
-            if (salaryMin == null) salaryMin = other.salaryMin;
-            if (salaryMax == null) salaryMax = other.salaryMax;
-            if (salaryText == null) salaryText = other.salaryText;
+            if (salaryText == null && salaryMin == null && salaryMax == null) {
+                salaryText = other.salaryText; salaryMin = other.salaryMin; salaryMax = other.salaryMax;
+                if (other.fieldSources.containsKey("salary")) fieldSources.put("salary", other.fieldSources.get("salary"));
+            }
+            if ("SIZE_UNKNOWN".equals(companySize)) {
+                companySize = other.companySize; companySizeText = other.companySizeText;
+                if (other.fieldSources.containsKey("companySize")) fieldSources.put("companySize", other.fieldSources.get("companySize"));
+            }
             if (experienceText == null) experienceText = other.experienceText;
             if (experienceMonths == null) experienceMonths = other.experienceMonths;
             if (educationText == null) educationText = other.educationText;
             if (educationMin == null) educationMin = other.educationMin;
             if (publishedAt == null) publishedAt = other.publishedAt;
+            if (updatedAt == null) updatedAt = other.updatedAt;
             if (fetchedAt == null) fetchedAt = other.fetchedAt;
-            if (other.verificationStatus != null
+            if (!"OFFICIAL".equals(sourceType) && other.verificationStatus != null
                     && verificationRank(other.verificationStatus) > verificationRank(verificationStatus)) {
                 verificationStatus = other.verificationStatus;
                 verificationReason = other.verificationReason;
@@ -1096,6 +1173,8 @@ public class JobSearchResultHandler implements TaskResultHandler {
             copy.sourceKey = sourceKey;
             copy.sourceName = sourceName;
             copy.sourceType = sourceType;
+            copy.companySizeText = companySizeText;
+            copy.fieldSources = new LinkedHashMap<>(fieldSources);
             copy.verification = verification;
             copy.sourceUrl = sourceUrl;
             copy.recruitmentStatus = recruitmentStatus;
@@ -1123,6 +1202,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
             copy.educationText = educationText;
             copy.educationMin = educationMin;
             copy.publishedAt = publishedAt;
+            copy.updatedAt = updatedAt;
             copy.fetchedAt = fetchedAt;
             copy.jdText = jdText;
             copy.requirements = requirements;

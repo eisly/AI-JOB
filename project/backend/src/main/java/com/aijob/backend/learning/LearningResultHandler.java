@@ -2,7 +2,10 @@ package com.aijob.backend.learning;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -106,7 +109,13 @@ public class LearningResultHandler implements TaskResultHandler {
             throw BusinessException.aiSchema("学习计划必须包含 1..20 项");
         }
         Map<String, Object> payload = json.map(task.getInputSnapshotJson());
+        String planSource = payload.get("planSource") == null ? "MATCH" : String.valueOf(payload.get("planSource"));
+        boolean strict = "RESUME".equals(planSource);
+        Map<String, Object> resume = payload.get("resume") instanceof Map<?, ?> rawResume
+                ? new LinkedHashMap<>((Map<String, Object>) rawResume) : Map.of();
+        String resumeText = normalizeText(String.valueOf(resume.getOrDefault("projectsText", "")));
         List<String> allowed = (List<String>) payload.get("allowedSkillCodes");
+        GithubFacts github = githubFacts(value.get("github"));
         int total = 0;
         List<Map<String, Object>> validated = new ArrayList<>();
         for (Map<String, Object> raw : items) {
@@ -118,13 +127,64 @@ public class LearningResultHandler implements TaskResultHandler {
             if (!Set.of("READING", "PRACTICE", "INTERVIEW").contains(kind)) {
                 throw BusinessException.aiSchema("学习计划项类型非法");
             }
+            String category = strict ? requiredText(raw, "category", 24) : optionalText(raw, "category", 24, "BASIC");
+            if (!Set.of("BASIC", "RESUME_PROJECT", "GITHUB").contains(category)) {
+                throw BusinessException.aiSchema("学习计划项分类非法");
+            }
             int minutes = requiredInt(raw.get("estimatedMinutes"), 5, 120);
             total += minutes;
             List<Object> refs = (List<Object>) raw.getOrDefault("resourceRefs", List.of());
             if (!refs.isEmpty() && ((List<Object>) payload.get("knowledgeRefs")).isEmpty()) {
                 throw BusinessException.aiSchema("学习计划包含未授权知识引用");
             }
-            Map<String, Object> item = new java.util.LinkedHashMap<>(raw);
+            String evidenceStatus = strict ? requiredText(raw, "evidenceStatus", 16)
+                    : optionalText(raw, "evidenceStatus", 16, "ASSESSED");
+            if (!Set.of("ASSESSED", "PENDING").contains(evidenceStatus)) {
+                throw BusinessException.aiSchema("计划项证据状态非法");
+            }
+            String evidenceQuote = optionalText(raw, "evidenceQuote", 500, null);
+            List<Map<String, Object>> links = resourceLinks(raw.get("resourceLinks"));
+            if ("RESUME_PROJECT".equals(category)) {
+                if (!strict) {
+                    throw BusinessException.aiSchema("仅基于简历的计划允许简历项目深挖");
+                }
+                if (evidenceQuote == null || normalizeText(evidenceQuote).length() < 6
+                        || !resumeText.contains(normalizeText(evidenceQuote))) {
+                    throw BusinessException.aiSchema("简历项目训练必须引用简历原文中的真实项目描述");
+                }
+                if ("PENDING".equals(evidenceStatus)) {
+                    throw BusinessException.aiSchema("简历项目训练必须给出已评估证据");
+                }
+            }
+            if ("GITHUB".equals(category)) {
+                if (!"AVAILABLE".equals(github.status())) {
+                    throw BusinessException.aiSchema("GitHub 数据不可用，不能生成 GitHub 学习项");
+                }
+                if (links.isEmpty() || links.size() > 3) {
+                    throw BusinessException.aiSchema("GitHub 学习项必须包含 1..3 个链接");
+                }
+                for (Map<String, Object> link : links) {
+                    if (!github.urls().contains(normalizeUrl(String.valueOf(link.get("url"))))) {
+                        throw BusinessException.aiSchema("GitHub 学习项包含输入候选之外的仓库链接");
+                    }
+                }
+                if (!"ASSESSED".equals(evidenceStatus)) {
+                    throw BusinessException.aiSchema("GitHub 学习项必须为已评估证据");
+                }
+            }
+            Map<String, Object> item = new LinkedHashMap<>(raw);
+            item.put("category", category);
+            item.put("objective", strict ? requiredText(raw, "objective", 500)
+                    : optionalText(raw, "objective", 500, title));
+            item.put("reason", strict ? requiredText(raw, "reason", 500)
+                    : optionalText(raw, "reason", 500, "依据当前训练计划生成"));
+            item.put("method", strict ? requiredText(raw, "method", 500)
+                    : optionalText(raw, "method", 500, "按计划完成学习或练习"));
+            item.put("completionCriteria", strict ? requiredText(raw, "completionCriteria", 500)
+                    : optionalText(raw, "completionCriteria", 500, "完成该项训练并提交有效记录"));
+            item.put("evidenceStatus", evidenceStatus);
+            item.put("evidenceQuote", evidenceQuote);
+            item.put("resourceLinks", links);
             item.put("resourceRefs", refs);
             validated.add(item);
         }
@@ -134,11 +194,96 @@ public class LearningResultHandler implements TaskResultHandler {
         int seq = 1;
         for (Map<String, Object> item : validated) {
             mapper.insertItem(UUID.randomUUID().toString(), task.getResourceId(), seq++,
-                    String.valueOf(item.get("skillCode")), requiredText(item, "title", 200), String.valueOf(item.get("kind")),
-                    ((Number) item.get("estimatedMinutes")).intValue(), json.stringify(item.get("resourceRefs")));
+                    String.valueOf(item.get("skillCode")), requiredText(item, "title", 200),
+                    String.valueOf(item.get("kind")), String.valueOf(item.get("category")),
+                    String.valueOf(item.get("objective")), String.valueOf(item.get("reason")),
+                    String.valueOf(item.get("method")), String.valueOf(item.get("completionCriteria")),
+                    String.valueOf(item.get("evidenceStatus")), (String) item.get("evidenceQuote"),
+                    json.stringify(item.get("resourceLinks")), ((Number) item.get("estimatedMinutes")).intValue(),
+                    json.stringify(item.get("resourceRefs")));
         }
         mapper.updatePlan(task.getResourceId(), "ACTIVE", task.getId(), title);
+        Map<String, Object> basis = plan.get("basis_json") == null ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(json.map(String.valueOf(plan.get("basis_json"))));
+        Object summary = value.get("summary");
+        if (summary != null) {
+            basis.put("summary", String.valueOf(summary));
+        }
+        Map<String, Object> githubBasis = new LinkedHashMap<>();
+        githubBasis.put("status", github.status());
+        githubBasis.put("candidateCount", github.urls().size());
+        githubBasis.put("fetchedAt", github.fetchedAt());
+        githubBasis.put("reason", github.reason());
+        basis.put("github", githubBasis);
+        mapper.updatePlanBasis(task.getResourceId(), json.stringify(basis));
         return 1;
+    }
+
+    private GithubFacts githubFacts(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return new GithubFacts("UNAVAILABLE", Set.of(), null, "Agent 未返回 GitHub 数据状态");
+        }
+        Object rawStatus = map.get("status");
+        String status = rawStatus == null ? "UNAVAILABLE" : String.valueOf(rawStatus);
+        Set<String> urls = new HashSet<>();
+        List<Map<String, Object>> candidates = map.get("candidates") instanceof List<?> list
+                ? (List<Map<String, Object>>) list : List.of();
+        if ("AVAILABLE".equals(status)) {
+            for (Map<String, Object> candidate : candidates) {
+                String url = candidate.get("htmlUrl") == null ? null : String.valueOf(candidate.get("htmlUrl"));
+                if (url == null || url.isBlank()) {
+                    throw BusinessException.aiSchema("GitHub 候选缺少仓库链接");
+                }
+                if (!"GITHUB_API".equals(String.valueOf(candidate.get("source")))) {
+                    throw BusinessException.aiSchema("GitHub 候选来源不可信");
+                }
+                if (candidate.get("verifiedAt") == null) {
+                    throw BusinessException.aiSchema("GitHub 候选缺少获取时间");
+                }
+                urls.add(normalizeUrl(url));
+            }
+            if (urls.isEmpty()) {
+                return new GithubFacts("UNAVAILABLE", Set.of(), null, "GitHub 检索无可用候选");
+            }
+        }
+        return new GithubFacts(status, urls, map.get("fetchedAt"), map.get("reason") == null ? null
+                : String.valueOf(map.get("reason")));
+    }
+
+    private List<Map<String, Object>> resourceLinks(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> links = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                links.add(new LinkedHashMap<>((Map<String, Object>) map));
+            }
+        }
+        return links;
+    }
+
+    private String normalizeUrl(String value) {
+        String normalized = value == null ? "" : value.strip().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("https://")) normalized = normalized.substring(8);
+        if (normalized.startsWith("http://")) normalized = normalized.substring(7);
+        while (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length() - 1);
+        return normalized;
+    }
+
+    private String normalizeText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "");
+    }
+
+    private String optionalText(Map<String, Object> value, String field, int max, String fallback) {
+        Object raw = value.get(field);
+        if (!(raw instanceof String text) || text.isBlank() || text.length() > max) {
+            return fallback;
+        }
+        return text.strip();
+    }
+
+    private record GithubFacts(String status, Set<String> urls, Object fetchedAt, String reason) {
     }
 
     @SuppressWarnings("unchecked")
@@ -237,8 +382,8 @@ public class LearningResultHandler implements TaskResultHandler {
             } else {
                 mapper.resolve(task.getUserId(), questionId, task.getResourceId());
             }
+            learning.completePractice(String.valueOf(session.get("plan_id")), String.valueOf(session.get("plan_item_id")));
         }
-        learning.completePractice(String.valueOf(session.get("plan_id")), String.valueOf(session.get("plan_item_id")));
         return 1;
     }
 

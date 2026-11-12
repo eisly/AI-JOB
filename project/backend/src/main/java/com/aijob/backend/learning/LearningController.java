@@ -40,6 +40,14 @@ public class LearningController {
         return learning.createPlan(users.resolveCurrentUserId(), request.getRequestURI(), Data.idempotencyKey(key), body);
     }
 
+    @PostMapping("/plans/from-resume")
+    public ResponseEntity<CommonResult<Object>> createPlanFromResume(@RequestHeader("Idempotency-Key") String key,
+                                                                      @RequestBody Map<String, Object> body,
+                                                                      HttpServletRequest request) {
+        return learning.createPlanFromResume(users.resolveCurrentUserId(), request.getRequestURI(),
+                Data.idempotencyKey(key), body);
+    }
+
     @GetMapping("/plans")
     public CommonResult<PageResult<Map<String, Object>>> plans(@RequestParam(required = false) Integer current,
                                                                 @RequestParam(required = false) Integer size) {

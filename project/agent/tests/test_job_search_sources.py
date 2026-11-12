@@ -135,7 +135,8 @@ async def test_baidu_checks_requested_list_and_dedupes_multi_city_posting(monkey
 
     monkeypatch.setattr("app.search.sources.baidu.ensure_public_url", allow)
     job = {"postId": "e3cec5b8-b7a3-4946-99fc-b292b749cd53", "name": "智能体应用开发实习生",
-           "workPlace": "北京市,上海市", "workContent": "负责智能体应用开发"}
+           "workPlace": "北京市,上海市", "workContent": "负责智能体应用开发",
+           "publishDate": "2026-04-28", "updateDate": "2026-07-21"}
 
     def handle(request):
         keyword = request.url.params["search"]
@@ -150,6 +151,10 @@ async def test_baidu_checks_requested_list_and_dedupes_multi_city_posting(monkey
     assert len(result.postings) == 1
     assert result.postings[0].recruitment_evidence == "OFFICIAL_LIST"
     assert result.postings[0].candidate_type == "INTERNSHIP"
+    assert result.postings[0].published_at is not None
+    assert result.postings[0].published_at.date().isoformat() == "2026-04-28"
+    assert result.postings[0].updated_at is not None
+    assert result.postings[0].updated_at.date().isoformat() == "2026-07-21"
 
 
 @pytest.mark.asyncio
@@ -180,7 +185,7 @@ async def test_web_search_keeps_relevant_results_independent_of_recruitment_stat
         return httpx.Response(200, json={"results": [
             {
                 "url": url, "title": "AI 应用开发实习生",
-                "raw_content": f"示例公司 {city} 实习 100-499人 {jd}" + (" 当前职位已下线" if index == 4 else ""),
+                "raw_content": f"示例公司 工作地点：{city} 实习 公司规模：100-499人 {jd}" + (" 当前职位已下线" if index == 4 else ""),
             }
             for index, (url, city) in enumerate(zip(urls, cities))
         ]})
@@ -204,12 +209,19 @@ async def test_web_search_keeps_relevant_results_independent_of_recruitment_stat
         )
         result = await WebSearchSource().search(context)
         assert result.status == "AVAILABLE"
-        # 索引 3 的城市字段与页面不一致，按“缺失不淘汰”保留并标记未知。
-        assert [posting.source_url for posting in result.postings] == [urls[1], urls[3], urls[4]]
+        # 页面正文可确认城市：索引 0 杭州、索引 1 上海保留；深圳、北京明确不符被排除。
+        assert [posting.source_url for posting in result.postings] == [urls[0], urls[1], urls[4]]
         assert result.postings[0].verification == "UNVERIFIED"
-        assert [posting.recruitment_status for posting in result.postings] == ["UNKNOWN", "UNKNOWN", "CLOSED"]
-        assert [posting.verification_status for posting in result.postings] == ["UNKNOWN", "UNKNOWN", "CLOSED"]
-        assert result.postings[1].warnings and "CITY_UNKNOWN" in result.postings[1].warnings
+        assert [posting.recruitment_status for posting in result.postings] == [
+            "UNKNOWN", "UNKNOWN", "CLOSED"
+        ]
+        assert [posting.verification_status for posting in result.postings] == [
+            "UNKNOWN", "UNKNOWN", "CLOSED"
+        ]
+        assert (result.postings[0].city_name, result.postings[0].city_code) == ("杭州", "330100")
+        assert (result.postings[1].city_name, result.postings[1].city_code) == ("上海", "310100")
+        assert result.postings[0].company_size == "SIZE_100_499"
+        assert result.postings[1].company_size == "SIZE_100_499"
         assert result.postings[0].recruitment_evidence is None
         assert result.postings[1].recruitment_evidence is None
         assert result.postings[2].recruitment_evidence == "OFFICIAL_CLOSED"

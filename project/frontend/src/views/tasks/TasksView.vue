@@ -49,6 +49,10 @@ const selectedDelta = computed(() => {
   if (!tracker.task.value || tracker.task.value.id !== selectedTaskId.value) return ''
   return isTerminalTask(tracker.task.value.status) ? '' : tracker.deltaText.value
 })
+const selectedReasoning = computed(() => {
+  if (!tracker.task.value || tracker.task.value.id !== selectedTaskId.value) return ''
+  return tracker.reasoningText.value
+})
 const hasRunningTasks = computed(() => tasks.value.some((item) => !isTerminalTask(item.status)))
 
 function queryTaskId() {
@@ -316,7 +320,7 @@ onBeforeUnmount(() => {
             </div>
             <el-tag :type="tracker.connected.value ? 'success' : 'info'" size="small">{{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}</el-tag>
           </div>
-          <TaskStatus :task="selectedTask">
+          <TaskStatus :task="selectedTask" :reasoning="selectedReasoning">
             <template #actions>
               <el-button v-if="!isTerminalTask(selectedTask.status)" type="warning" plain :loading="cancelingId === selectedTask.id" @click="cancelTask(selectedTask)">取消任务</el-button>
               <el-button v-if="selectedTask.status === 'SUCCEEDED' && selectedTask.result" type="primary" @click="goToBusiness(selectedTask)">查看结果</el-button>

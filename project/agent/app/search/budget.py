@@ -12,6 +12,7 @@ class BudgetConfig:
     max_queries_per_round: int = 12
     max_pages_per_round: int = 20
     max_detail_pages: int = 20
+    max_page_fetch: int = 12
     max_api_calls: int = 60
     max_elapsed_seconds: float = 150.0
     max_rounds: int = 3
@@ -33,6 +34,7 @@ class BudgetConfig:
             max_queries_per_round=int(value("job_search_max_queries_per_round", 12)),
             max_pages_per_round=int(value("job_search_max_pages_per_round", 20)),
             max_detail_pages=int(value("job_search_max_detail_pages", 20)),
+            max_page_fetch=int(value("job_search_max_page_fetch", 12)),
             max_api_calls=int(value("job_search_max_api_calls", 60)),
             max_elapsed_seconds=float(value("job_search_max_elapsed_seconds", 150.0)),
             max_rounds=int(value("job_search_max_rounds", 3)),
@@ -90,8 +92,11 @@ class SearchBudget:
     def details_remaining(self) -> int:
         return max(0, self.config.max_detail_pages - self.details)
 
+    def remaining_seconds(self):
+        return max(0.0, self.config.max_elapsed_seconds - 30 - self.elapsed())
+
     def can_call(self, count: int = 1) -> bool:
-        return self.api_calls + count <= self.config.max_api_calls and self.elapsed() < self.config.max_elapsed_seconds
+        return self.api_calls + count <= self.config.max_api_calls and self.remaining_seconds() > 0
 
     def record_query(self, count: int = 1) -> None:
         self.queries += count
@@ -130,12 +135,15 @@ class SearchBudget:
     def remember(self, provider: str, query: str, hits: list[SearchHit]) -> None:
         self._cache[f"{provider}|{query}"] = _CacheEntry(time.monotonic(), hits)
 
-    def should_continue(self, valid_count: int, *, uncovered: int = 0, last_round_new: int = 0) -> bool:
-        """根据有效岗位数量、覆盖缺口和剩余预算决定是否继续补搜。"""
+    def should_continue(self, valid_count: int, *, uncovered: int = 0, last_round_new: int = 0,
+                        pending: int = 0) -> bool:
+        """根据有效岗位数量、覆盖缺口、待处理页面和剩余预算决定是否继续补搜。"""
         if self.round_no >= self.config.max_rounds:
             return False
         if not self.can_call():
             return False
+        if pending > 0:
+            return True
         if valid_count >= self.config.target_results and uncovered == 0:
             return False
         if valid_count >= self.config.target_results and last_round_new == 0:
@@ -153,6 +161,7 @@ class SearchBudget:
             "queries": self.queries,
             "pages": self.pages,
             "detailChecks": self.details,
+            "pagesFetched": getattr(self, "page_fetches", 0),
             "apiCalls": self.api_calls,
             "cacheHits": self.cache_hits,
             "elapsedMs": int(self.elapsed() * 1000),
@@ -160,6 +169,7 @@ class SearchBudget:
                 "maxQueriesPerRound": self.config.max_queries_per_round,
                 "maxPagesPerRound": self.config.max_pages_per_round,
                 "maxDetailPages": self.config.max_detail_pages,
+                "maxPageFetch": self.config.max_page_fetch,
                 "maxApiCalls": self.config.max_api_calls,
                 "maxElapsedSeconds": self.config.max_elapsed_seconds,
                 "maxRounds": self.config.max_rounds,
@@ -168,3 +178,107 @@ class SearchBudget:
             },
             "stages": dict(self._stage_durations),
         }
+
+@dataclass
+class SourceBudget:
+    """单个来源的预算视图；所有消耗仍计入全局预算，避免来源互相挤占配额。"""
+
+    global_budget: SearchBudget
+    key: str
+    query_limit: int | None = None
+    page_limit: int | None = None
+    page_fetch_limit: int | None = None
+    api_limit: int | None = None
+    _round_queries: int = 0
+    _round_pages: int = 0
+    _page_fetches: int = 0
+    _api_calls: int = 0
+
+    @property
+    def config(self) -> BudgetConfig:
+        return self.global_budget.config
+
+    @property
+    def round_no(self) -> int:
+        return self.global_budget.round_no
+
+    @property
+    def cache_hits(self) -> int:
+        return self.global_budget.cache_hits
+
+    def begin_round(self) -> int:
+        self._round_queries = 0
+        self._round_pages = 0
+        return self.global_budget.round_no
+
+    def elapsed(self) -> float:
+        return self.global_budget.elapsed()
+
+    def remaining_seconds(self) -> float:
+        return self.global_budget.remaining_seconds()
+
+    def queries_remaining(self) -> int:
+        global_remaining = self.global_budget.queries_remaining()
+        own_remaining = self.query_limit - self._round_queries if self.query_limit is not None else global_remaining
+        return max(0, min(global_remaining, own_remaining))
+
+    def pages_remaining(self) -> int:
+        global_remaining = self.global_budget.pages_remaining()
+        own_remaining = self.page_limit - self._round_pages if self.page_limit is not None else global_remaining
+        return max(0, min(global_remaining, own_remaining))
+
+    def details_remaining(self) -> int:
+        return self.global_budget.details_remaining()
+
+    def can_call(self, count: int = 1) -> bool:
+        if not self.global_budget.can_call(count):
+            return False
+        if self.api_limit is not None and self._api_calls + count > self.api_limit:
+            return False
+        return True
+
+    def record_query(self, count: int = 1) -> None:
+        self._round_queries += count
+        self.global_budget.record_query(count)
+
+    def record_page(self, count: int = 1) -> None:
+        self._round_pages += count
+        self.global_budget.record_page(count)
+
+    def record_detail(self, count: int = 1) -> None:
+        self.global_budget.record_detail(count)
+
+    def record_api_call(self, count: int = 1) -> None:
+        self._api_calls += count
+        self.global_budget.record_api_call(count)
+
+    def start_stage(self, name: str) -> None:
+        self.global_budget.start_stage(name)
+
+    def end_stage(self, name: str) -> int:
+        return self.global_budget.end_stage(name)
+
+    def cached(self, provider: str, query: str):
+        return self.global_budget.cached(provider, query)
+
+    def remember(self, provider: str, query: str, hits) -> None:
+        self.global_budget.remember(provider, query, hits)
+
+    @property
+    def page_fetches(self) -> int:
+        return self._page_fetches
+
+    @page_fetches.setter
+    def page_fetches(self, value: int) -> None:
+        previous = self._page_fetches
+        self._page_fetches = max(0, int(value))
+        delta = self._page_fetches - previous
+        if delta:
+            self.global_budget.page_fetches = int(getattr(self.global_budget, "page_fetches", 0)) + delta
+
+    def fetches_remaining(self) -> int:
+        own = self.page_fetch_limit - self.page_fetches if self.page_fetch_limit is not None else self.config.max_page_fetch
+        return max(0, min(own, self.config.max_page_fetch - getattr(self.global_budget, "page_fetches", 0)))
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.global_budget.snapshot()

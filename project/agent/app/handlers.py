@@ -13,6 +13,8 @@ from .config import Settings
 from .errors import HandlerError, HandlerValidationError
 from .files import FileFetcher
 from .llm import LLMClient, LLMProviderError, LLMRequest
+from .project_fallback import plan_project, recommend_project
+from .learning_github import search_github_repositories
 from .operations import (
     GROWTH_ANALYZE,
     INTERVIEW_REPORT,
@@ -49,6 +51,7 @@ from .schemas import (
     AIResumeDiagnoseResult,
     AIResumeOptimizeResult,
     Citation,
+    GitHubLookup,
     Education,
     EvaluationDimension,
     EvaluationModelOutput,
@@ -113,6 +116,15 @@ def quote_in_text(quote: str, text: str) -> bool:
     return bool(q) and q in norm_text(text)
 
 
+def _normalize_url(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized.startswith("https://"):
+        normalized = normalized[8:]
+    elif normalized.startswith("http://"):
+        normalized = normalized[7:]
+    return normalized.rstrip("/")
+
+
 def dedupe(values: list[str], *, limit: int | None = None) -> list[str]:
     seen: set[str] = set()
     result = []
@@ -167,6 +179,8 @@ class ExecutionContext:
     llm: LLMClient
     files: FileFetcher
     emit_stage: Callable[[str, int | None], Awaitable[None]]
+    emit_reasoning: Callable[[str], Awaitable[None]] | None = None
+    emit_candidates: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
 
 
 class BaseHandler:
@@ -212,6 +226,7 @@ class BaseHandler:
                 user_prompt=user_prompt + repair_note,
                 schema_hint=schema_hint,
                 context=context,
+                thinking=False if self.operation in {PROJECT_RECOMMEND, PROJECT_PLAN} else None,
             )
             logger.info("model call attempt=%s user_chars=%s", attempt + 1, len(request.user_prompt))
             try:
@@ -223,6 +238,13 @@ class BaseHandler:
                     exc.retryable,
                     exc.message,
                 )
+                reasoning_text = getattr(exc, "reasoning", "") or ""
+                if (
+                    reasoning_text
+                    and ctx.emit_reasoning is not None
+                    and ctx.settings.reasoning_display_enabled
+                ):
+                    await ctx.emit_reasoning(reasoning_text[: ctx.settings.reasoning_max_chars])
                 raise HandlerError("MODEL_PROVIDER_ERROR", exc.message, retryable=exc.retryable) from exc
             meta = {
                 "provider": getattr(ctx.llm, "name", "unknown"),
@@ -243,6 +265,13 @@ class BaseHandler:
                 response.output_tokens,
                 len(response.text),
             )
+            reasoning_text = getattr(response, "reasoning", "") or ""
+            if (
+                reasoning_text
+                and ctx.emit_reasoning is not None
+                and ctx.settings.reasoning_display_enabled
+            ):
+                await ctx.emit_reasoning(reasoning_text[: ctx.settings.reasoning_max_chars])
             try:
                 data = skill.parse_output(response.text)
                 output = self.output_model.model_validate(data)
@@ -585,6 +614,7 @@ class JobSearchHandler(BaseHandler):
                 client=client,
                 profile=payload.get("profile") or {},
                 payload=payload,
+                emit_candidates=ctx.emit_candidates,
             )
             try:
                 result = await JobSearchPipeline(runtime).run()
@@ -607,6 +637,17 @@ class LearningPlanHandler(BaseHandler):
     output_model = AIPlanResult
     prompt_version = PROMPT_VERSIONS[LEARNING_PLAN]
 
+    async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
+        payload: LearningPlanPayload = ctx.payload  # type: ignore[assignment]
+        if payload.plan_source != "RESUME":
+            return {"github": {"status": "DISABLED", "reason": "岗位匹配来源不检索 GitHub"}}
+        lookup = await search_github_repositories(
+            ctx.settings,
+            payload.target_direction,
+            payload.allowed_skill_codes,
+        )
+        return {"github": lookup.model_dump(by_alias=True, mode="json")}
+
     def validate_business(
         self,
         ctx: ExecutionContext,
@@ -625,6 +666,9 @@ class LearningPlanHandler(BaseHandler):
             ): item
             for item in payload.knowledge_refs
         }
+        github = GitHubLookup.model_validate(prepared.get("github") or {"status": "UNAVAILABLE"})
+        github_urls = {_normalize_url(item.html_url) for item in github.candidates}
+        resume_text = norm_text(payload.resume.projects_text) if payload.resume else ""
 
         items: list[PlanItem] = []
         total = 0
@@ -641,10 +685,31 @@ class LearningPlanHandler(BaseHandler):
                 if source is None:
                     raise HandlerValidationError("resourceRefs 含未授权的知识引用")
                 refs_out.append(source.model_copy(deep=True))
+            if item.category == "RESUME_PROJECT":
+                if payload.plan_source != "RESUME":
+                    raise HandlerValidationError("岗位匹配来源不能生成简历项目深挖训练")
+                quote = norm_text(item.evidence_quote or "")
+                if len(quote) < 6 or quote not in resume_text:
+                    raise HandlerValidationError("简历项目训练必须引用简历原文中的真实项目描述")
+                if item.evidence_status == "PENDING":
+                    raise HandlerValidationError("简历项目训练必须给出已评估证据")
+            if item.category == "GITHUB":
+                if github.status != "AVAILABLE":
+                    raise HandlerValidationError("GitHub 数据不可用，不能生成 GitHub 学习项")
+                if not item.resource_links:
+                    raise HandlerValidationError("GitHub 学习项必须包含仓库链接")
+                for link in item.resource_links:
+                    if _normalize_url(link.url) not in github_urls:
+                        raise HandlerValidationError("GitHub 学习项包含输入候选之外的仓库链接")
+                if item.evidence_status != "ASSESSED":
+                    raise HandlerValidationError("GitHub 学习项必须为已评估证据")
+            if item.evidence_status == "PENDING" and payload.plan_source != "RESUME":
+                raise HandlerValidationError("只有在基于简历的计划中允许待评估项")
             items.append(
                 item.model_copy(
                     update={
                         "title": item.title.strip()[:200],
+                        "evidence_quote": (item.evidence_quote or "").strip() or None,
                         "resource_refs": refs_out,
                     }
                 )
@@ -655,7 +720,12 @@ class LearningPlanHandler(BaseHandler):
             raise HandlerValidationError(
                 f"计划总时长 {total} 分钟超过 dailyMinutes×days={budget} 分钟"
             )
-        return AIPlanResult(title=output.title.strip()[:200], items=items)
+        return AIPlanResult(
+            title=output.title.strip()[:200],
+            summary=output.summary.strip()[:500],
+            items=items,
+            github=github,
+        )
 
 
 class LearningQuestionHandler(BaseHandler):
@@ -1136,11 +1206,38 @@ class GrowthAnalyzeHandler(BaseHandler):
         return AIGrowthResult(suggestions=suggestions, cited_evidence_ids=cited)
 
 
-class ProjectRecommendHandler(BaseHandler):
+class ProjectFallbackHandler(BaseHandler):
+    model_deadline_seconds = 35.0
+
+    async def execute(self, ctx: ExecutionContext) -> tuple[dict[str, Any], dict[str, Any]]:
+        import asyncio
+
+        try:
+            return await asyncio.wait_for(super().execute(ctx), timeout=self.model_deadline_seconds)
+        except TimeoutError:
+            reason = "MODEL_TIMEOUT"
+        except HandlerError as exc:
+            if exc.code not in {"MODEL_PROVIDER_ERROR", "MODEL_OUTPUT_INVALID"}:
+                raise
+            reason = exc.code
+            status = getattr(exc.__cause__, "http_status", None)
+            if status is not None:
+                reason = f"MODEL_HTTP_{status}"
+        await ctx.emit_stage("using_local_project_rules", 85)
+        result = self.fallback(ctx.payload)
+        meta = {"provider": "local_rules", "promptVersion": self.prompt_version,
+                "operation": self.operation, "modelDegraded": True, "fallbackReason": reason}
+        logger.warning("project fallback operation=%s reason=%s", self.operation, reason)
+        await ctx.emit_stage("validating_result", 90)
+        return self.validate_business(ctx, result, {}, meta).model_dump(by_alias=True, mode="json"), meta
+
+
+class ProjectRecommendHandler(ProjectFallbackHandler):
     operation = PROJECT_RECOMMEND
     payload_model = ProjectRecommendPayload
     output_model = AIProjectRecommendResult
     prompt_version = PROMPT_VERSIONS[PROJECT_RECOMMEND]
+    fallback = staticmethod(recommend_project)
 
     def validate_business(
         self,
@@ -1164,11 +1261,12 @@ class ProjectRecommendHandler(BaseHandler):
         return AIProjectRecommendResult(items=output.items)
 
 
-class ProjectPlanHandler(BaseHandler):
+class ProjectPlanHandler(ProjectFallbackHandler):
     operation = PROJECT_PLAN
     payload_model = ProjectPlanPayload
     output_model = AIProjectPlanResult
     prompt_version = PROMPT_VERSIONS[PROJECT_PLAN]
+    fallback = staticmethod(plan_project)
 
     def validate_business(
         self,

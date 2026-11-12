@@ -175,6 +175,8 @@ def test_company_size_boundaries(count: int | None, expected: str) -> None:
         ("500-999人", "SIZE_500_999"),
         ("1000-9999人", "SIZE_1000_9999"),
         ("10000人以上", "SIZE_10000_PLUS"),
+        ("2000-5000人", "SIZE_1000_9999"),
+        ("50-150人", "SIZE_UNKNOWN"),
         ("20人以下", "SIZE_0_20"),
         ("规模未知", "SIZE_UNKNOWN"),
         ("保密", "SIZE_UNKNOWN"),

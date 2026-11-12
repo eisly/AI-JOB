@@ -2,8 +2,17 @@
 import { computed } from 'vue'
 import type { TaskStatus, TaskVO } from '@/api/types'
 import { taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import ModelReasoning from '@/components/ModelReasoning.vue'
 
-const props = defineProps<{ task: TaskVO | null; compact?: boolean }>()
+const props = defineProps<{ task: TaskVO | null; compact?: boolean; reasoning?: string }>()
+const errorDescription = computed(() => {
+  const error = props.task?.error
+  if (!error) return ''
+  if (error.code === 'MODEL_PROVIDER_ERROR') {
+    return error.retryable ? '模型服务暂时不可用，可稍后重试。' : '需要恢复服务端的模型账号或访问权限。'
+  }
+  return error.retryable ? '该任务可重试，重试会创建新任务。' : '请检查输入后重新提交。'
+})
 
 const tagType = computed(() => {
   const types: Record<TaskStatus, 'primary' | 'success' | 'info' | 'warning' | 'danger'> = {
@@ -25,10 +34,11 @@ const tagType = computed(() => {
       <strong>{{ taskTypeLabels[task.type] || task.type }}</strong>
       <el-tag :type="tagType" size="small">{{ taskStatusLabels[task.status] || task.status }}</el-tag>
     </div>
-    <div class="task-status__stage">{{ task.stage || '等待状态更新' }}</div>
+    <div class="task-status__stage">{{ task.stage === 'using_local_project_rules' ? '正在生成本地规则方案' : task.stage || '等待状态更新' }}</div>
     <el-progress v-if="task.progress !== null" :percentage="Math.max(0, Math.min(100, task.progress))" :status="task.status === 'FAILED' ? 'exception' : task.status === 'SUCCEEDED' ? 'success' : undefined" />
     <div v-else-if="!compact" class="task-status__unknown">进度暂无法估算</div>
-    <el-alert v-if="task.error" :title="task.error.message" :description="task.error.retryable ? '该任务可重试，重试会创建新任务。' : '请检查输入后重新提交。'" type="error" :closable="false" show-icon />
+    <el-alert v-if="task.error" :title="task.error.message" :description="errorDescription" type="error" :closable="false" show-icon />
+    <ModelReasoning v-if="reasoning" :text="reasoning" />
     <div v-if="$slots.actions" class="task-status__actions"><slot name="actions" /></div>
   </div>
 </template>

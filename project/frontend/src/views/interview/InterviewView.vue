@@ -70,6 +70,10 @@ const pendingDeltaText = computed(() => {
   if (isTerminalTask(tracker.task.value.status)) return ''
   return tracker.deltaText.value
 })
+const activeReasoning = computed(() => {
+  if (!activeTaskId.value || tracker.task.value?.id !== activeTaskId.value) return ''
+  return tracker.reasoningText.value
+})
 const sortedMessages = computed(() => [...(currentInterview.value?.messages || [])].sort((a, b) => a.seq - b.seq))
 const currentQuestion = computed(() => {
   const messages = sortedMessages.value
@@ -504,7 +508,7 @@ onMounted(async () => {
           {{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}
         </el-tag>
       </div>
-      <TaskStatus :task="activeTask">
+      <TaskStatus :task="activeTask" :reasoning="activeReasoning">
         <template #actions>
           <el-button v-if="canRetryTrackedTask(activeTask)" type="primary" :loading="retrying" @click="retryActiveTask">重试失败任务</el-button>
           <el-button v-if="activeTask.status === 'FAILED' && activeTask.type === 'INTERVIEW_TURN' && answerAttempt" :disabled="submitting || retrying" @click="retryAnswerWithSameContent">使用原内容重新提交</el-button>

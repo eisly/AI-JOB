@@ -373,8 +373,80 @@ def test_build_gaps_covers_all_evidence_branches():
 def _plan_output(minutes=20):
     return AIPlanResult(
         title="  差距提升计划  ",
-        items=[PlanItem(skillCode="redis", title="  专项  ", kind="PRACTICE", estimatedMinutes=minutes)],
+        summary="基于岗位差距生成",
+        items=[
+            PlanItem(
+                skillCode="redis",
+                title="  专项  ",
+                kind="PRACTICE",
+                category="BASIC",
+                objective="掌握缓存设计",
+                reason="岗位差距要求补充 Redis 实战证据",
+                method="完成缓存穿透与一致性场景练习",
+                completionCriteria="提交有效回答并达到 60 分",
+                estimatedMinutes=minutes,
+            )
+        ],
     )
+
+
+def _resume_payload(**overrides):
+    data = {
+        "planSource": "RESUME",
+        "profileVersion": 3,
+        "dailyMinutes": 30,
+        "days": 7,
+        "targetDirection": "JAVA_BACKEND",
+        "allowedSkillCodes": ["JAVA", "REDIS"],
+        "knowledgeRefs": [],
+        "matchItem": None,
+        "resume": {
+            "versionId": str(uuid4()),
+            "versionNo": 1,
+            "title": "后端简历",
+            "targetDirection": "JAVA_BACKEND",
+            "skills": [
+                {
+                    "skillCode": "JAVA",
+                    "claim": "负责订单系统开发",
+                    "quote": "基于 Spring Boot 实现订单系统",
+                    "location": "项目经历",
+                }
+            ],
+            "projectsText": "项目经历：基于 Spring Boot 实现订单系统，使用 Redis 做缓存。",
+        },
+        "trainingHistory": {
+            "completedItems": 0,
+            "evaluatedAnswers": 0,
+            "averageScore": None,
+            "openMistakes": 0,
+            "weakSkillCodes": [],
+        },
+        "limitations": [],
+    }
+    data.update(overrides)
+    return LearningPlanPayload.model_validate(data)
+
+
+def _github_prepared(url="https://github.com/spring-projects/spring-boot"):
+    return {
+        "github": {
+            "status": "AVAILABLE",
+            "fetchedAt": "2026-11-12T00:00:00Z",
+            "candidates": [
+                {
+                    "fullName": "spring-projects/spring-boot",
+                    "htmlUrl": url,
+                    "description": "Spring Boot",
+                    "stargazersCount": 70000,
+                    "language": "Java",
+                    "topics": ["spring-boot"],
+                    "source": "GITHUB_API",
+                    "verifiedAt": "2026-11-12T00:00:00Z",
+                }
+            ],
+        }
+    }
 
 
 def test_plan_validate_trims_titles():
@@ -394,8 +466,16 @@ def test_plan_rejects_disallowed_skill_and_over_budget():
     output = AIPlanResult(
         title="t",
         items=[
-            PlanItem(skillCode="redis", title="a", kind="PRACTICE", estimatedMinutes=120),
-            PlanItem(skillCode="redis", title="b", kind="READING", estimatedMinutes=120),
+            PlanItem(
+                skillCode="redis", title="a", kind="PRACTICE", category="BASIC",
+                objective="o", reason="r", method="m", completionCriteria="c",
+                estimatedMinutes=120,
+            ),
+            PlanItem(
+                skillCode="redis", title="b", kind="READING", category="BASIC",
+                objective="o", reason="r", method="m", completionCriteria="c",
+                estimatedMinutes=120,
+            ),
         ],
     )
     with pytest.raises(HandlerValidationError, match="超过 dailyMinutes"):
@@ -414,6 +494,124 @@ def test_plan_resource_refs_must_be_authorized():
     result = LearningPlanHandler().validate_business(_ctx(payload), output, {}, {})
     assert result.items[0].resource_refs[0].chunk_id == "c1"
     assert result.items[0].resource_refs[0] is not citation
+
+
+def test_resume_plan_accepts_project_quote_from_resume_text():
+    payload = _resume_payload()
+    output = AIPlanResult(
+        title="简历专项计划",
+        items=[
+            PlanItem(
+                skillCode="JAVA",
+                title="订单系统项目深挖",
+                kind="INTERVIEW",
+                category="RESUME_PROJECT",
+                objective="能讲清项目技术选型与个人贡献",
+                reason="简历项目经历中真实出现订单系统",
+                method="按 STAR 结构准备项目介绍并模拟追问",
+                completionCriteria="完成一次模拟面试并通过评价",
+                evidenceQuote="基于 Spring Boot 实现订单系统",
+                estimatedMinutes=30,
+            ),
+            PlanItem(
+                skillCode="REDIS",
+                title="缓存基础补强",
+                kind="PRACTICE",
+                category="BASIC",
+                objective="掌握缓存设计基础",
+                reason="简历未提供 Redis 直接证据，待评估",
+                method="完成缓存场景练习",
+                completionCriteria="提交有效回答",
+                evidenceStatus="PENDING",
+                estimatedMinutes=20,
+            ),
+        ],
+    )
+    result = LearningPlanHandler().validate_business(_ctx(payload), output, {"github": {"status": "UNAVAILABLE"}}, {})
+    assert result.items[0].category == "RESUME_PROJECT"
+    assert result.items[1].evidence_status == "PENDING"
+
+
+def test_resume_plan_rejects_fabricated_project_quote():
+    payload = _resume_payload()
+    output = AIPlanResult(
+        title="简历专项计划",
+        items=[
+            PlanItem(
+                skillCode="JAVA",
+                title="编造项目",
+                kind="INTERVIEW",
+                category="RESUME_PROJECT",
+                objective="o",
+                reason="r",
+                method="m",
+                completionCriteria="c",
+                evidenceQuote="基于 Kubernetes 实现多活架构",
+                estimatedMinutes=30,
+            )
+        ],
+    )
+    with pytest.raises(HandlerValidationError, match="简历原文"):
+        LearningPlanHandler().validate_business(_ctx(payload), output, {"github": {"status": "UNAVAILABLE"}}, {})
+
+
+def test_github_item_requires_available_candidates():
+    payload = _resume_payload()
+    output = AIPlanResult(
+        title="简历专项计划",
+        items=[
+            PlanItem(
+                skillCode="JAVA",
+                title="学习 Spring Boot 官方示例",
+                kind="READING",
+                category="GITHUB",
+                objective="o",
+                reason="r",
+                method="m",
+                completionCriteria="c",
+                resourceLinks=[{"label": "spring-boot", "url": "https://github.com/spring-projects/spring-boot"}],
+                estimatedMinutes=30,
+            )
+        ],
+    )
+    with pytest.raises(HandlerValidationError, match="GitHub 数据不可用"):
+        LearningPlanHandler().validate_business(_ctx(payload), output, {"github": {"status": "UNAVAILABLE"}}, {})
+
+    result = LearningPlanHandler().validate_business(_ctx(payload), output, _github_prepared(), {})
+    assert result.items[0].category == "GITHUB"
+    assert result.github.status == "AVAILABLE"
+
+    output.items[0].resource_links[0].url = "https://github.com/evil/fake-repo"
+    with pytest.raises(HandlerValidationError, match="候选之外"):
+        LearningPlanHandler().validate_business(_ctx(payload), output, _github_prepared(), {})
+
+
+def test_match_plan_rejects_pending_and_resume_category():
+    payload = LearningPlanPayload.model_validate(plan_envelope(uuid4())["payload"])
+    output = AIPlanResult(
+        title="岗位差距计划",
+        items=[
+            PlanItem(
+                skillCode="redis",
+                title="待评估项",
+                kind="PRACTICE",
+                category="BASIC",
+                objective="o",
+                reason="r",
+                method="m",
+                completionCriteria="c",
+                evidenceStatus="PENDING",
+                estimatedMinutes=20,
+            )
+        ],
+    )
+    with pytest.raises(HandlerValidationError, match="待评估"):
+        LearningPlanHandler().validate_business(_ctx(payload), output, {}, {})
+
+    output.items[0].evidence_status = "ASSESSED"
+    output.items[0].category = "RESUME_PROJECT"
+    with pytest.raises(HandlerValidationError, match="岗位匹配来源"):
+        LearningPlanHandler().validate_business(_ctx(payload), output, {}, {})
 
 
 # ---------------------------------------------------------------------------

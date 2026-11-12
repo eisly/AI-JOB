@@ -26,11 +26,12 @@ public interface JobMapper {
     @Insert("""
             INSERT INTO job_version (id,job_id,version_no,title,company_name,city_code,role_code,candidate_type,
               jd_text,content_hash,requirements_json)
-            VALUES (#{id},#{jobId},1,#{title},#{companyName},NULL,#{roleCode},'EXPERIENCED',#{jdText},
+            VALUES (#{id},#{jobId},1,#{title},#{companyName},NULL,#{roleCode},#{candidateType},#{jdText},
               UNHEX(#{contentHash}),NULL)
             """)
     int insertJobVersion(@Param("id") String id, @Param("jobId") String jobId, @Param("title") String title,
                          @Param("companyName") String companyName, @Param("roleCode") String roleCode,
+                         @Param("candidateType") String candidateType,
                          @Param("jdText") String jdText, @Param("contentHash") String contentHash);
 
     String COLUMNS = """

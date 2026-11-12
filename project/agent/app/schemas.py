@@ -17,6 +17,9 @@ EDUCATION_ORDER: dict[str, int] = {
 }
 Difficulty = Literal["EASY", "MEDIUM", "HARD"]
 PlanKind = Literal["READING", "PRACTICE", "INTERVIEW"]
+PlanCategory = Literal["BASIC", "RESUME_PROJECT", "GITHUB"]
+PlanEvidenceStatus = Literal["ASSESSED", "PENDING"]
+GitHubLookupStatus = Literal["AVAILABLE", "UNAVAILABLE", "DISABLED"]
 EvidenceStatus = Literal["MISSING", "LIMITED", "SUFFICIENT"]
 ROLE_VALUES = {"USER", "ASSISTANT", "SYSTEM"}
 
@@ -110,17 +113,51 @@ class AIMatchResult(APIModel):
     items: list[AIMatchItem] = Field(default_factory=list, max_length=50)
 
 
+class GitHubCandidate(APIModel):
+    full_name: str = Field(min_length=1, max_length=200)
+    html_url: str = Field(min_length=1, max_length=2048)
+    description: str = Field(default="", max_length=1000)
+    stargazers_count: int = Field(default=0, ge=0)
+    language: str | None = Field(default=None, max_length=64)
+    pushed_at: datetime | None = None
+    topics: list[str] = Field(default_factory=list, max_length=20)
+    source: Literal["GITHUB_API"] = "GITHUB_API"
+    verified_at: datetime
+
+
+class GitHubLookup(APIModel):
+    status: GitHubLookupStatus = "UNAVAILABLE"
+    fetched_at: datetime | None = None
+    reason: str | None = Field(default=None, max_length=500)
+    candidates: list[GitHubCandidate] = Field(default_factory=list, max_length=10)
+
+
+class ResourceLink(APIModel):
+    label: str = Field(min_length=1, max_length=120)
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class PlanItem(APIModel):
     skill_code: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=200)
     kind: PlanKind
+    category: PlanCategory = "BASIC"
+    objective: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
+    method: str = Field(min_length=1, max_length=500)
+    completion_criteria: str = Field(min_length=1, max_length=500)
+    evidence_status: PlanEvidenceStatus = "ASSESSED"
+    evidence_quote: str | None = Field(default=None, max_length=500)
+    resource_links: list[ResourceLink] = Field(default_factory=list, max_length=5)
     estimated_minutes: int = Field(ge=5, le=120)
     resource_refs: list[Citation] = Field(default_factory=list, max_length=10)
 
 
 class AIPlanResult(APIModel):
     title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=500)
     items: list[PlanItem] = Field(min_length=1, max_length=20)
+    github: GitHubLookup = Field(default_factory=GitHubLookup)
 
 
 class RubricDimension(APIModel):
@@ -465,13 +502,46 @@ class MatchItemInput(APIModel):
     verified_at: datetime | None = None
 
 
+class ResumeSkillInput(APIModel):
+    skill_code: str = Field(min_length=1, max_length=64)
+    claim: str = Field(default="", max_length=500)
+    quote: str = Field(default="", max_length=1000)
+    location: str = Field(default="", max_length=200)
+
+
+class ResumeSnapshotInput(APIModel):
+    version_id: UUID
+    version_no: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    target_direction: str | None = Field(default=None, max_length=32)
+    education: Education | None = None
+    experience_months: int | None = Field(default=None, ge=0, le=600)
+    major: str | None = Field(default=None, max_length=200)
+    skills: list[ResumeSkillInput] = Field(default_factory=list, max_length=50)
+    projects_text: str = Field(default="", max_length=12000)
+
+
+class TrainingHistoryInput(APIModel):
+    completed_items: int = Field(default=0, ge=0)
+    evaluated_answers: int = Field(default=0, ge=0)
+    average_score: float | None = Field(default=None, ge=0, le=100)
+    open_mistakes: int = Field(default=0, ge=0)
+    weak_skill_codes: list[str] = Field(default_factory=list, max_length=20)
+
+
+
 class PlanItemSpec(APIModel):
     skill_code: str = Field(min_length=1, max_length=64)
     difficulty: Difficulty = "MEDIUM"
 
 
 class LearningPlanPayload(APIModel):
-    match_item: MatchItemInput
+    plan_source: Literal["MATCH", "RESUME"] = "MATCH"
+    match_item: MatchItemInput | None = None
+    resume: ResumeSnapshotInput | None = None
+    target_direction: str | None = Field(default=None, max_length=32)
+    training_history: TrainingHistoryInput | None = None
+    limitations: list[str] = Field(default_factory=list, max_length=10)
     profile_version: int = Field(ge=1)
     daily_minutes: int = Field(ge=5, le=480)
     days: int = Field(ge=1, le=30)
@@ -486,6 +556,14 @@ class LearningPlanPayload(APIModel):
             if item not in cleaned:
                 cleaned.append(item)
         return cleaned
+
+    @model_validator(mode="after")
+    def _required_source(self) -> "LearningPlanPayload":
+        if self.plan_source == "MATCH" and self.match_item is None:
+            raise ValueError("MATCH 来源必须提供 matchItem")
+        if self.plan_source == "RESUME" and self.resume is None:
+            raise ValueError("RESUME 来源必须提供 resume")
+        return self
 
 
 class QuestionCandidate(APIModel):
@@ -798,7 +876,7 @@ class AIJobSearchItem(APIModel):
     company_name: str = Field(min_length=1, max_length=200)
     city_name: str | None = Field(default=None, max_length=100)
     city_code: str | None = Field(default=None, max_length=12)
-    candidate_type: Literal["INTERNSHIP", "CAMPUS", "EXPERIENCED"]
+    candidate_type: Literal["INTERNSHIP", "CAMPUS", "EXPERIENCED"] | None = None
     salary_min_monthly_cents: int | None = Field(default=None, ge=0, le=100_000_000)
     salary_max_monthly_cents: int | None = Field(default=None, ge=0, le=100_000_000)
     salary_text: str | None = Field(default=None, max_length=200)
@@ -808,7 +886,10 @@ class AIJobSearchItem(APIModel):
     education_min: Education | None = None
     company_size: CompanySize
     company_size_label: str | None = Field(default=None, max_length=50)
+    company_size_text: str | None = Field(default=None, max_length=200)
+    field_sources: dict[str, Any] = Field(default_factory=dict)
     published_at: datetime | None = None
+    updated_at: datetime | None = None
     fetched_at: datetime
     recruitment_status: Literal["OPEN", "PROBABLE", "CLOSED", "UNKNOWN"] | None = None
     recruitment_checked_at: datetime | None = None

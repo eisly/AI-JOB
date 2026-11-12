@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,8 @@ if str(ROOT) not in sys.path:
 from app.config import Settings
 from app.llm import create_llm
 from app.search.pipeline import JobSearchPipeline, SearchRuntime
+from app.schemas import JobSearchPayload
+from app.skills.tools import validate_result_contract
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +30,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-results", type=int, default=10)
     parser.add_argument("--target-role", default="JAVA_BACKEND")
     parser.add_argument("--output", default="", help="将完整结果写入指定 JSON 文件")
+    parser.add_argument("--replay-output", default="", help="保存合成画像和完整 Agent 结果，用于 Java 隔离回放")
+    parser.add_argument("--phase-one-budget", action="store_true", help="固定 60 次、150 秒、3 轮阶段一全局预算")
+    parser.add_argument("--diagnose-llm", action="store_true", help="记录模型调用耗时与异常类型，不记录提示词")
     return parser.parse_args()
 
 
@@ -35,6 +41,10 @@ async def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     args = parse_args()
     settings = Settings()
+    if args.phase_one_budget:
+        settings = settings.model_copy(update={"job_search_max_api_calls": 60,
+                                               "job_search_max_elapsed_seconds": 150,
+                                               "job_search_max_rounds": 3})
     payload = {
         "profile": {
             "userId": "10000000-0000-4000-8000-00000000d001",
@@ -55,7 +65,7 @@ async def main() -> int:
                 ],
                 "warnings": [],
             },
-            "activeResumeVersionId": "10000000-0000-4000-8000-00000000r001",
+            "activeResumeVersionId": "10000000-0000-4000-8000-00000000a001",
         },
         "filters": {
             "keyword": args.keyword,
@@ -80,11 +90,59 @@ async def main() -> int:
         print(f"stage {name} {progress}", flush=True)
 
     llm = create_llm(settings)
+    llm_diagnostics = []
+    if args.diagnose_llm:
+        inner_llm = llm
+
+        class DiagnosticLLM:
+            @property
+            def name(self):
+                return inner_llm.name
+
+            async def complete(self, request):
+                started = time.monotonic()
+                event = {
+                    "operation": request.operation,
+                    "schema": request.schema_hint,
+                    "systemChars": len(request.system_prompt),
+                    "userChars": len(request.user_prompt),
+                }
+                try:
+                    response = await inner_llm.complete(request)
+                except BaseException as exc:
+                    event.update({
+                        "status": "ERROR",
+                        "errorType": type(exc).__name__,
+                        "httpStatus": getattr(exc, "http_status", None),
+                        "durationMs": int((time.monotonic() - started) * 1000),
+                    })
+                    llm_diagnostics.append(event)
+                    print("llm diagnostic " + json.dumps(event, ensure_ascii=False), flush=True)
+                    raise
+                event.update({
+                    "status": "OK",
+                    "durationMs": int((time.monotonic() - started) * 1000),
+                    "responseChars": len(response.text),
+                    "inputTokens": response.input_tokens,
+                    "outputTokens": response.output_tokens,
+                })
+                llm_diagnostics.append(event)
+                print("llm diagnostic " + json.dumps(event, ensure_ascii=False), flush=True)
+                return response
+
+        llm = DiagnosticLLM()
+    http_attempts = {}
+
+    async def record_request(request):
+        key = request.headers.get("host", request.url.host)
+        http_attempts[key] = http_attempts.get(key, 0) + 1
+
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(12.0, connect=5.0),
         limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
         trust_env=settings.job_search_trust_env,
         follow_redirects=False,
+        event_hooks={"request": [record_request]},
     ) as client:
         runtime = SearchRuntime(
             settings=settings,
@@ -96,6 +154,13 @@ async def main() -> int:
         )
         result = await JobSearchPipeline(runtime).run()
 
+    validated = validate_result_contract("JOB_SEARCH", result)
+    JobSearchPayload.model_validate(payload)
+    if args.replay_output:
+        replay = Path(args.replay_output)
+        replay.parent.mkdir(parents=True, exist_ok=True)
+        replay.write_text(json.dumps({"payload": payload, "result": validated}, ensure_ascii=False), encoding="utf-8")
+
     summary = {
         "provider": settings.effective_llm_provider,
         "model": settings.effective_model_name,
@@ -106,6 +171,8 @@ async def main() -> int:
         "dedupe": result["dedupe"],
         "metrics": result.get("metrics"),
         "meta": result.get("meta"),
+        "llmDiagnostics": llm_diagnostics,
+        "httpAttempts": http_attempts,
         "itemCount": len(result["items"]),
         "items": [
             {
@@ -152,6 +219,7 @@ async def main() -> int:
             "funnel": summary["metrics"]["funnel"],
             "rates": summary["metrics"]["rates"],
             "budget": summary["meta"]["budget"],
+            "llmDiagnostics": llm_diagnostics,
             "output": str(target),
         }
         print(json.dumps(compact, ensure_ascii=False, indent=2))

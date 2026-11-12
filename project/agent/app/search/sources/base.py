@@ -22,6 +22,15 @@ class SourceContext:
     settings: Any = None
     extra: dict[str, Any] = field(default_factory=dict)
 
+    def reserve_request(self) -> bool:
+        budget = self.extra.get("budget")
+        if budget is None:
+            return True
+        if not budget.can_call():
+            return False
+        budget.record_api_call()
+        return True
+
 
 class SourceAdapter:
     key = ""

@@ -14,6 +14,7 @@ from app.llm import (
     create_llm,
     parse_json_object,
 )
+from app.operations import RESUME_PARSE
 
 
 def _settings(**overrides) -> Settings:
@@ -71,18 +72,19 @@ def _request() -> LLMRequest:
     )
 
 
-def _completion(content: str | None, *, with_usage: bool = True):
-    message = SimpleNamespace(content=content)
+def _completion(content: str | None, *, with_usage: bool = True, finish_reason="stop", reasoning=""):
+    message = SimpleNamespace(content=content, reasoning_content=reasoning)
     usage = SimpleNamespace(prompt_tokens=11, completion_tokens=7) if with_usage else None
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=message)] if content is not None else [],
-        model="deepseek-chat",
+        choices=[SimpleNamespace(message=message, finish_reason=finish_reason)] if content is not None else [],
+        model="deepseek-v4-pro",
         usage=usage,
     )
 
 
 async def test_deepseek_complete_returns_text_model_and_usage(monkeypatch):
-    client = DeepSeekClient(_settings(llm_provider="deepseek", deepseek_api_key="sk-test"))
+    client = DeepSeekClient(_settings(llm_provider="deepseek", deepseek_api_key="sk-test",
+                                      deepseek_model="deepseek-v4-pro"))
     captured: dict = {}
 
     async def fake_create(**kwargs):
@@ -93,17 +95,41 @@ async def test_deepseek_complete_returns_text_model_and_usage(monkeypatch):
     response = await client.complete(_request())
 
     assert json.loads(response.text) == {"ok": True}
-    assert response.model == "deepseek-chat"
+    assert response.model == "deepseek-v4-pro"
     assert response.input_tokens == 11
     assert response.output_tokens == 7
     assert response.latency_ms >= 0
-    assert client.name == "deepseek-chat"
-    assert captured["model"] == "deepseek-chat"
+    assert client.name == "deepseek-v4-pro"
+    assert captured["model"] == "deepseek-v4-pro"
     assert captured["messages"] == [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "user"},
     ]
     assert captured["response_format"] == {"type": "json_object"}
+    assert captured["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert captured["reasoning_effort"] == "high"
+    assert captured["max_tokens"] == 16384
+    assert "temperature" not in captured
+    assert captured["timeout"].read == 120.0
+    assert captured["timeout"].connect == 45.0
+
+
+async def test_deepseek_complete_disables_thinking_and_keeps_temperature(monkeypatch):
+    client = DeepSeekClient(_settings(llm_provider="deepseek", deepseek_api_key="sk-test",
+                                      deepseek_thinking=False))
+    captured: dict = {}
+
+    async def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _completion('{"ok": true}')
+
+    monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
+    await client.complete(_request())
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "reasoning_effort" not in captured
+    assert captured["temperature"] == 0.2
+    assert "timeout" not in captured
 
 
 async def test_deepseek_complete_rejects_empty_content(monkeypatch):
@@ -116,6 +142,32 @@ async def test_deepseek_complete_rejects_empty_content(monkeypatch):
     with pytest.raises(LLMProviderError, match="模型返回空内容") as caught:
         await client.complete(_request())
     assert caught.value.retryable is True
+
+
+@pytest.mark.parametrize("content,finish_reason", [("   ", "stop"), ('{"facts":', "length")])
+async def test_resume_retries_incomplete_json_with_lower_effort(monkeypatch, content, finish_reason):
+    client = DeepSeekClient(_settings(llm_provider="deepseek", deepseek_api_key="sk-test"))
+    replies = iter([
+        _completion(content, finish_reason=finish_reason),
+        _completion('{"facts": {}}', reasoning="synthetic reasoning"),
+    ])
+    calls = []
+
+    async def fake_create(**kwargs):
+        calls.append((kwargs["reasoning_effort"], kwargs["max_tokens"], kwargs["extra_body"]))
+        return next(replies)
+
+    monkeypatch.setattr(client._client.chat.completions, "create", fake_create)
+    request = _request()
+    request.operation = RESUME_PARSE
+    result = await client.complete(request)
+
+    assert json.loads(result.text) == {"facts": {}}
+    assert result.reasoning == "synthetic reasoning"
+    assert calls == [
+        ("high", 16384, {"thinking": {"type": "enabled"}}),
+        ("low", 16384, {"thinking": {"type": "enabled"}}),
+    ]
 
 
 async def test_deepseek_complete_wraps_provider_error_without_leaking_payload(monkeypatch):

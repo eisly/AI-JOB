@@ -2,18 +2,23 @@ package com.aijob.backend.job;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 
 class JobSearchResultHandlerTest {
 
-    private record Ranked(int rank, String eligibility, String title, int score, String legacyStatus,
+    private record Ranked(int rank, String eligibility, String title, Integer score, String legacyStatus,
                           String verificationStatus, String reason) {
     }
 
@@ -103,26 +108,105 @@ class JobSearchResultHandlerTest {
         assertTrue(warnings.contains("CANDIDATE_TYPE_UNKNOWN"));
     }
 
+    @Test
+    void preservesOfficialIdentityAndFieldEvidenceInSnapshot() {
+        Harness harness = new Harness(10);
+        Map<String, Object> job = harness.job("官网后端岗位", "110100", "BACHELOR", 0.5, "2026-11-06T00:00:00Z");
+        job.put("sourceKey", "company_official");
+        job.put("companySizeText", "2000-5000人");
+        job.put("fieldSources", Map.of("salary", Map.of("sourceUrl", "https://www.liepin.com/job/123.shtml",
+                "sourceName", "猎聘", "sourceType", "PUBLIC_SEARCH", "rawText", "100-150元/天")));
+        job.put("updatedAt", "2026-07-21T00:00:00Z");
+        harness.run(List.of(job));
+        assertEquals("2000-5000人", harness.snapshot.get("companySizeText"));
+        assertEquals("2026-07-21T00:00:00Z", harness.snapshot.get("updatedAt"));
+        assertEquals("OFFICIAL", ((Map<?, ?>) harness.snapshot.get("source")).get("type"));
+        assertTrue(((Map<?, ?>) harness.snapshot.get("fieldSources")).containsKey("salary"));
+    }
+
+    @Test
+    void skillOnlyRequirementLeavesHardEligibilityUnknown() {
+        Harness harness = new Harness(10);
+        Map<String, Object> job = harness.job("Java 后端", "110100", null, 0.5, "2026-11-06T00:00:00Z");
+        job.put("requirements", Map.of("skills", List.of("JAVA")));
+        when(harness.profiles.agentSkillCatalog()).thenReturn(List.of(Map.of("code", "JAVA")));
+        harness.run(List.of(job));
+        assertEquals("UNKNOWN", harness.ranked.getFirst().eligibility());
+    }
+
+    @Test
+    void checksExplicitGraduationCohortEvenWhenExtractionOmitsIt() {
+        Harness harness = new Harness(10);
+        Map<String, Object> job = harness.job("Java 后端", "110100", "BACHELOR", 0.5, "2026-11-06T00:00:00Z");
+        job.put("jdText", "要求本科及以上学历，面向 2028 届或 2029 届毕业生");
+        harness.run(List.of(job));
+        assertEquals("UNKNOWN", harness.ranked.getFirst().eligibility());
+    }
+
+    @Test
+    void reconcilesEducationCodeWithExplicitQuotedDegree() {
+        Harness harness = new Harness(10);
+        harness.run(List.of(harness.job("Java 后端", "110100", "MASTER", 0.5, "2026-11-06T00:00:00Z")));
+        assertEquals("PASS", harness.ranked.getFirst().eligibility());
+    }
+
+    @Test
+    void replaysCapturedAgentResponsesThroughJavaRanking() throws Exception {
+        String directory = System.getProperty("jobSearchReplayDir");
+        assumeTrue(directory != null && !directory.isBlank());
+        ObjectMapper objectMapper = new ObjectMapper();
+        try (var files = Files.list(Path.of(directory))) {
+            var cases = files.filter(file -> file.getFileName().toString().endsWith(".json")).sorted().toList();
+            assertTrue(!cases.isEmpty());
+            for (Path file : cases) {
+                var captured = objectMapper.readTree(Files.readString(file));
+                var harness = new Harness(30);
+                var payload = captured.get("payload");
+                var result = captured.get("result");
+                doCallRealMethod().when(harness.jobService).roleCode(anyString());
+                when(harness.mapper.sourceId(anyString())).thenAnswer(call -> "source-" + call.getArgument(0));
+                when(harness.profiles.agentSkillCatalog()).thenReturn(harness.json.map(payload).get("skillCatalog")
+                        instanceof List<?> skills ? (List) skills : List.of());
+                harness.run(payload.toString(), result);
+                assertEquals(result.get("items").size(), harness.summary.get("rawCount"));
+                assertEquals(harness.ranked.size(), harness.summary.get("uniqueCount"));
+                var rankedEligibility = harness.ranked.stream().collect(Collectors.groupingBy(
+                        Ranked::eligibility, Collectors.counting()));
+                Map<String, Object> report = new HashMap<>(harness.summary);
+                report.remove("agentMetrics");
+                report.remove("agentDedupe");
+                report.put("rankedEligibility", rankedEligibility);
+                report.put("rankedStale", harness.snapshots.stream().filter(item ->
+                        ((List<?>) item.get("warnings")).contains("STALE_POSTING")).count());
+                System.out.println("JOB_SEARCH_REPLAY " + file.getFileName() + " " + harness.json.stringify(report));
+            }
+        }
+    }
+
     private static final class Harness {
         private final JsonService json = new JsonService(new ObjectMapper());
         private final JobSearchMapper mapper = mock(JobSearchMapper.class);
         private final JobMapper jobs = mock(JobMapper.class);
         private final AbilityService ability = mock(AbilityService.class);
         private final ProfileService profiles = mock(ProfileService.class);
+        private final JobService jobService = mock(JobService.class);
         private final int limit;
         private final List<Ranked> ranked = new ArrayList<>();
         private Map<String, Object> snapshot = Map.of();
+        private Map<String, Object> summary = Map.of();
+        private final List<Map<String, Object>> snapshots = new ArrayList<>();
 
         private Harness(int limit) {
             this.limit = limit;
             when(jobs.lockBatch("search", "user")).thenReturn(Map.of("status", "GENERATING"));
             when(mapper.sourceId("web")).thenReturn("source");
+            when(mapper.sourceId("company_official")).thenReturn("official-source");
             when(ability.snapshots("user")).thenReturn(List.of());
             when(profiles.agentSkillCatalog()).thenReturn(List.of());
-            JobService jobService = mock(JobService.class);
             when(jobService.roleCode(anyString())).thenReturn("JAVA_BACKEND");
             doAnswer(call -> {
                 snapshot = json.map((String) call.getArgument(11));
+                snapshots.add(snapshot);
                 ranked.add(new Ranked(
                         (Integer) call.getArgument(4),
                         (String) call.getArgument(5),
@@ -134,6 +218,10 @@ class JobSearchResultHandlerTest {
                 return 1;
             }).when(jobs).insertItem(anyString(), anyString(), anyString(), anyInt(), anyInt(), anyString(),
                     anyString(), any(), anyString(), anyString(), anyString(), anyString());
+            doAnswer(call -> {
+                summary = json.map((String) call.getArgument(4));
+                return 1;
+            }).when(mapper).complete(anyString(), anyString(), anyString(), anyString(), anyString());
             handler = new JobSearchResultHandler(mapper, jobs, jobService, json,
                     new EligibilityService(), new MatchScoreService(), ability, profiles);
         }
@@ -141,15 +229,20 @@ class JobSearchResultHandlerTest {
         private final JobSearchResultHandler handler;
 
         private void run(List<Map<String, Object>> items) {
+            run(json.stringify(Map.of(
+                    "profile", Map.of("targetRole", "JAVA_BACKEND", "candidateType", "EXPERIENCED",
+                            "facts", Map.of("education", "BACHELOR")),
+                    "filters", Map.of("cities", List.of("110100"), "maxResults", limit))),
+                    json.tree(Map.of("items", items)));
+        }
+
+        private void run(String payload, tools.jackson.databind.JsonNode result) {
             AiTask task = new AiTask();
             task.setId("task");
             task.setResourceId("search");
             task.setUserId("user");
-            task.setInputSnapshotJson(json.stringify(Map.of(
-                    "profile", Map.of("targetRole", "JAVA_BACKEND", "candidateType", "EXPERIENCED",
-                            "facts", Map.of("education", "BACHELOR")),
-                    "filters", Map.of("cities", List.of("110100"), "maxResults", limit))));
-            handler.success(task, json.tree(Map.of("items", items)));
+            task.setInputSnapshotJson(payload);
+            handler.success(task, result);
         }
 
         private Map<String, Object> job(String title, String city, String education, double score, String publishedAt) {

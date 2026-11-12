@@ -61,7 +61,7 @@ const taskRunning = computed(() => !!task.value && ['QUEUED', 'RUNNING', 'CANCEL
 const educationOptions = Object.entries(educationLabels).map(([value, label]) => ({ value, label }))
 const maxGraduationYear = new Date().getFullYear() + 10
 
-const { task, deltaText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
+const { task, deltaText, reasoningText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
   onTerminal: async currentTask => {
     const id = currentTask.result?.resourceId || currentTask.resourceId
     if (!id) {
@@ -568,7 +568,7 @@ onMounted(() => {
 
         <section v-if="task || parseSubmissionError || taskAuthorityError || taskError" class="panel">
           <div class="panel__heading"><h2>解析任务</h2><el-tag v-if="taskRunning" type="warning">轮询与事件流同步中</el-tag></div>
-          <TaskStatus :task="task">
+          <TaskStatus :task="task" :reasoning="reasoningText">
             <template #actions>
               <el-button v-if="task?.status === 'FAILED'" type="primary" :loading="parseSubmitting" @click="startParse(taskVersionId || selectedVersionId)">按原版本重试</el-button>
               <el-button v-if="taskVersionId" :loading="detailLoading" @click="loadVersion(taskVersionId)">刷新版本详情</el-button>
@@ -600,7 +600,7 @@ onMounted(() => {
                 <span>上传时间：{{ formatDate(selectedVersion.createdAt) }}</span>
                 <span>MIME：{{ selectedVersion.mimeType }}</span>
               </div>
-              <el-alert v-if="selectedVersion.status === 'FAILED'" class="inline-alert" type="error" title="该版本解析失败，请检查文件后重试；如文件损坏或加密，请重新上传。" :closable="false" show-icon />
+              <el-alert v-if="selectedVersion.status === 'FAILED'" class="inline-alert" type="error" title="该版本解析失败，请查看解析任务中的错误详情，或按原版本重试。" :closable="false" show-icon />
               <el-alert v-if="selectedVersion.status === 'UPLOADED'" class="inline-alert" type="info" title="文件已上传，开始解析后才能核对事实。" :closable="false" show-icon />
               <el-alert v-if="selectedVersion.status === 'PARSING'" class="inline-alert" type="warning" title="正在解析，请等待任务完成。" :closable="false" show-icon />
               <template v-if="['PARSED', 'CONFIRMED'].includes(selectedVersion.status)">

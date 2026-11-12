@@ -6,6 +6,15 @@ export const learningApi = {
   createPlan(body: { matchItemId: string; dailyMinutes: number; days: number }) {
     return submitTrackedTask('/api/v1/learning/plans', body, '/training')
   },
+  createPlanFromResume(body: {
+    resumeVersionId?: string
+    targetDirection?: string
+    dailyMinutes: number
+    days: number
+    matchItemId?: string
+  }) {
+    return submitTrackedTask('/api/v1/learning/plans/from-resume', body, '/training')
+  },
   listPlans(query: PageQuery = {}) {
     return request<Page<LearningPlanVO>>('/api/v1/learning/plans', { query })
   },

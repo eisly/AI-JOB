@@ -91,8 +91,8 @@ function toCard(item: MatchItemVO, batchId: string): TargetJobCard {
       .map((gap) => gap.skillCode?.trim())
       .filter((code): code is string => !!code),
     action: {
-      name: 'job-match',
-      query: { batchId, jobId: item.jobId ?? item.id },
+      name: 'jobs',
+      query: { tab: 'matches', matchId: batchId, ...(item.jobId ? { jobId: item.jobId } : {}) },
     },
   }
 }

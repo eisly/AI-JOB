@@ -90,7 +90,7 @@ def build_metrics(
         "rates": {
             **verification.rates(),
             "extractionSuccessRate": _ratio(funnel.extraction_success, funnel.extraction_attempted),
-            "duplicateRate": _ratio(funnel.duplicate_count, funnel.unique_urls + funnel.duplicate_count),
+            "duplicateRate": _ratio(funnel.duplicate_count, funnel.unique_postings + funnel.duplicate_count),
             "staleRate": _ratio(funnel.stale_count, len(items)),
             "unknownRate": verification.rates().get("unknownRate", 0.0),
         },

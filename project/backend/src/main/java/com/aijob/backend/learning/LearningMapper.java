@@ -13,12 +13,32 @@ import org.apache.ibatis.annotations.Update;
 public interface LearningMapper {
 
     @Insert("""
-            INSERT INTO learning_plan (id,user_id,match_item_id,task_id,profile_version,daily_minutes,days)
-            VALUES (#{id},#{userId},#{matchItemId},#{taskId},#{profileVersion},#{dailyMinutes},#{days})
+            INSERT INTO learning_plan (id,user_id,match_item_id,source,resume_version_id,target_direction,
+              supersedes_plan_id,generation_no,basis_json,task_id,profile_version,daily_minutes,days)
+            VALUES (#{id},#{userId},#{matchItemId,jdbcType=VARCHAR},#{source},
+              #{resumeVersionId,jdbcType=VARCHAR},#{targetDirection,jdbcType=VARCHAR},
+              #{supersedesPlanId,jdbcType=VARCHAR},#{generationNo},#{basisJson,jdbcType=VARCHAR},
+              #{taskId},#{profileVersion},#{dailyMinutes},#{days})
             """)
-    int insertPlan(@Param("id") String id, @Param("userId") String userId, @Param("matchItemId") String matchItemId,
-                   @Param("taskId") String taskId, @Param("profileVersion") long profileVersion,
-                   @Param("dailyMinutes") int dailyMinutes, @Param("days") int days);
+    int insertPlan(@Param("id") String id, @Param("userId") String userId,
+                   @Param("matchItemId") String matchItemId, @Param("source") String source,
+                   @Param("resumeVersionId") String resumeVersionId, @Param("targetDirection") String targetDirection,
+                   @Param("supersedesPlanId") String supersedesPlanId, @Param("generationNo") int generationNo,
+                   @Param("basisJson") String basisJson, @Param("taskId") String taskId,
+                   @Param("profileVersion") long profileVersion, @Param("dailyMinutes") int dailyMinutes,
+                   @Param("days") int days);
+
+    @Select("""
+            SELECT * FROM learning_plan WHERE user_id=#{userId} AND source=#{source}
+            ORDER BY created_at DESC,id DESC LIMIT 1
+            """)
+    Map<String,Object> latestPlan(@Param("userId") String userId, @Param("source") String source);
+
+    @Select("SELECT COUNT(*) FROM learning_plan WHERE user_id=#{userId} AND source=#{source}")
+    int planGeneration(@Param("userId") String userId, @Param("source") String source);
+
+    @Update("UPDATE learning_plan SET basis_json=#{basisJson,jdbcType=VARCHAR},updated_at=UTC_TIMESTAMP(3) WHERE id=#{id}")
+    int updatePlanBasis(@Param("id") String id, @Param("basisJson") String basisJson);
 
     @Select("SELECT * FROM learning_plan WHERE id=#{id} AND user_id=#{userId}")
     Map<String,Object> plan(@Param("id") String id, @Param("userId") String userId);
@@ -37,11 +57,18 @@ public interface LearningMapper {
                    @Param("taskId") String taskId, @Param("title") String title);
 
     @Insert("""
-            INSERT INTO learning_plan_item (id,plan_id,seq,skill_code,title,kind,estimated_minutes,resource_refs_json)
-            VALUES (#{id},#{planId},#{seq},#{skillCode},#{title},#{kind},#{estimatedMinutes},#{resourceRefsJson})
+            INSERT INTO learning_plan_item (id,plan_id,seq,skill_code,title,kind,category,objective,reason,`method`,
+              completion_criteria,evidence_status,evidence_quote,resource_links_json,estimated_minutes,resource_refs_json)
+            VALUES (#{id},#{planId},#{seq},#{skillCode},#{title},#{kind},#{category},#{objective},#{reason},#{method},
+              #{completionCriteria},#{evidenceStatus},#{evidenceQuote,jdbcType=VARCHAR},
+              #{resourceLinksJson,jdbcType=VARCHAR},#{estimatedMinutes},#{resourceRefsJson})
             """)
     int insertItem(@Param("id") String id, @Param("planId") String planId, @Param("seq") int seq,
                    @Param("skillCode") String skillCode, @Param("title") String title, @Param("kind") String kind,
+                   @Param("category") String category, @Param("objective") String objective,
+                   @Param("reason") String reason, @Param("method") String method,
+                   @Param("completionCriteria") String completionCriteria, @Param("evidenceStatus") String evidenceStatus,
+                   @Param("evidenceQuote") String evidenceQuote, @Param("resourceLinksJson") String resourceLinksJson,
                    @Param("estimatedMinutes") int estimatedMinutes, @Param("resourceRefsJson") String resourceRefsJson);
 
     @Select("SELECT * FROM learning_plan_item WHERE plan_id=#{planId} ORDER BY seq")
@@ -186,4 +213,29 @@ public interface LearningMapper {
             </script>
             """)
     long mistakeCount(@Param("userId") String userId, @Param("resolved") Boolean resolved);
+
+    @Select("""
+            SELECT COUNT(*) FROM learning_plan_item i JOIN learning_plan p ON p.id=i.plan_id
+            WHERE p.user_id=#{userId} AND i.status='COMPLETED'
+            """)
+    int completedItemCount(@Param("userId") String userId);
+
+    @Select("SELECT COUNT(*) FROM learning_answer WHERE user_id=#{userId} AND status='EVALUATED'")
+    int evaluatedAnswerCount(@Param("userId") String userId);
+
+    @Select("""
+            SELECT AVG(CAST(JSON_UNQUOTE(JSON_EXTRACT(evaluation_json,'$.overallScore')) AS DECIMAL(6,1)))
+            FROM learning_answer WHERE user_id=#{userId} AND status='EVALUATED'
+              AND JSON_EXTRACT(evaluation_json,'$.overallScore') IS NOT NULL
+            """)
+    Double averageEvaluationScore(@Param("userId") String userId);
+
+    @Select("SELECT COUNT(*) FROM user_mistake WHERE user_id=#{userId} AND resolved=0")
+    int openMistakeCount(@Param("userId") String userId);
+
+    @Select("""
+            SELECT q.skill_codes_json FROM user_mistake m JOIN question q ON q.id=m.question_id
+            WHERE m.user_id=#{userId} AND m.resolved=0 ORDER BY m.updated_at DESC,m.id DESC LIMIT 10
+            """)
+    List<String> openMistakeSkillJson(@Param("userId") String userId);
 }

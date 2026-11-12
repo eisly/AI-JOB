@@ -198,6 +198,9 @@ public class JobResultHandler implements TaskResultHandler {
         for (PreparedItem item : prepared) {
             Map<String, Object> source = new LinkedHashMap<>();
             source.put("title", item.jobSnapshot.get("title"));
+            source.put("companyName", item.jobSnapshot.get("companyName"));
+            source.put("cityCode", item.jobSnapshot.get("cityCode"));
+            source.put("candidateType", item.jobSnapshot.get("candidateType"));
             source.put("source", item.jobSnapshot.get("source"));
             source.put("sourceUrl", item.jobSnapshot.get("sourceUrl"));
             source.put("verifiedAt", item.jobSnapshot.get("verifiedAt"));

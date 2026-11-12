@@ -80,6 +80,28 @@ public interface TaskMapper {
                     @Param("eventType") String eventType, @Param("payloadJson") String payloadJson,
                     @Param("expiresAt") LocalDateTime expiresAt);
 
+    @Select("SELECT COALESCE(MAX(agent_seq),0) FROM ai_task_event WHERE task_id=#{taskId}")
+    long agentEventCursor(@Param("taskId") String taskId);
+
+    @Select("SELECT COALESCE(MAX(seq),0)+1 FROM ai_task_event WHERE task_id=#{taskId}")
+    long nextEventSeq(@Param("taskId") String taskId);
+
+    @Select("""
+            SELECT COUNT(*) FROM ai_task_event
+            WHERE task_id=#{taskId} AND agent_run_id=#{agentRunId} AND agent_seq=#{agentSeq}
+            """)
+    int agentEventExists(@Param("taskId") String taskId, @Param("agentRunId") String agentRunId,
+                         @Param("agentSeq") long agentSeq);
+
+    @Insert("""
+            INSERT INTO ai_task_event (id,task_id,seq,event_type,payload_json,agent_run_id,agent_seq,expires_at)
+            VALUES (#{id},#{taskId},#{seq},#{eventType},#{payloadJson},#{agentRunId},#{agentSeq},#{expiresAt})
+            """)
+    int insertAgentEvent(@Param("id") String id, @Param("taskId") String taskId, @Param("seq") long seq,
+                         @Param("eventType") String eventType, @Param("payloadJson") String payloadJson,
+                         @Param("agentRunId") String agentRunId, @Param("agentSeq") long agentSeq,
+                         @Param("expiresAt") LocalDateTime expiresAt);
+
     @Select("""
             SELECT id,task_id,seq,event_type,payload_json,created_at,expires_at FROM ai_task_event
             WHERE task_id=#{taskId} AND seq>#{cursor} AND expires_at>UTC_TIMESTAMP(3) ORDER BY seq LIMIT 200

@@ -421,6 +421,29 @@ def create_app(
             logger.info("query by task status=%s callback=%s", record.status, record.callback_status)
         return _result(_run_payload(record), trace_id=_trace_id(request))
 
+    @app.get("/internal/ai/v1/runs/{run_id}/events/log")
+    async def run_events_log(
+        request: Request,
+        run_id: UUID,
+        after: int = Query(default=0, ge=0),
+        limit: int = Query(default=200, ge=1, le=500),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        record = await service.get_run(str(run_id))
+        _assert_task(settings, principal, record.task_id)
+        events = await repository.events_after(record.run_id, after)
+        fresh = [item for item in events if item.expires_at > utcnow()][:limit]
+        payload = {
+            "runId": record.run_id,
+            "taskId": record.task_id,
+            "lastSeq": fresh[-1].seq if fresh else after,
+            "events": [
+                {"seq": item.seq, "type": item.event_type, "payload": item.payload}
+                for item in fresh
+            ],
+        }
+        return _result(payload, trace_id=_trace_id(request))
+
     @app.post("/internal/ai/v1/runs/{run_id}/cancel")
     async def cancel_run(
         request: Request,

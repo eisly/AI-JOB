@@ -105,6 +105,7 @@ const {
   task,
   loading: taskLoading,
   error: taskError,
+  reasoningText,
   restart: restartTask,
 } = useTask(taskId, {
   onDone: async done => {
@@ -343,14 +344,15 @@ function sourceAlerts() {
   return alerts
 }
 
-function cityName(code?: string | null) {
-  if (!code) return '未明确'
-  return cityLabels[code] || code
+function cityName(code?: string | null, fallback?: string | null) {
+  if (code) return cityLabels[code] || code
+  return fallback || '来源未提供'
 }
 
 function salary(item: JobSearchItemVO) {
   if (item.salaryText) return item.salaryText
-  return formatSalary(item.minMonthlySalaryCents, item.maxMonthlySalaryCents)
+  const formatted = formatSalary(item.minMonthlySalaryCents, item.maxMonthlySalaryCents)
+  return formatted && !formatted.includes('未明确') ? formatted : '来源未提供'
 }
 
 function experience(item: JobSearchItemVO) {
@@ -358,17 +360,18 @@ function experience(item: JobSearchItemVO) {
   if (item.experienceMonthsMin !== null && item.experienceMonthsMin !== undefined) {
     return `${item.experienceMonthsMin} 个月起`
   }
-  return '未明确'
+  return '来源未提供'
 }
 
 function education(item: JobSearchItemVO) {
   if (item.educationText) return item.educationText
   if (item.educationMin) return educationLabels[item.educationMin] || item.educationMin
-  return '未明确'
+  return '来源未提供'
 }
 
 function sizeLabel(item: JobSearchItemVO) {
-  return companySizeLabels[item.companySize] || item.companySize || '规模未知'
+  if (!item.companySize || item.companySize === 'SIZE_UNKNOWN') return '来源未提供'
+  return companySizeLabels[item.companySize] || item.companySize
 }
 
 function safeUrl(url?: string | null) {
@@ -484,7 +487,7 @@ onMounted(async () => {
         <el-tag v-if="task?.stage" size="small">{{ task.stage }}</el-tag>
       </div>
       <el-skeleton v-if="taskLoading && !task" :rows="2" animated />
-      <TaskStatus v-else :task="task">
+      <TaskStatus v-else :task="task" :reasoning="reasoningText">
         <template #actions>
           <el-button v-if="task?.status === 'FAILED'" size="small" :loading="retrying" @click="retrySearch">按原条件重试</el-button>
           <el-button v-if="task && taskIsActive(task)" size="small" :loading="canceling" @click="cancelSearch">取消</el-button>
@@ -571,7 +574,7 @@ onMounted(async () => {
                 <div class="search-card__heading">
                   <div>
                     <h3><el-tag effect="plain" size="small">优先级 {{ item.rankNo }}</el-tag> {{ item.title }}</h3>
-                    <p>{{ item.companyName }} · {{ cityName(item.cityCode) }} · {{ candidateTypeLabels[item.candidateType] || item.candidateType }}</p>
+                    <p>{{ item.companyName }} · {{ cityName(item.cityCode, item.cityName) }} · {{ candidateTypeLabels[item.candidateType] || item.candidateType }}</p>
                   </div>
                   <div class="search-score">
                     <strong>{{ item.matchScore === null ? '待评估' : item.matchScore }}</strong>
@@ -595,8 +598,9 @@ onMounted(async () => {
                   <el-descriptions-item label="薪资">{{ salary(item) }}</el-descriptions-item>
                   <el-descriptions-item label="经验">{{ experience(item) }}</el-descriptions-item>
                   <el-descriptions-item label="学历">{{ education(item) }}</el-descriptions-item>
-                  <el-descriptions-item label="公司规模">{{ sizeLabel(item) }}</el-descriptions-item>
+                  <el-descriptions-item label="公司规模">{{ item.companySizeText || sizeLabel(item) }}</el-descriptions-item>
                   <el-descriptions-item label="发布时间">{{ formatDate(item.publishedAt) }}</el-descriptions-item>
+                  <el-descriptions-item v-if="item.updatedAt" label="官网更新">{{ formatDate(item.updatedAt) }}</el-descriptions-item>
                   <el-descriptions-item v-if="item.recruitmentCheckedAt" label="在招核验时间">{{ formatDate(item.recruitmentCheckedAt) }}</el-descriptions-item>
                   <el-descriptions-item v-if="item.verificationReason" label="核验结论">{{ item.verificationReason }}</el-descriptions-item>
                   <el-descriptions-item v-if="item.searchProviders?.length" label="搜索引擎">{{ item.searchProviders.join(' / ') }}</el-descriptions-item>
@@ -644,6 +648,13 @@ onMounted(async () => {
                   </el-collapse-item>
                 </el-collapse>
 
+                <div v-if="item.fieldSources" class="source-aliases">
+                  <el-popover v-for="(proof, field) in item.fieldSources" :key="field" trigger="click" width="320">
+                    <template #reference><el-button link type="primary">{{ ({ salary: '薪资', companySize: '规模', city: '城市', education: '学历', experience: '经验', publishedAt: '发布时间', updatedAt: '更新时间', companyName: '公司' } as Record<string, string>)[field] || field }}依据</el-button></template>
+                    <p>{{ proof.rawText }}</p><p>{{ proof.fetchedAt }}</p>
+                    <el-button link type="primary" @click="openSource(proof.sourceUrl)">{{ proof.sourceName }}</el-button>
+                  </el-popover>
+                </div>
                 <div class="source-aliases">
                   <span class="muted">可追溯来源：</span>
                   <template v-for="alias in item.aliases" :key="`${alias.sourceKey}:${alias.sourceUrl}`">

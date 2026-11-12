@@ -10,7 +10,10 @@ from .tencent import TencentCareerSource
 from .unavailable import BossZhipinSource, LiepinSource, ZhaopinSource
 from .web import WebSearchSource
 
+from .company_official import CompanyOfficialSource
+
 ALL_SOURCES: dict[str, SourceAdapter] = {
+    "company_official": CompanyOfficialSource(),
     "web": WebSearchSource(),
     "tencent": TencentCareerSource(),
     "baidu": BaiduCareerSource(),
@@ -21,7 +24,7 @@ ALL_SOURCES: dict[str, SourceAdapter] = {
     "zhaopin": ZhaopinSource(),
 }
 
-DEFAULT_SOURCE_KEYS = ("web", "baidu", "tencent", "greenhouse")
+DEFAULT_SOURCE_KEYS = ("company_official", "web", "baidu", "tencent", "greenhouse")
 
 
 def configured_source_keys(settings: Any) -> list[str]:
@@ -33,6 +36,8 @@ def configured_source_keys(settings: Any) -> list[str]:
         key = item.strip().lower()
         if key in ALL_SOURCES and key not in result:
             result.append(key)
+    if "web" in result and "company_official" not in result:
+        result.insert(0, "company_official")
     return result or list(DEFAULT_SOURCE_KEYS)
 
 

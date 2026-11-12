@@ -12,7 +12,6 @@ import type {
   LearningPlanVO,
   MatchBatchVO,
   NextTaskModel,
-  PageResult,
   ProfileVO,
   ProgressModel,
   RegionKey,
@@ -31,7 +30,7 @@ import { buildNextTask } from './model/nextTask'
 import { buildProgress } from './model/progress'
 import { buildTargetJobsModel, selectLatestBatch } from './model/targetJobs'
 
-type SourceKey = 'user' | 'profile' | 'matchBatches' | 'plans' | 'interviews' | 'growth' | 'tasks' | 'resumes'
+type SourceKey = 'user' | 'profile' | 'matchBatches' | 'plans' | 'interviews' | 'growth' | 'tasks' | 'resumes' | 'applications'
 
 type SourceOutcome<T> = { ok: true; data: T; traceId?: string } | { ok: false; error: ApiError }
 
@@ -125,7 +124,6 @@ export function useWorkbench(): WorkbenchController {
   let authHandling = false
   let snapshotRestored = false
   let currentUserId: string | undefined
-  let unmounted = false
 
   const businessKeys: Array<Exclude<RegionKey, 'identity'>> = [
     'goal',
@@ -415,7 +413,7 @@ export function useWorkbench(): WorkbenchController {
 
     const startedAt = Date.now()
     const [batchesOutcome, profileOutcome] = await Promise.all([
-      pool.get<PageResult<MatchBatchVO>>('matchBatches', workbenchApi.getMatchBatches),
+      pool.get('matchBatches', workbenchApi.getMatchBatches),
       pool.get<ProfileVO | null>('profile', workbenchApi.getProfile),
     ])
     if (generation !== state.generation || identityBlocked) {
@@ -430,7 +428,7 @@ export function useWorkbench(): WorkbenchController {
       return
     }
 
-    const batches = batchesOutcome.data.records
+    const batches = batchesOutcome.data
     const profile = profileOutcome.ok ? profileOutcome.data : null
     const latest = selectLatestBatch(batches)
     if (!latest) {
@@ -481,17 +479,14 @@ export function useWorkbench(): WorkbenchController {
       return
     }
 
-    const [profileOutcome, resumesOutcome, batchesOutcome, plansOutcome, growthOutcome, interviewsOutcome] =
+    const [profileOutcome, resumesOutcome, batchesOutcome, plansOutcome, growthOutcome, interviewsOutcome, applicationOutcome] =
       await Promise.all([
         pool.get<ProfileVO | null>('profile', workbenchApi.getProfile),
         pool.get<ResumeVO[]>('resumes', (options) => workbenchApi.getResumes(options).then((result) => ({
           data: result.data.records,
           traceId: result.traceId,
         }))),
-        pool.get<MatchBatchVO[]>('matchBatches', (options) => workbenchApi.getMatchBatches(options).then((result) => ({
-          data: result.data.records,
-          traceId: result.traceId,
-        }))),
+        pool.get('matchBatches', workbenchApi.getMatchBatches),
         pool.get<LearningPlanVO[]>('plans', (options) => workbenchApi.getLearningPlans(options).then((result) => ({
           data: result.data.records,
           traceId: result.traceId,
@@ -501,13 +496,14 @@ export function useWorkbench(): WorkbenchController {
           data: result.data.records,
           traceId: result.traceId,
         }))),
+        pool.get('applications', workbenchApi.getApplicationTotal),
       ])
 
     if (generation !== state.generation || identityBlocked) {
       return
     }
 
-    const outcomes = [profileOutcome, resumesOutcome, batchesOutcome, plansOutcome, growthOutcome, interviewsOutcome]
+    const outcomes = [profileOutcome, resumesOutcome, batchesOutcome, plansOutcome, growthOutcome, interviewsOutcome, applicationOutcome]
     for (const outcome of outcomes) {
       if (!outcome.ok && isAuthError(outcome.error)) {
         handleAuthExpired()
@@ -527,6 +523,7 @@ export function useWorkbench(): WorkbenchController {
       plans: plansOutcome.ok ? plansOutcome.data : null,
       growth: growthOutcome.ok ? growthOutcome.data : null,
       interviews: interviewsOutcome.ok ? interviewsOutcome.data : null,
+      applicationTotal: applicationOutcome.ok ? applicationOutcome.data : null,
       availability: {
         profile: profileOutcome.ok,
         resumes: resumesOutcome.ok,
@@ -553,10 +550,7 @@ export function useWorkbench(): WorkbenchController {
         data: result.data.records,
         traceId: result.traceId,
       }))),
-      pool.get<MatchBatchVO[]>('matchBatches', (options) => workbenchApi.getMatchBatches(options).then((result) => ({
-        data: result.data.records,
-        traceId: result.traceId,
-      }))),
+      pool.get('matchBatches', workbenchApi.getMatchBatches),
       pool.get<LearningPlanVO[]>('plans', (options) => workbenchApi.getLearningPlans(options).then((result) => ({
         data: result.data.records,
         traceId: result.traceId,
@@ -693,7 +687,7 @@ export function useWorkbench(): WorkbenchController {
   }
 
   onBeforeUnmount(() => {
-    unmounted = true
+    state.generation += 1
     activeController?.abort()
     activeController = null
   })

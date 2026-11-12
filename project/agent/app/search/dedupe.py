@@ -4,6 +4,8 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from .evidence import fill_groups
+
 from .models import (
     SourcePosting,
     normalize_company,
@@ -99,7 +101,7 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
             by_identity.setdefault(identity, index)
         host = _host(posting.source_url)
         for other in by_fingerprint.get(posting.fingerprint, []):
-            if _host(ordered[other].source_url) != host and finder.union(index, other):
+            if _compatible(posting, ordered[other]) and _host(ordered[other].source_url) != host and finder.union(index, other):
                 merged_by_method["fingerprint"] += 1
                 break
         by_fingerprint.setdefault(posting.fingerprint, []).append(index)
@@ -117,7 +119,7 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
                     continue
                 if finder.find(left_index) == finder.find(right_index):
                     continue
-                if jd_similarity(left.jd_text, right.jd_text) >= JD_SIMILARITY_THRESHOLD:
+                if _compatible(left, right) and normalize_title(left.title) == normalize_title(right.title) and jd_similarity(left.jd_text, right.jd_text) >= JD_SIMILARITY_THRESHOLD:
                     finder.union(left_index, right_index)
                     merged_by_method["jdSimilarity"] += 1
 
@@ -147,6 +149,17 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
             merged_count += len(group) - 1
         result.append(primary)
 
+    # Size belongs to the verified employer; salary remains specific to a job.
+    for primary in result:
+        if primary.company_size in (None, "SIZE_UNKNOWN"):
+            employer = next((p for p in result if normalize_company(p.company_name) == normalize_company(primary.company_name)
+                             and p.company_size not in (None, "SIZE_UNKNOWN") and p.company_size_text), None)
+            if employer:
+                from .evidence import record_fields
+                record_fields(employer)
+                primary.company_size, primary.company_size_text = employer.company_size, employer.company_size_text
+                primary.field_sources["companySize"] = dict(employer.field_sources["companySize"])
+
     result.sort(key=lambda item: (
         SOURCE_PRIORITY.get(item.source_type, 9),
         -_verification_rank(item),
@@ -160,6 +173,13 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
         "duplicateRate": round(merged_count / len(postings), 4) if postings else 0.0,
     }
     return result, stats
+
+
+def _compatible(left, right):
+    return (normalize_company(left.company_name) == normalize_company(right.company_name)
+            and bool(left.city_code or left.city_name)
+            and (left.city_code or left.city_name) == (right.city_code or right.city_name)
+            and bool(left.candidate_type) and left.candidate_type == right.candidate_type)
 
 
 def _host(url: str) -> str:
@@ -182,6 +202,7 @@ def _alias(posting: SourcePosting) -> dict[str, Any]:
         "sourceType": posting.source_type,
         "sourceUrl": posting.source_url,
         "publishedAt": posting.published_at.isoformat() if posting.published_at else None,
+        "updatedAt": posting.updated_at.isoformat() if posting.updated_at else None,
         "fetchedAt": posting.fetched_at.isoformat(),
         "verification": posting.verification,
         "verificationStatus": posting.verification_status,
@@ -190,22 +211,8 @@ def _alias(posting: SourcePosting) -> dict[str, Any]:
 
 
 def _fill_missing(primary: SourcePosting, other: SourcePosting) -> None:
-    for field in (
-        "city_name",
-        "city_code",
-        "candidate_type",
-        "salary_min_monthly_cents",
-        "salary_max_monthly_cents",
-        "salary_text",
-        "experience_text",
-        "experience_months_min",
-        "education_text",
-        "education_min",
-        "published_at",
-    ):
-        if getattr(primary, field) in (None, "") and getattr(other, field) not in (None, ""):
-            setattr(primary, field, getattr(other, field))
-    if _verification_rank(other) > _verification_rank(primary):
+    fill_groups(primary, other)
+    if primary.source_type != "OFFICIAL" and _verification_rank(other) > _verification_rank(primary):
         primary.verification_status = other.verification_status
         primary.verification_reason = other.verification_reason
         primary.verification_evidence = other.verification_evidence

@@ -78,6 +78,10 @@ public class ProfileService {
         return vo(mapper.find(userId));
     }
 
+    public Set<String> roles() {
+        return ROLES;
+    }
+
     public List<Map<String, Object>> skillCatalog() {
         return mapper.skills().stream().map(view::map).toList();
     }

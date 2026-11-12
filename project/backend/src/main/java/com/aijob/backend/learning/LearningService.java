@@ -1,8 +1,11 @@
 package com.aijob.backend.learning;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -20,6 +23,7 @@ import com.aijob.backend.common.PageResult;
 import com.aijob.backend.job.JobMapper;
 import com.aijob.backend.job.JobService;
 import com.aijob.backend.profile.ProfileService;
+import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.AiTask;
 import com.aijob.backend.task.TaskMapper;
 import com.aijob.backend.task.TaskService;
@@ -27,21 +31,39 @@ import com.aijob.backend.task.TaskService;
 @Service
 public class LearningService {
 
+    private static final Set<String> PLAN_SOURCES = Set.of("MATCH", "RESUME");
+    private static final Set<String> RESUME_READY = Set.of("PARSED", "CONFIRMED");
+    private static final int MAX_RESUME_TEXT = 8000;
+    private static final Map<String, List<String>> DIRECTION_SKILL_KEYWORDS = Map.of(
+            "JAVA_BACKEND", List.of("java", "spring", "mysql", "redis", "jvm", "mybatis", "kafka", "system",
+                    "algorithm", "linux", "network", "sql"),
+            "FRONTEND", List.of("javascript", "typescript", "vue", "react", "css", "html", "vite", "node",
+                    "browser", "network", "algorithm"),
+            "ALGORITHM", List.of("python", "c++", "algorithm", "math", "machine", "deep", "pytorch",
+                    "tensorflow", "sql", "statistics"),
+            "TEST", List.of("java", "python", "test", "junit", "pytest", "selenium", "docker", "ci", "linux",
+                    "network"),
+            "DATA", List.of("sql", "python", "spark", "hive", "flink", "data", "machine", "statistics",
+                    "hadoop", "kafka"));
+
     private final LearningMapper mapper;
     private final JobMapper jobs;
     private final JobService jobService;
     private final ProfileService profiles;
+    private final ResumeMapper resumes;
     private final TaskService tasks;
     private final TaskMapper taskMapper;
     private final JsonService json;
     private final ApiView view;
 
     public LearningService(LearningMapper mapper, JobMapper jobs, JobService jobService, ProfileService profiles,
-                           TaskService tasks, TaskMapper taskMapper, JsonService json, ApiView view) {
+                           ResumeMapper resumes, TaskService tasks, TaskMapper taskMapper, JsonService json,
+                           ApiView view) {
         this.mapper = mapper;
         this.jobs = jobs;
         this.jobService = jobService;
         this.profiles = profiles;
+        this.resumes = resumes;
         this.tasks = tasks;
         this.taskMapper = taskMapper;
         this.json = json;
@@ -69,13 +91,107 @@ public class LearningService {
         }
         Map<String, Object> matchItem = matchItemInput(jobService.matchItemVo(match));
         List<String> allowedSkills = allowedSkills(matchItem);
-        Map<String, Object> payload = Map.of("matchItem", matchItem, "profileVersion", profileVersion,
-                "dailyMinutes", dailyMinutes, "days", days, "allowedSkillCodes", allowedSkills,
-                "knowledgeRefs", List.of());
+        Map<String, Object> payload = Map.of("planSource", "MATCH", "matchItem", matchItem,
+                "profileVersion", profileVersion, "dailyMinutes", dailyMinutes, "days", days,
+                "allowedSkillCodes", allowedSkills, "knowledgeRefs", List.of());
         String planId = UUID.randomUUID().toString();
+        PlanLineage lineage = lineage(userId, "MATCH");
+        Map<String, Object> basis = basis("MATCH", dailyMinutes, days, null, null, matchItemId,
+                String.valueOf(match.get("title")), List.of());
+        String basisJson = json.stringify(basis);
         return tasks.create(userId, "POST", route, key, body, "LEARNING_PLAN", "LEARNING_PLAN", planId,
                 Map.of("profileVersion", profileVersion), payload,
-                taskId -> mapper.insertPlan(planId, userId, matchItemId, taskId, profileVersion, dailyMinutes, days));
+                taskId -> mapper.insertPlan(planId, userId, matchItemId, "MATCH", null, null,
+                        lineage.supersedesPlanId(), lineage.generationNo(), basisJson, taskId, profileVersion,
+                        dailyMinutes, days));
+    }
+
+    public ResponseEntity<CommonResult<Object>> createPlanFromResume(String userId, String route, String key,
+                                                                      Map<String, Object> body) {
+        ResponseEntity<CommonResult<Object>> replay = tasks.replay(userId, "POST", route, key, body);
+        if (replay != null) {
+            return replay;
+        }
+        int dailyMinutes = requiredInt(body, "dailyMinutes", 10, 120);
+        int days = requiredInt(body, "days", 1, 14);
+        Map<String, Object> profile = profiles.get(userId);
+        long profileVersion = ((Number) profile.get("profileVersion")).longValue();
+        String requestedDirection = Data.text(body, "targetDirection", false, 32);
+        String targetDirection = isBlank(requestedDirection)
+                ? textOrNull(profile.get("targetRole")) : requestedDirection;
+        if (targetDirection == null || !profiles.roles().contains(targetDirection)) {
+            throw BusinessException.validation("targetDirection", "目标求职方向不在支持范围内");
+        }
+        ResumeContext resume = resolveResume(userId, Data.uuid(body, "resumeVersionId", false), profile);
+        if (!RESUME_READY.contains(resume.status())) {
+            throw resumeRequired("简历尚未解析完成，请等待解析成功后再生成训练计划");
+        }
+
+        String requestedMatchItemId = Data.uuid(body, "matchItemId", false);
+        Map<String, Object> matchItem = null;
+        boolean matchReferenced = false;
+        String matchNote = null;
+        if (!isBlank(requestedMatchItemId)) {
+            Map<String, Object> match = jobs.matchItem(requestedMatchItemId, userId);
+            if (match == null || !"READY".equals(String.valueOf(match.get("batch_status")))
+                    || "FAIL".equals(String.valueOf(match.get("eligibility_status")))) {
+                matchNote = "指定的岗位匹配结果不可用，已忽略";
+            } else if (profileVersion != ((Number) match.get("profile_version")).longValue()) {
+                matchNote = "岗位匹配使用的画像版本已变化，已忽略该结果";
+            } else if (jobs.staleItems(String.valueOf(match.get("batch_id"))) > 0) {
+                matchNote = "岗位匹配结果已过期，已忽略该结果";
+            } else {
+                matchItem = matchItemInput(jobService.matchItemVo(match));
+                matchReferenced = true;
+            }
+        }
+
+        List<String> allowedSkills = resumeAllowedSkills(resume.facts(), targetDirection, matchItem);
+        if (allowedSkills.isEmpty()) {
+            throw BusinessException.validation("targetDirection", "技能目录中没有可用于目标方向的技能");
+        }
+        Map<String, Object> history = trainingHistory(userId);
+        List<String> limitations = new ArrayList<>();
+        if (((Number) history.get("evaluatedAnswers")).intValue() == 0) {
+            limitations.add("暂无历史训练评价，能力判断仅基于简历事实");
+        }
+        if (!matchReferenced) {
+            limitations.add("未参考岗位匹配结果，训练内容仅基于简历与目标方向");
+        }
+        if (matchNote != null) {
+            limitations.add(matchNote);
+        }
+        Object evidenceSkills = resume.facts().get("skills");
+        if (!(evidenceSkills instanceof List<?> skillsList) || skillsList.isEmpty()) {
+            limitations.add("简历未提供可映射的技能事实，技能证据标记为待评估");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("planSource", "RESUME");
+        payload.put("profileVersion", profileVersion);
+        payload.put("dailyMinutes", dailyMinutes);
+        payload.put("days", days);
+        payload.put("targetDirection", targetDirection);
+        payload.put("allowedSkillCodes", allowedSkills);
+        payload.put("knowledgeRefs", List.of());
+        payload.put("matchItem", matchItem);
+        payload.put("resume", resumeInput(resume, targetDirection));
+        payload.put("trainingHistory", history);
+        payload.put("limitations", limitations);
+
+        String planId = UUID.randomUUID().toString();
+        PlanLineage lineage = lineage(userId, "RESUME");
+        Map<String, Object> basis = basis("RESUME", dailyMinutes, days, resume.versionId(), targetDirection,
+                matchItem == null ? null : String.valueOf(matchItem.get("id")), resume.title(), limitations);
+        basis.put("resumeVersionNo", resume.versionNo());
+        basis.put("matchReferenced", matchReferenced);
+        basis.put("github", Map.of("status", "PENDING"));
+        String basisJson = json.stringify(basis);
+        return tasks.create(userId, "POST", route, key, body, "LEARNING_PLAN", "LEARNING_PLAN", planId,
+                Map.of("profileVersion", profileVersion), payload,
+                taskId -> mapper.insertPlan(planId, userId, null, "RESUME", resume.versionId(), targetDirection,
+                        lineage.supersedesPlanId(), lineage.generationNo(), basisJson, taskId, profileVersion,
+                        dailyMinutes, days));
     }
 
     public Map<String, Object> plan(String userId, String planId) {
@@ -266,12 +382,40 @@ public class LearningService {
     public Map<String, Object> planVo(Map<String, Object> plan) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", plan.get("id"));
+        result.put("source", plan.get("source"));
         result.put("matchItemId", plan.get("match_item_id"));
+        result.put("resumeVersionId", plan.get("resume_version_id"));
+        result.put("targetDirection", plan.get("target_direction"));
+        result.put("supersedesPlanId", plan.get("supersedes_plan_id"));
+        result.put("generationNo", plan.get("generation_no"));
         result.put("profileVersion", plan.get("profile_version"));
+        result.put("dailyMinutes", plan.get("daily_minutes"));
+        result.put("days", plan.get("days"));
         result.put("status", plan.get("status"));
         result.put("title", plan.get("title"));
+        result.put("generatedAt", view.value(plan.get("created_at")));
+        Object basis = plan.get("basis_json");
+        result.put("basis", basis == null ? null : json.convert(json.parse(String.valueOf(basis)), Object.class));
+        if (plan.get("match_item_id") != null) {
+            result.put("matchSummary", matchSummary(String.valueOf(plan.get("match_item_id")),
+                    String.valueOf(plan.get("user_id"))));
+        }
         result.put("items", mapper.items(String.valueOf(plan.get("id"))).stream().map(view::map).toList());
         return result;
+    }
+
+    private Map<String, Object> matchSummary(String matchItemId, String userId) {
+        Map<String, Object> match = jobs.matchItem(matchItemId, userId);
+        if (match == null) {
+            return null;
+        }
+        Map<String, Object> vo = jobService.matchItemVo(match);
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("id", matchItemId);
+        summary.put("title", vo.get("title"));
+        summary.put("companyName", vo.get("companyName"));
+        summary.put("matchScore", vo.get("matchScore"));
+        return summary;
     }
 
     public Map<String, Object> sessionVo(Map<String, Object> session) {
@@ -364,8 +508,174 @@ public class LearningService {
     private void ensureNoActive(String userId, String itemId) {
         Map<String, Object> active = mapper.activeSession(userId, itemId);
         if (active != null) {
-            throw BusinessException.conflict("当前计划项已有活动训练会话: " + active.get("id"), "INVALID_STATE");
+            throw BusinessException.conflict("当前计划项已有活动训练会话", "INVALID_STATE",
+                    Map.of("sessionId", String.valueOf(active.get("id"))));
         }
+    }
+
+    private ResumeContext resolveResume(String userId, String requestedVersionId, Map<String, Object> profile) {
+        Map<String, Object> row = null;
+        if (!isBlank(requestedVersionId)) {
+            row = resumes.versionWithResume(requestedVersionId, userId);
+            if (row == null) {
+                throw BusinessException.notFound();
+            }
+        } else {
+            Object activeVersion = profile.get("activeResumeVersionId");
+            if (activeVersion != null) {
+                row = resumes.versionWithResume(String.valueOf(activeVersion), userId);
+            }
+            if (row == null) {
+                for (Map<String, Object> candidate : resumes.latestVersions(userId, 20)) {
+                    if (RESUME_READY.contains(String.valueOf(candidate.get("status")))) {
+                        row = candidate;
+                        break;
+                    }
+                }
+            }
+        }
+        if (row == null) {
+            throw resumeRequired("请先在简历中心上传并解析简历，再生成训练计划");
+        }
+        String status = String.valueOf(row.get("status"));
+        String factsJson = "CONFIRMED".equals(status) ? textOrNull(row.get("confirmed_facts_json"))
+                : textOrNull(row.get("parsed_facts_json"));
+        Map<String, Object> facts = factsJson == null ? Map.of() : json.map(factsJson);
+        return new ResumeContext(String.valueOf(row.get("version_id")),
+                ((Number) row.get("version_no")).intValue(), textOrNull(row.get("title")), status,
+                facts, maxChars(textOrNull(row.get("extracted_text")), MAX_RESUME_TEXT));
+    }
+
+    private Map<String, Object> resumeInput(ResumeContext resume, String targetDirection) {
+        List<Map<String, Object>> skills = new ArrayList<>();
+        Object rawSkills = resume.facts().get("skills");
+        if (rawSkills instanceof List<?> items) {
+            for (Object raw : items) {
+                if (!(raw instanceof Map<?, ?> map)) continue;
+                Map<String, Object> skill = new LinkedHashMap<>();
+                skill.put("skillCode", map.get("skillCode"));
+                skill.put("claim", map.get("claim"));
+                skill.put("quote", maxChars(String.valueOf(map.get("quote")), 500));
+                skill.put("location", map.get("location"));
+                skills.add(skill);
+            }
+        }
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("versionId", resume.versionId());
+        input.put("versionNo", resume.versionNo());
+        input.put("title", resume.title() == null ? "简历" : resume.title());
+        input.put("targetDirection", targetDirection);
+        input.put("education", resume.facts().get("education"));
+        input.put("experienceMonths", resume.facts().get("experienceMonths"));
+        input.put("major", resume.facts().get("major"));
+        input.put("skills", skills);
+        input.put("projectsText", resume.text());
+        return input;
+    }
+
+    private List<String> resumeAllowedSkills(Map<String, Object> facts, String targetDirection,
+                                             Map<String, Object> matchItem) {
+        Map<String, String> catalog = new LinkedHashMap<>();
+        for (Map<String, Object> item : profiles.agentSkillCatalog()) {
+            catalog.put(String.valueOf(item.get("code")), String.valueOf(item.get("name")));
+        }
+        LinkedHashSet<String> chosen = new LinkedHashSet<>();
+        Object rawSkills = facts.get("skills");
+        if (rawSkills instanceof List<?> items) {
+            for (Object raw : items) {
+                if (raw instanceof Map<?, ?> map) {
+                    String code = String.valueOf(map.get("skillCode"));
+                    if (catalog.containsKey(code)) chosen.add(code);
+                }
+            }
+        }
+        for (String keyword : DIRECTION_SKILL_KEYWORDS.getOrDefault(targetDirection, List.of())) {
+            for (Map.Entry<String, String> entry : catalog.entrySet()) {
+                if (chosen.size() >= 16) break;
+                String haystack = (entry.getKey() + " " + entry.getValue()).toLowerCase(Locale.ROOT);
+                if (haystack.contains(keyword)) chosen.add(entry.getKey());
+            }
+        }
+        if (matchItem != null) {
+            for (String code : allowedSkills(matchItem)) {
+                if (chosen.size() >= 20) break;
+                if (catalog.containsKey(code)) chosen.add(code);
+            }
+        }
+        if (chosen.isEmpty()) {
+            catalog.keySet().stream().limit(12).forEach(chosen::add);
+        }
+        return new ArrayList<>(chosen).subList(0, Math.min(20, chosen.size()));
+    }
+
+    private Map<String, Object> trainingHistory(String userId) {
+        Set<String> weak = new LinkedHashSet<>();
+        for (String skillJson : mapper.openMistakeSkillJson(userId)) {
+            if (skillJson == null || weak.size() >= 10) continue;
+            for (Object code : json.convert(json.parse(skillJson), List.class)) {
+                if (weak.size() >= 10) break;
+                weak.add(String.valueOf(code));
+            }
+        }
+        Map<String, Object> history = new LinkedHashMap<>();
+        history.put("completedItems", mapper.completedItemCount(userId));
+        history.put("evaluatedAnswers", mapper.evaluatedAnswerCount(userId));
+        history.put("averageScore", mapper.averageEvaluationScore(userId));
+        history.put("openMistakes", mapper.openMistakeCount(userId));
+        history.put("weakSkillCodes", new ArrayList<>(weak));
+        return history;
+    }
+
+    private Map<String, Object> basis(String source, int dailyMinutes, int days, String resumeVersionId,
+                                      String targetDirection, String matchItemId, String matchTitle,
+                                      List<String> limitations) {
+        Map<String, Object> basis = new LinkedHashMap<>();
+        basis.put("source", source);
+        basis.put("dailyMinutes", dailyMinutes);
+        basis.put("days", days);
+        basis.put("resumeVersionId", resumeVersionId);
+        basis.put("targetDirection", targetDirection);
+        basis.put("matchItemId", matchItemId);
+        basis.put("matchTitle", matchTitle);
+        basis.put("generatedAt", Instant.now().toString());
+        basis.put("limitations", limitations);
+        return basis;
+    }
+
+    private PlanLineage lineage(String userId, String source) {
+        Map<String, Object> latest = mapper.latestPlan(userId, source);
+        if (latest == null) {
+            return new PlanLineage(null, 1);
+        }
+        int generation = latest.get("generation_no") == null ? 1
+                : ((Number) latest.get("generation_no")).intValue() + 1;
+        return new PlanLineage(String.valueOf(latest.get("id")), generation);
+    }
+
+    private BusinessException resumeRequired(String message) {
+        return BusinessException.conflict(message, "RESUME_REQUIRED", Map.of("action", "GO_RESUME"));
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String textOrNull(Object value) {
+        if (value == null) return null;
+        String text = String.valueOf(value);
+        return text.isBlank() ? null : text;
+    }
+
+    private String maxChars(String value, int max) {
+        if (value == null) return null;
+        return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    private record PlanLineage(String supersedesPlanId, int generationNo) {
+    }
+
+    private record ResumeContext(String versionId, int versionNo, String title, String status,
+                                 Map<String, Object> facts, String text) {
     }
 
     private Map<String, Object> matchItemInput(Map<String, Object> source) {

@@ -19,7 +19,8 @@ class TavilyProvider(SearchProvider):
         return bool(getattr(settings, "tavily_api_key", None))
 
     async def search(self, client: Any, query: str, *, settings: Any, limit: int, timeout: float,
-                     freshness: str | None = None, retries: int = 1) -> ProviderResult:
+                     freshness: str | None = None, retries: int = 1,
+                     page: int = 0) -> ProviderResult:
         api_key = getattr(settings, "tavily_api_key", None)
         if not api_key:
             return self.unconfigured(query)
@@ -29,9 +30,11 @@ class TavilyProvider(SearchProvider):
             "topic": "general",
             "country": "china",
             "language": "zh-cn",
-            "search_depth": "basic",
+            "search_depth": str(getattr(settings, "job_search_tavily_search_depth", "basic")),
             "include_raw_content": "markdown",
             "include_answer": False,
+            "include_published_date": True,
+            "include_usage": True,
             "max_results": max(1, min(limit, self.max_results)),
         }
         if freshness:
@@ -72,10 +75,14 @@ class TavilyProvider(SearchProvider):
                         published_at=_parse_date(item.get("published_date")),
                         score=item.get("score") if isinstance(item.get("score"), (int, float)) else None,
                     ))
+                usage = body.get("usage")
+                credits = usage.get("credits") if isinstance(usage, dict) else None
                 return ProviderResult(
                     key=self.key, name=self.name, status="OK" if hits else "EMPTY", hits=hits,
                     message="" if hits else "Tavily 未返回结果", http_status=response.status_code,
                     duration_ms=int((time.monotonic() - started) * 1000), query=query, attempts=attempts,
+                    page=page,
+                    credits=credits if isinstance(credits, int) else None,
                 )
             except httpx.TimeoutException:
                 last_error = httpx.TimeoutException("timeout")

@@ -14,6 +14,7 @@ from ..models import (
     parse_salary,
 )
 from ..security import ensure_public_url
+from ..text_extract import extract_job_fields
 from ..verification import official_list
 from .base import SourceAdapter, SourceContext, filter_postings
 from .detail import closed_text
@@ -49,36 +50,55 @@ class TencentCareerSource(SourceAdapter):
             "language": "zh-cn",
             "area": "cn",
         }
+        found = {}
+        status_code = None
+        raw_count = 0
+        pages = 0
+        failure = None
+        seen = set()
         try:
             await ensure_public_url(LIST_URL, allowed_hosts=set(TENCENT_HOSTS))
-            response = await context.client.get(
-                LIST_URL,
-                params=params,
-                timeout=context.timeout_seconds,
-                headers={"User-Agent": context.user_agent, "Accept": "application/json"},
-                follow_redirects=False,
-            )
+            for page in range(1, min(3, max(1, int(getattr(context.settings, "job_search_tencent_pages", 1)))) + 1):
+                if not context.reserve_request():
+                    raise TimeoutError("来源请求预算已用完")
+                response = await context.client.get(
+                    LIST_URL, params={**params, "pageIndex": page}, timeout=context.timeout_seconds,
+                    headers={"User-Agent": context.user_agent, "Accept": "application/json"},
+                    follow_redirects=False,
+                )
+                status_code = response.status_code
+                if status_code != 200:
+                    failure = f"官方接口返回 HTTP {status_code}"
+                    break
+                body = response.json()
+                data = body.get("Data") if isinstance(body, dict) and body.get("Code") == 200 else None
+                posts = data.get("Posts") if isinstance(data, dict) else None
+                if not isinstance(posts, list):
+                    failure = "官方接口未确认岗位列表"
+                    break
+                pages += 1
+                raw_count += len(posts)
+                for post in posts:
+                    posting = _to_posting(post)
+                    if posting:
+                        found.setdefault(posting.source_url, posting)
+                ids = {str(post.get("PostId")) for post in posts if isinstance(post, dict)}
+                if len(posts) < params["pageSize"] or not ids - seen:
+                    break
+                seen.update(ids)
+                total = data.get("Count")
+                if isinstance(total, int) and raw_count >= total:
+                    break
         except Exception as exc:
-            return self.result("FAILED", message=f"官方接口请求失败: {type(exc).__name__}", started=started)
-        if response.status_code != 200:
-            return self.result("FAILED", message=f"官方接口返回 HTTP {response.status_code}", http_status=response.status_code, started=started)
-        try:
-            body = response.json()
-        except ValueError:
-            return self.result("FAILED", message="官方接口返回非 JSON 内容", http_status=response.status_code, started=started)
-        data = body.get("Data") if isinstance(body, dict) and body.get("Code") == 200 else None
-        posts = data.get("Posts") if isinstance(data, dict) else None
-        if not isinstance(posts, list):
-            return self.result("FAILED", message="官方接口未确认岗位列表", started=started)
-        postings: list[SourcePosting] = []
-        for post in posts:
-            posting = _to_posting(post)
-            if posting is not None:
-                postings.append(posting)
-        postings = filter_postings(postings, context.filters)
-        if not postings:
-            return self.result("EMPTY", message="官方接口可用，但当前条件下没有匹配岗位", http_status=200, started=started)
-        return self.result("AVAILABLE", postings[: context.limit], message=f"官方接口返回 {len(posts)} 条，筛选后 {len(postings)} 条", http_status=200, started=started)
+            failure = f"官方接口请求失败: {type(exc).__name__}"
+        postings = filter_postings(list(found.values()), context.filters)
+        status = ("PARTIAL" if pages else "FAILED") if failure else "AVAILABLE" if postings else "EMPTY"
+        result = self.result(status, postings[:context.limit], message=failure or
+                             f"官方接口返回 {raw_count} 条，筛选后 {len(postings)} 条",
+                             http_status=status_code, started=started)
+        result.verification_counts = {"queries": pages, "discovered": raw_count,
+                                      "normalized": len(found), "hardFilterPass": len(postings)}
+        return result
 
 
 def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
@@ -94,8 +114,14 @@ def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
     city_name = str(post.get("LocationName") or "").strip() or None
     company = str(post.get("ComName") or "").strip() or "腾讯"
     candidate_type, inferred = infer_candidate_type(title, post.get("RequireWorkYearsName"))
-    experience_text = str(post.get("RequireWorkYearsName") or "").strip() or None
-    published = _parse_date(post.get("LastUpdateTime"))
+    fields = extract_job_fields(jd, title=title)
+    experience_text = str(post.get("RequireWorkYearsName") or "").strip() or fields.experience_text
+    experience_months = parse_experience_months(experience_text)
+    if experience_months is None:
+        experience_months = fields.experience_months_min
+    published = _parse_date(post.get("LastUpdateTime")) or fields.published_at
+    city_name = city_name or fields.city_name
+    city_code = city_code_for(city_name) or fields.city_code
     warnings: list[str] = []
     if inferred:
         warnings.append("CANDIDATE_TYPE_INFERRED")
@@ -103,7 +129,9 @@ def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
         warnings.append("MISSING_PUBLISHED_AT")
     if not experience_text:
         warnings.append("MISSING_EXPERIENCE")
-    salary_min, salary_max = parse_salary(None)
+    salary_text = fields.salary_text
+    salary_min = fields.salary_min_monthly_cents
+    salary_max = fields.salary_max_monthly_cents
     posting = SourcePosting(
         source_key=TencentCareerSource.key,
         source_name=TencentCareerSource.name,
@@ -113,16 +141,16 @@ def _to_posting(post: dict[str, Any]) -> SourcePosting | None:
         company_name=company,
         jd_text=jd,
         city_name=city_name,
-        city_code=city_code_for(city_name),
+        city_code=city_code,
         candidate_type=candidate_type,
         salary_min_monthly_cents=salary_min,
         salary_max_monthly_cents=salary_max,
-        salary_text=None,
+        salary_text=salary_text,
         experience_text=experience_text,
-        experience_months_min=parse_experience_months(experience_text),
-        education_text=None,
-        education_min=None,
-        company_size="SIZE_UNKNOWN",
+        experience_months_min=experience_months,
+        education_text=fields.education_text,
+        education_min=fields.education_min,
+        company_size=fields.company_size,
         published_at=published,
         fetched_at=checked_at,
         verification="VERIFIED",

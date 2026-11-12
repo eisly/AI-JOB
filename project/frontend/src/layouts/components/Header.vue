@@ -40,7 +40,8 @@ async function logout() {
 </template>
 
 <style scoped lang="scss">
-.header { position:absolute; z-index:1; top:16px; right:24px; display:flex; align-items:center; gap:18px; color:#445e90; }
+.header { position:absolute; z-index:1; top:16px; right:24px; display:flex; align-items:center; gap:18px; color:#445e90; pointer-events:none; }
+.header__notification, .header__user { pointer-events:auto; }
 .header__notification { color:#445e90; }
 .header__user { display:flex; align-items:center; gap:10px; cursor:pointer; outline:none; }
 .header__avatar { background:#3868b2; color:#fff; }

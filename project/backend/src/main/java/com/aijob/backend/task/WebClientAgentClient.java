@@ -133,6 +133,25 @@ public class WebClientAgentClient implements AgentClient {
         }
     }
 
+    @Override
+    public Map<String, Object> runEvents(String runId, String taskId, long after) {
+        long started = System.nanoTime();
+        try {
+            Map<String, Object> result = data(webClient.get()
+                    .uri(uri -> uri.path("/internal/ai/v1/runs/{runId}/events/log")
+                            .queryParam("after", after).build(runId))
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken(taskId))
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceIdOr(taskId))
+                    .retrieve().bodyToMono(Map.class).block(timeout));
+            log.debug("agent events task={} run={} duration={}ms", taskId, runId, elapsedMillis(started));
+            return result;
+        } catch (RuntimeException ex) {
+            log.debug("agent events failed task={} run={} error={} duration={}ms",
+                    taskId, runId, describe(ex), elapsedMillis(started));
+            throw ex;
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> data(Map<String, Object> response) {
         if (response == null || !(response.get("data") instanceof Map<?, ?>)) {

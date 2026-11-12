@@ -43,6 +43,13 @@ class EligibilityServiceTest {
     }
 
     @Test
+    void unrecognizedFactsRemainUnknown() {
+        assertEquals("UNKNOWN", service.evaluate(
+                Map.of("education", "UNKNOWN", "graduationYear", "2026", "experienceMonths", "12"),
+                requirements("BACHELOR")).get("status"));
+    }
+
+    @Test
     void requiredSkillLevelsCannotBeIgnored() {
         Map<String, Object> requirements = requirements("BACHELOR");
         requirements.put("requiredSkillLevels", Map.of("java", 70));

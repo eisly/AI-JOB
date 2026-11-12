@@ -19,6 +19,8 @@ tools: build_model_input,parse_model_output,validate_result_contract
 - 岗位须匹配用户指定的技术方向、职责和招聘类型；标题可使用同义表达，但不得把只把研发技能列为加分项的非研发岗位当作研发岗。
 - `pageIndex` 必须复制输入对象的 `pageIndex` 数字；页面内的职位编号、链接参数与 `pageIndex` 无关。
 - 所有文本字段从页面原样引用，不推测。`candidateTypeText` 填明确的招聘类型（实习/校招/社招），或支持社招的工作经验原文。
+- `cityName` 优先取“工作地点/工作城市/base/办公地点”后的原文；页面没有明确地点时填 null，不得用公司总部或推荐岗位城市代替。
+- `salaryText` 取薪资原文；`companySizeText` 取公司规模原文；`experienceText` 取经验要求原文；`educationText` 取学历要求原文；`publishedDate` 取发布时间原文。找不到就填 null，禁止根据常识补全。
 - `jdQuotes` 填二至四段从正文逐字复制的短句，每段须连续，优先取与目标岗位相关的职责及明确学历经验要求。
 - 可选字段缺失填 null；无合格岗位时返回空数组。
 - 只返回 JSON 对象 `{"postings": [...]}`，不要输出解释、Markdown 代码块或其他文本。
@@ -37,6 +39,8 @@ tools: build_model_input,parse_model_output,validate_result_contract
       "jdQuotes": ["JD 原文连续片段"],
       "companySizeText": "公司规模原文或 null",
       "salaryText": "薪资原文或 null",
+      "experienceText": "经验要求原文或 null",
+      "educationText": "学历要求原文或 null",
       "publishedDate": "发布时间原文或 null"
     }
   ]

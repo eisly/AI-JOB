@@ -14,10 +14,10 @@ import { isBatchStale } from './targetJobs'
 const STAGE_ACTIONS: Record<string, NavigationTarget> = {
   PROFILE: { name: 'profile', query: { section: 'goal' }, label: '完善求职画像' },
   RESUME: { name: 'resume', label: '前往简历中心' },
-  MATCH: { name: 'job-match', label: '前往岗位匹配' },
+  MATCH: { name: 'jobs', query: { tab: 'matches' }, label: '前往岗位匹配' },
   TRAINING: { name: 'training', label: '前往专项训练' },
   INTERVIEW: { name: 'interview', label: '前往模拟面试' },
-  APPLICATION: { name: 'application', label: '查看投递进度（方案预览）', preview: true },
+  APPLICATION: { name: 'application', label: '查看投递进度' },
 }
 
 export interface ProgressSourceAvailability {
@@ -36,6 +36,7 @@ export interface ProgressInput {
   plans: LearningPlanVO[] | null
   growth: GrowthVO | null
   interviews: InterviewVO[] | null
+  applicationTotal: number | null
   availability: ProgressSourceAvailability
 }
 
@@ -67,7 +68,7 @@ function trainingDone(plans: LearningPlanVO[] | null, growth: GrowthVO | null): 
 }
 
 export function buildProgress(input: ProgressInput): ProgressModel {
-  const { profile, resumes, batches, plans, growth, interviews, availability } = input
+  const { profile, resumes, batches, plans, growth, interviews, applicationTotal, availability } = input
 
   const stages: ProgressStage[] = [
     {
@@ -112,8 +113,8 @@ export function buildProgress(input: ProgressInput): ProgressModel {
     {
       key: 'APPLICATION',
       label: '产生一条投递记录',
-      status: 'UNKNOWN',
-      note: '投递进度功能未开放',
+      status: applicationTotal === null ? 'UNKNOWN' : applicationTotal > 0 ? 'DONE' : 'PENDING',
+      note: applicationTotal === null ? '数据加载失败，状态待确认' : undefined,
       action: STAGE_ACTIONS.APPLICATION,
     },
   ]
@@ -124,17 +125,15 @@ export function buildProgress(input: ProgressInput): ProgressModel {
   }
 
   const completedCount = stages.filter((stage) => stage.status === 'DONE').length
-  const blockingUnknown = stages.some((stage) => stage.key !== 'APPLICATION' && stage.status === 'UNKNOWN')
-  const applicationUnknown = stages.some((stage) => stage.key === 'APPLICATION' && stage.status === 'UNKNOWN')
-  const denominator = applicationUnknown ? 5 : 6
-
-  const percent = blockingUnknown ? undefined : Math.floor((completedCount / denominator) * 100)
+  const percent = stages.some((stage) => stage.status === 'UNKNOWN')
+    ? undefined
+    : Math.floor((completedCount / stages.length) * 100)
 
   return {
     percent,
     computable: percent !== undefined,
     completedCount,
-    totalCount: 6,
+    totalCount: stages.length,
     stages,
   }
 }

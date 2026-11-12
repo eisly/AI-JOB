@@ -17,7 +17,7 @@ def posting(url: str, status: str = "UNKNOWN") -> SourcePosting:
 
 
 def test_search_funnel_and_rates() -> None:
-    funnel = SearchFunnel(search_results={"tavily": 5, "brave": 3}, unique_urls=4,
+    funnel = SearchFunnel(search_results={"tavily": 5, "brave": 3}, unique_urls=7, unique_postings=4,
                           detail_pages=4, detail_pages_success=2, extraction_attempted=4,
                           extraction_success=2, duplicate_count=2, stale_count=1)
     items = [posting("https://a.example.com/1", "ACTIVE_CONFIRMED"),

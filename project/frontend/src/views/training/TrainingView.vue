@@ -1,16 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Edit, Refresh, Right } from '@element-plus/icons-vue'
+import { Edit, Plus, Refresh, Right } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { learningApi } from '@/api/learning'
+import { jobApi } from '@/api/jobs'
+import { profileApi } from '@/api/profile'
+import { resumeApi } from '@/api/resumes'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
 import { ApiError } from '@/api/request'
-import type { LearningAnswerVO, LearningPlanVO, LearningSessionVO, MistakeVO, Page, PlanItemVO, TaskVO } from '@/api/types'
+import type {
+LearningAnswerVO,
+  LearningPlanVO,
+  LearningSessionVO,
+  MatchSummaryVO,
+  MistakeVO,
+  Page,
+  PlanItemVO,
+  TaskVO,
+} from '@/api/types'
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
-import { commonStatusLabels, displayScore, errorMessage } from '@/utils/format'
+import { commonStatusLabels, displayScore, errorMessage, formatDate, roleLabels } from '@/utils/format'
 
 type TrainingTab = 'plans' | 'mistakes'
 type TaskContext = 'plans' | 'mistakes'
@@ -479,6 +491,167 @@ async function retryMistake(mistake: MistakeVO) {
   }
 }
 
+function categoryLabel(category: PlanItemVO['category']) {
+  return ({ BASIC: '基础知识', RESUME_PROJECT: '简历项目深挖', GITHUB: 'GitHub 项目学习' } as Record<string, string>)[category] || category
+}
+
+function planSourceLabel(plan: LearningPlanVO) {
+  return plan.source === 'RESUME' ? '简历生成' : '岗位匹配'
+}
+
+function planDirectionLabel(plan: LearningPlanVO) {
+  const direction = plan.targetDirection
+  if (direction) return roleLabels[direction] || direction
+  return plan.matchSummary?.title || '未设置方向'
+}
+
+function githubNotice(plan: LearningPlanVO) {
+  const github = plan.basis?.github
+  if (!github || github.status === 'PENDING') return 'GitHub 推荐数据尚未返回，不影响其他训练内容。'
+  if (github.status === 'AVAILABLE') {
+    return `GitHub 推荐来自公开检索，共 ${github.candidateCount || 0} 个候选，获取于 ${formatDate(github.fetchedAt)}。`
+  }
+  if (github.status === 'DISABLED') return '当前计划未启用 GitHub 推荐，可继续使用其他训练内容。'
+  return `GitHub 推荐当前不可用${github.reason ? `：${github.reason}` : ''}，可继续使用其他训练内容。`
+}
+
+function githubNoticeType(plan: LearningPlanVO): 'success' | 'info' | 'warning' {
+  const status = plan.basis?.github?.status
+  if (status === 'AVAILABLE') return 'success'
+  if (status === 'UNAVAILABLE') return 'warning'
+  return 'info'
+}
+
+function safeLinks(item: PlanItemVO) {
+  return item.resourceLinks.filter(link => /^https:\/\/github\.com\//i.test(link.url))
+}
+
+const planDialogVisible = ref(false)
+const planContextLoading = ref(false)
+const hasResume = ref(true)
+const planError = ref<unknown>(null)
+const planForm = ref({
+  resumeVersionId: '',
+  targetDirection: 'JAVA_BACKEND',
+  dailyMinutes: 30,
+  days: 7,
+  matchItemId: '',
+})
+const matchOptions = ref<MatchSummaryVO[]>([])
+const directionOptions = Object.entries(roleLabels).map(([value, label]) => ({ value, label }))
+const planTaskId = ref<string | null>(null)
+const planTracker = useTask(planTaskId, { onDone: handlePlanDone })
+const planTask = planTracker.task
+const planTrackingError = planTracker.error
+const planTaskActive = computed(() => taskIsActive(planTask.value))
+const planFormValid = computed(() => !!planForm.value.targetDirection && planForm.value.dailyMinutes >= 10 && planForm.value.days >= 1)
+
+async function loadPlanContext() {
+  planContextLoading.value = true
+  try {
+    const [resumes, profile] = await Promise.all([
+      resumeApi.list({ current: 1, size: 20 }),
+      profileApi.get().catch(() => null),
+    ])
+    const ready = resumes.records.find(item => ['PARSED', 'CONFIRMED'].includes(item.latestVersion?.status))
+    hasResume.value = !!ready
+    if (ready) planForm.value.resumeVersionId = ready.latestVersion.id
+    if (profile?.targetRole) planForm.value.targetDirection = profile.targetRole
+    const matches = await jobApi.listMatches({ current: 1, size: 5 }).catch(() => null)
+    const items: MatchSummaryVO[] = []
+    for (const batch of matches?.records || []) {
+      if (batch.status !== 'READY' || batch.isStale) continue
+      for (const item of batch.items) {
+        if (item.eligibility?.status === 'FAIL') continue
+        items.push({ id: item.id, title: item.title, companyName: null, matchScore: item.matchScore })
+      }
+    }
+    matchOptions.value = items.slice(0, 10)
+  } catch (reason) {
+    planError.value = reason
+  } finally {
+    planContextLoading.value = false
+  }
+}
+
+function openPlanDialog() {
+  planError.value = null
+  planDialogVisible.value = true
+  void loadPlanContext()
+}
+
+function goResumeCenter() {
+  planDialogVisible.value = false
+  void router.push('/resume')
+}
+
+function resumeRequired(reason: unknown) {
+  return reason instanceof ApiError && reason.status === 409 && reason.details?.action === 'GO_RESUME'
+}
+
+async function submitPlanFromResume() {
+  if (!hasResume.value) {
+    goResumeCenter()
+    return
+  }
+  if (planTaskActive.value || !planFormValid.value) return
+  planError.value = null
+  const body: Parameters<typeof learningApi.createPlanFromResume>[0] = {
+    dailyMinutes: planForm.value.dailyMinutes,
+    days: planForm.value.days,
+    targetDirection: planForm.value.targetDirection,
+  }
+  if (planForm.value.resumeVersionId) body.resumeVersionId = planForm.value.resumeVersionId
+  if (planForm.value.matchItemId) body.matchItemId = planForm.value.matchItemId
+  try {
+    planTaskId.value = (await learningApi.createPlanFromResume(body)).id
+  } catch (reason) {
+    if (resumeRequired(reason)) {
+      hasResume.value = false
+      planError.value = new Error('当前没有可用简历，请先上传并解析简历')
+    } else {
+      planError.value = reason
+    }
+  }
+}
+
+async function retryPlanTask() {
+  if (!planTask.value) return
+  planError.value = null
+  try {
+    planTaskId.value = (await retryTrackedTask(planTask.value)).id
+  } catch (reason) {
+    planError.value = reason
+  }
+}
+
+async function handlePlanDone(task: TaskVO) {
+  const planId = task.result?.resourceId || task.resourceId
+  if (!planId) {
+    planError.value = new Error('任务完成但未返回训练计划ID')
+    return
+  }
+  activeTab.value = 'plans'
+  await loadPlans()
+  await loadPlan(planId, true, true)
+  if (!planDetailError.value) {
+    planDialogVisible.value = false
+    ElMessage.success('训练计划已生成，已读取计划依据与训练项')
+  }
+}
+
+async function openPlanItem(planItemId: string) {
+  if (!planItemId) return
+  if (!plans.value.records.some(plan => plan.items.some(item => item.id === planItemId))) {
+    await loadPlans()
+  }
+  const plan = plans.value.records.find(item => item.items.some(entry => entry.id === planItemId))
+  if (plan) {
+    await loadPlan(plan.id, true, true)
+    setQuery({ planItemId: undefined })
+  }
+}
+
 function loadActiveTab() {
   if (activeTab.value === 'plans') void loadPlans()
   else void loadMistakes()
@@ -494,7 +667,9 @@ onMounted(async () => {
   const planId = queryValue(route.query.planId)
   const sessionId = queryValue(route.query.sessionId)
   const answerId = queryValue(route.query.answerId)
+  const planItemId = queryValue(route.query.planItemId)
   if (planId) await loadPlan(planId)
+  else if (planItemId) await openPlanItem(planItemId)
   if (sessionId) {
     await loadSession(sessionId, { loadLastAnswer: !answerId, syncRoute: false })
     if (answerId) await loadAnswer(answerId, { loadSession: false, syncRoute: false })
@@ -509,9 +684,12 @@ onMounted(async () => {
     <header class="page-header">
       <div>
         <h1><el-icon><Edit /></el-icon> 专项训练</h1>
-        <p>按计划完成阅读、答题和面试训练，保留真实评价与错题记录。</p>
+        <p>上传并解析简历后即可生成专项训练计划，也可结合岗位匹配结果补充训练重点。</p>
       </div>
-      <el-button :icon="Refresh" @click="loadActiveTab">刷新当前列表</el-button>
+      <div class="actions page-header__actions">
+        <el-button type="primary" :icon="Plus" @click="openPlanDialog">生成训练计划</el-button>
+        <el-button :icon="Refresh" @click="loadActiveTab">刷新当前列表</el-button>
+      </div>
     </header>
 
     <el-tabs v-model="activeTab" class="training-tabs">
@@ -526,14 +704,25 @@ onMounted(async () => {
             <h2>我的训练计划</h2>
             <el-tag type="info">{{ plans.total }} 个计划</el-tag>
           </div>
-          <AsyncState :loading="plansLoading" :error="plansError" :empty="!plans.records.length" empty-text="暂无训练计划，请先从有效匹配结果创建" @retry="loadPlans">
+          <AsyncState :loading="plansLoading" :error="plansError" :empty="!plans.records.length" empty-text="暂无训练计划" @retry="loadPlans">
+            <template #empty>
+              <p class="empty-hint">可以直接基于已解析简历生成计划，也可以从岗位匹配结果创建计划。</p>
+              <div class="actions empty-actions">
+                <el-button type="primary" @click="openPlanDialog">基于简历生成计划</el-button>
+                <el-button @click="router.push('/jobs?tab=matches')">前往岗位匹配</el-button>
+              </div>
+            </template>
             <div class="list-stack">
               <button v-for="plan in plans.records" :key="plan.id" type="button" class="plan-card" :class="{ 'plan-card--active': selectedPlan?.id === plan.id }" @click="selectPlan(plan.id)">
                 <span class="plan-card__heading">
                   <strong>{{ plan.title }}</strong>
                   <el-tag size="small" :type="statusTagType(plan.status)">{{ commonStatusLabels[plan.status] || plan.status }}</el-tag>
                 </span>
-                <span class="muted">画像 v{{ plan.profileVersion }} · {{ plan.items.length }} 个训练项</span>
+                <span class="plan-card__source">
+                  <el-tag size="small" :type="plan.source === 'RESUME' ? 'success' : 'info'">{{ planSourceLabel(plan) }}</el-tag>
+                  <span class="muted">{{ planDirectionLabel(plan) }} · 第 {{ plan.generationNo }} 版</span>
+                </span>
+                <span class="muted">画像 v{{ plan.profileVersion }} · {{ plan.items.length }} 个训练项 · 生成于 {{ formatDate(plan.generatedAt) }}</span>
                 <el-progress :percentage="planProgress(plan).percentage" :stroke-width="7" />
                 <span class="plan-card__progress">{{ planProgress(plan).completed }} / {{ planProgress(plan).total }} 已完成</span>
               </button>
@@ -550,13 +739,40 @@ onMounted(async () => {
               <div class="panel__heading">
                 <div>
                   <h2>{{ selectedPlan.title }}</h2>
-                  <span class="muted break-all">计划ID：{{ selectedPlan.id }} · 画像 v{{ selectedPlan.profileVersion }}</span>
+                  <span class="muted break-all">计划ID：{{ selectedPlan.id }} · 画像 v{{ selectedPlan.profileVersion }} · 第 {{ selectedPlan.generationNo }} 版</span>
                 </div>
                 <div class="actions">
                   <el-tag :type="statusTagType(selectedPlan.status)">{{ commonStatusLabels[selectedPlan.status] || selectedPlan.status }}</el-tag>
                   <el-button size="small" :icon="Refresh" @click="loadPlan(selectedPlan.id)">刷新</el-button>
                 </div>
               </div>
+              <div class="plan-basis">
+                <div class="plan-basis__row">
+                  <el-tag :type="selectedPlan.source === 'RESUME' ? 'success' : 'info'" effect="plain">{{ planSourceLabel(selectedPlan) }}</el-tag>
+                  <span v-if="selectedPlan.source === 'RESUME'">
+                    简历 v{{ selectedPlan.basis?.resumeVersionNo || '-' }}
+                    <template v-if="selectedPlan.basis?.resumeVersionId"> · {{ selectedPlan.basis.resumeVersionId }}</template>
+                  </span>
+                  <span>目标方向：{{ selectedPlan.targetDirection ? roleLabels[selectedPlan.targetDirection] || selectedPlan.targetDirection : '未设置' }}</span>
+                  <span>生成时间：{{ formatDate(selectedPlan.generatedAt) }}</span>
+                </div>
+                <div class="plan-basis__row">
+                  <span>每日投入 {{ selectedPlan.dailyMinutes }} 分钟 · 周期 {{ selectedPlan.days }} 天</span>
+                  <span v-if="selectedPlan.matchSummary">参考岗位：{{ selectedPlan.matchSummary.title }}<template v-if="selectedPlan.matchSummary.companyName"> · {{ selectedPlan.matchSummary.companyName }}</template></span>
+                  <span v-else>未参考岗位匹配结果</span>
+                </div>
+                <p v-if="selectedPlan.basis?.summary" class="plan-basis__summary">{{ selectedPlan.basis.summary }}</p>
+                <ul v-if="selectedPlan.basis?.limitations?.length" class="plan-basis__limitations">
+                  <li v-for="(item, index) in selectedPlan.basis.limitations" :key="index">{{ item }}</li>
+                </ul>
+              </div>
+              <el-alert
+                v-if="selectedPlan.source === 'RESUME'"
+                :title="githubNotice(selectedPlan)"
+                :type="githubNoticeType(selectedPlan)"
+                :closable="false"
+                show-icon
+              />
               <el-alert v-if="selectedPlan.status === 'GENERATING'" title="计划仍在生成，可稍后刷新读取计划项" type="warning" :closable="false" show-icon />
               <el-alert v-else-if="selectedPlan.status === 'FAILED'" title="计划生成失败，请返回匹配结果核对任务状态" type="error" :closable="false" show-icon />
               <el-empty v-else-if="!selectedPlan.items.length" description="该计划尚无训练项" />
@@ -567,9 +783,29 @@ onMounted(async () => {
                     <div class="plan-item__heading">
                       <div>
                         <h3>{{ item.title }}</h3>
-                        <p>{{ item.skillCode }} · {{ kindLabel(item.kind) }} · 预计 {{ item.estimatedMinutes }} 分钟</p>
+                        <p class="plan-item__meta">
+                          <el-tag size="small" effect="plain">{{ categoryLabel(item.category) }}</el-tag>
+                          <span>{{ item.skillCode }} · {{ kindLabel(item.kind) }} · 预计 {{ item.estimatedMinutes }} 分钟</span>
+                        </p>
                       </div>
                       <el-tag :type="statusTagType(item.status)">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
+                    </div>
+                    <div class="plan-item__guide">
+                      <p><strong>训练目标：</strong>{{ item.objective }}</p>
+                      <p><strong>推荐原因：</strong>{{ item.reason }}</p>
+                      <p><strong>练习方式：</strong>{{ item.method }}</p>
+                      <p><strong>完成标准：</strong>{{ item.completionCriteria }}</p>
+                      <p v-if="item.evidenceStatus === 'PENDING'" class="plan-item__pending">
+                        <el-tag size="small" type="warning">待评估</el-tag>
+                        简历未提供该技能的直接证据，训练后再评估能力。
+                      </p>
+                      <p v-if="item.evidenceQuote" class="muted">简历依据：{{ item.evidenceQuote }}</p>
+                    </div>
+                    <div v-if="safeLinks(item).length" class="resource-links">
+                      <h4>GitHub 项目学习</h4>
+                      <a v-for="link in safeLinks(item)" :key="link.url" :href="link.url" target="_blank" rel="noopener noreferrer">
+                        {{ link.label }} <span class="muted">{{ link.url }}</span>
+                      </a>
                     </div>
                     <div v-if="item.resourceRefs.length" class="resource-refs">
                       <h4>授权资料引用</h4>
@@ -595,7 +831,7 @@ onMounted(async () => {
       <section v-if="sessionActionError || sessionTask" class="panel">
         <div class="panel__heading"><h2>训练题准备任务</h2></div>
         <el-alert v-if="sessionActionError" :title="errorMessage(sessionActionError)" type="error" :closable="false" show-icon />
-        <TaskStatus v-if="sessionTask" :task="sessionTask">
+        <TaskStatus v-if="sessionTask" :task="sessionTask" :reasoning="sessionTracker.reasoningText.value">
           <template #actions>
             <el-button v-if="canRetryTrackedTask(sessionTask)" size="small" type="primary" :loading="sessionRetrying" @click="retrySessionTask">按原参数重试</el-button>
           </template>
@@ -659,7 +895,7 @@ onMounted(async () => {
             <el-empty v-else description="会话尚未返回题目" />
 
             <div v-if="evaluationTask" class="evaluation-task">
-              <TaskStatus :task="evaluationTask">
+              <TaskStatus :task="evaluationTask" :reasoning="evaluationTracker.reasoningText.value">
                 <template #actions>
                   <el-button v-if="canRetryTrackedTask(evaluationTask)" size="small" type="primary" :loading="answerRetrying" @click="retryEvaluation">使用相同回答重试</el-button>
                 </template>
@@ -740,7 +976,7 @@ onMounted(async () => {
           </el-radio-group>
         </div>
         <el-alert v-if="sessionActionError" :title="errorMessage(sessionActionError)" type="error" :closable="false" show-icon />
-        <TaskStatus v-if="sessionTask && sessionTaskContext === 'mistakes'" :task="sessionTask">
+        <TaskStatus v-if="sessionTask && sessionTaskContext === 'mistakes'" :task="sessionTask" :reasoning="sessionTracker.reasoningText.value">
           <template #actions>
             <el-button v-if="canRetryTrackedTask(sessionTask)" size="small" type="primary" :loading="sessionRetrying" @click="retrySessionTask">按原参数重试错题重练</el-button>
           </template>
@@ -770,6 +1006,58 @@ onMounted(async () => {
         </div>
       </section>
     </template>
+
+    <el-dialog v-model="planDialogVisible" title="生成专项训练计划" width="620px" class="responsive-dialog">
+      <div v-loading="planContextLoading" class="plan-dialog">
+        <el-alert v-if="!hasResume" type="warning" :closable="false" show-icon title="没有可用简历">
+          <p>请先在简历中心上传简历并完成解析，再生成专项训练计划。</p>
+          <el-button type="primary" size="small" @click="goResumeCenter">前往简历中心</el-button>
+        </el-alert>
+        <template v-else>
+          <el-form label-width="96px">
+            <el-form-item label="目标方向">
+              <el-select v-model="planForm.targetDirection" placeholder="请选择目标方向">
+                <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="每天投入">
+              <el-input-number v-model="planForm.dailyMinutes" :min="10" :max="120" :step="5" />
+              <span class="form-hint">分钟 / 天</span>
+            </el-form-item>
+            <el-form-item label="计划周期">
+              <el-input-number v-model="planForm.days" :min="1" :max="14" />
+              <span class="form-hint">天</span>
+            </el-form-item>
+            <el-form-item label="参考岗位">
+              <el-select v-model="planForm.matchItemId" clearable placeholder="可选：参考最近一次岗位匹配">
+                <el-option
+                  v-for="option in matchOptions"
+                  :key="option.id"
+                  :label="`${option.title}${option.matchScore === null ? '' : ` · ${option.matchScore} 分`}`"
+                  :value="option.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-form>
+          <p class="muted">计划将基于简历版本 {{ planForm.resumeVersionId || '当前可用版本' }} 生成，历史计划与进度会保留。</p>
+          <el-alert v-if="planError" :title="errorMessage(planError)" type="error" :closable="false" show-icon />
+          <TaskStatus v-if="planTask" :task="planTask" :reasoning="planTracker.reasoningText.value">
+            <template #actions>
+              <el-button v-if="canRetryTrackedTask(planTask)" size="small" type="primary" @click="retryPlanTask">按原参数重试</el-button>
+            </template>
+          </TaskStatus>
+          <div v-if="planTrackingError" class="tracking-error">
+            <span>{{ errorMessage(planTrackingError) }}</span>
+            <el-button size="small" @click="planTracker.restart">恢复任务跟踪</el-button>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="planDialogVisible = false">关闭</el-button>
+        <el-button v-if="!hasResume" type="primary" @click="goResumeCenter">前往简历中心</el-button>
+        <el-button v-else type="primary" :loading="planTaskActive" :disabled="planTaskActive || !planFormValid" @click="submitPlanFromResume">{{ planError ? '重试生成' : '生成计划' }}</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="mistakeDialogVisible" title="错题与原回答" width="780px" class="responsive-dialog">
       <template v-if="selectedMistake">
@@ -815,6 +1103,24 @@ onMounted(async () => {
 
 <style scoped lang="scss">
 .training-page { padding-bottom: 28px; }
+.page-header__actions { align-items: center; }
+.empty-hint { margin: 0 0 12px; color: $ai-text-secondary; }
+.empty-actions { justify-content: center; }
+.plan-card__source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plan-basis { display: grid; gap: 6px; margin: 14px 0; padding: 14px 16px; border-radius: $ai-radius; background: $ai-bg-page; color: $ai-text-secondary; font-size: 13px; }
+.plan-basis__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.plan-basis__summary { margin: 4px 0 0; color: #101d4b; }
+.plan-basis__limitations { margin: 4px 0 0; padding-left: 18px; }
+.plan-item__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plan-item__guide { display: grid; gap: 4px; margin: 12px 0; color: $ai-text-secondary; font-size: 13px; }
+.plan-item__guide p { margin: 0; }
+.plan-item__guide strong { color: #101d4b; }
+.plan-item__pending { display: flex; align-items: center; gap: 8px; }
+.resource-links { display: grid; gap: 6px; margin: 12px 0; }
+.resource-links h4 { margin: 0 0 4px; }
+.resource-links a { word-break: break-all; }
+.plan-dialog { min-height: 120px; }
+.form-hint { margin-left: 8px; color: $ai-text-secondary; font-size: 12px; }
 .page-header h1 { display: flex; align-items: center; gap: 10px; }
 .training-tabs { margin-bottom: 16px; padding: 0 16px; border: 1px solid #e8f0fa; border-radius: $ai-radius-lg; background: #fff; }
 .training-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); align-items: start; gap: 14px; }

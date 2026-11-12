@@ -52,21 +52,20 @@ def test_company_missing_falls_back_to_domain_without_fabrication() -> None:
         page(),
     )
     assert reason is None and posting is not None
-    assert posting.company_name == "careers.example.com"
+    assert posting.company_name == "示例科技"  # 详情正文与标题提供了可核对公司名
     assert "COMPANY_FROM_DOMAIN" in posting.warnings
     assert flags["missingCompany"] is True
 
 
-def test_jd_quote_layout_difference_is_accepted_and_marked_fuzzy() -> None:
+def test_short_source_span_is_rejected_even_when_model_quote_is_long() -> None:
     body = "示例科技 杭州 实习 负责后端服务接口开发，参与接口设计与性能优化，保障系统稳定性和高并发场景可用性"
     posting, reason, flags = _to_posting(
         row(jdQuotes=["负责后端服务开发 参与接口设计与性能优化，保障系统稳定性和高并发场景可用性"]),
         "https://careers.example.com/job/1",
         page(body=body),
     )
-    assert reason is None and posting is not None
-    assert flags["fuzzyJd"] is True
-    assert "JD_QUOTE_FUZZY" in posting.warnings
+    assert posting is None
+    assert reason == "JD_TOO_SHORT"
 
 
 def test_jd_quote_without_page_evidence_is_rejected() -> None:

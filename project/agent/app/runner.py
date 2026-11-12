@@ -314,6 +314,13 @@ class RunService:
             emit_stage=lambda name, progress: self._emit(
                 run_id, "stage", {"name": name, "progress": progress}, utcnow()
             ),
+            emit_reasoning=lambda text: self._emit(
+                run_id, "reasoning", {"text": text}, utcnow()
+            ),
+            emit_candidates=lambda candidates: self._emit(
+                run_id, "stage", {"name": "search_candidates_available", "progress": 40,
+                                  "candidates": candidates}, utcnow()
+            ),
         )
         cancel_event = self._cancel_events.setdefault(run_id, asyncio.Event())
         execution = asyncio.create_task(self._orchestrator.execute(ctx), name=f"run-{run_id}")

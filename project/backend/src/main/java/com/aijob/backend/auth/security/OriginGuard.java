@@ -1,12 +1,16 @@
 package com.aijob.backend.auth.security;
 
+import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
+
+import org.springframework.stereotype.Component;
+
 import com.aijob.backend.common.ApiErrorCode;
 import com.aijob.backend.common.BusinessException;
 import com.aijob.backend.config.AppProperties;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.stereotype.Component;
 
-import java.net.URI;
+import jakarta.servlet.http.HttpServletRequest;
 
 @Component
 public class OriginGuard {
@@ -22,10 +26,21 @@ public class OriginGuard {
         if (origin == null) {
             origin = originOfReferer(request.getHeader("Referer"));
         }
-        String allowed = normalizeOrigin(properties.security().frontendOrigin());
-        if (origin == null || allowed == null || !origin.equals(allowed)) {
+        List<String> allowed = allowedOrigins();
+        if (origin == null || !allowed.contains(origin)) {
             throw new BusinessException(ApiErrorCode.FORBIDDEN, "请求来源不受信任");
         }
+    }
+
+    private List<String> allowedOrigins() {
+        String configured = properties.security().frontendOrigin();
+        if (configured == null || configured.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(configured.split(","))
+                .map(OriginGuard::normalizeOrigin)
+                .filter(value -> value != null)
+                .toList();
     }
 
     private static String originOfReferer(String referer) {
@@ -48,10 +63,7 @@ public class OriginGuard {
             return null;
         }
         String normalized = origin.trim();
-        int comma = normalized.indexOf(',');
-        if (comma >= 0) {
-            normalized = normalized.substring(0, comma).trim();
-        }
+
         while (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }

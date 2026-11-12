@@ -9,4 +9,6 @@ public interface AgentClient {
     Map<String, Object> findByTask(String taskId);
 
     Map<String, Object> cancel(String runId, String taskId);
+
+    Map<String, Object> runEvents(String runId, String taskId, long after);
 }

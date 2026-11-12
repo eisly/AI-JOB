@@ -42,6 +42,23 @@ public interface ResumeMapper {
     @Select("SELECT * FROM resume_version WHERE id=#{id} AND user_id=#{userId} AND deleted_at IS NULL")
     Map<String,Object> version(@Param("id") String id, @Param("userId") String userId);
 
+    @Select("""
+            SELECT r.title,r.id AS resume_id,v.id AS version_id,v.version_no,v.status,v.parsed_facts_json,
+              v.confirmed_facts_json,v.extracted_text
+            FROM resume r JOIN resume_version v ON v.id=r.latest_version_id
+            WHERE r.user_id=#{userId} AND r.deleted_at IS NULL AND v.deleted_at IS NULL
+            ORDER BY r.updated_at DESC,r.id DESC LIMIT #{size}
+            """)
+    List<Map<String,Object>> latestVersions(@Param("userId") String userId, @Param("size") int size);
+
+    @Select("""
+            SELECT r.title,r.id AS resume_id,v.id AS version_id,v.version_no,v.status,v.parsed_facts_json,
+              v.confirmed_facts_json,v.extracted_text
+            FROM resume_version v JOIN resume r ON r.id=v.resume_id
+            WHERE v.id=#{versionId} AND v.user_id=#{userId} AND v.deleted_at IS NULL AND r.deleted_at IS NULL
+            """)
+    Map<String,Object> versionWithResume(@Param("versionId") String versionId, @Param("userId") String userId);
+
     @Select("SELECT * FROM resume_version WHERE id=#{id} AND user_id=#{userId} AND deleted_at IS NULL FOR UPDATE")
     Map<String,Object> lockVersion(@Param("id") String id, @Param("userId") String userId);
 

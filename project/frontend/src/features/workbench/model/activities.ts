@@ -102,8 +102,8 @@ export function buildActivities(input: ActivitiesInput): ActivityItem[] {
   const latestBatch = input.batches ? selectLatestBatch(input.batches) : null
   if (latestBatch?.status === 'READY') {
     push(items, 'MATCH_READY', `match-${latestBatch.id}`, '岗位匹配结果已更新', latestBatch.createdAt, {
-      name: 'job-match',
-      query: { batchId: latestBatch.id },
+      name: 'jobs',
+      query: { tab: 'matches', matchId: latestBatch.id },
     })
   }
 

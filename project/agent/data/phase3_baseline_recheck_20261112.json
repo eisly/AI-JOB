@@ -1,0 +1,1132 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "now": "2026-11-12T08:03:39.881966+00:00",
+  "sourceStatus": [
+    {
+      "key": "company_official",
+      "name": "企业招聘官网",
+      "status": "FAILED",
+      "count": 0,
+      "message": "Tavily 请求超时；官网归属确认 0 条",
+      "httpStatus": null,
+      "durationMs": 24047,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 4,
+        "providerCount": 1,
+        "discovered": 0,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 0,
+        "cacheHits": 0,
+        "fetchAttempted": 0,
+        "fetchSucceeded": 0,
+        "fetchFailed": 0,
+        "fetchFailureReasons": {},
+        "fetchBodyChars": 0,
+        "renderUsed": 0,
+        "providerFailures": 4,
+        "searchResults": {
+          "tavily": 0
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12015,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12015,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12015,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12015,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          }
+        ]
+      },
+      "providers": [
+        "tavily"
+      ]
+    },
+    {
+      "key": "baidu",
+      "name": "百度招聘官网",
+      "status": "PARTIAL",
+      "count": 8,
+      "message": "官网当前列表确认 26 个职位，条件筛选后 25 条；每个关键词取官网首屏；其中 8 条符合岗位关键词",
+      "httpStatus": null,
+      "durationMs": 1281,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 4,
+        "discovered": 26,
+        "confirmedOpen": 26
+      },
+      "providers": []
+    },
+    {
+      "key": "tencent",
+      "name": "腾讯招聘官网",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "官方接口返回 19 条，筛选后 0 条",
+      "httpStatus": 200,
+      "durationMs": 829,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 2,
+        "discovered": 19,
+        "normalized": 19,
+        "hardFilterPass": 0
+      },
+      "providers": []
+    },
+    {
+      "key": "greenhouse",
+      "name": "公司招聘官网（Greenhouse ATS）",
+      "status": "FAILED",
+      "count": 0,
+      "message": "Stripe: ConnectTimeout",
+      "httpStatus": null,
+      "durationMs": 12016,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    },
+    {
+      "key": "web",
+      "name": "AI 全网搜索",
+      "status": "PARTIAL",
+      "count": 1,
+      "message": "引擎 tavily 发现 29 个链接（25 个域名），分析 20 页，筛选后 1 个岗位；5 个检索请求失败；19 页未提取到岗位（规则拒绝 38 条，主要原因 DETERMINISTIC_INSUFFICIENT）；已达到本轮查询预算；仍有 9 个候选页面待处理",
+      "httpStatus": null,
+      "durationMs": 61219,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 8,
+        "providerCount": 1,
+        "discovered": 32,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 1,
+        "cacheHits": 0,
+        "fetchAttempted": 9,
+        "fetchSucceeded": 3,
+        "fetchFailed": 6,
+        "fetchFailureReasons": {
+          "PAGE_ACCESS_FAILED": 2,
+          "DETAIL_NOT_FOUND": 1,
+          "TIMEOUT": 3
+        },
+        "fetchBodyChars": 1727,
+        "renderUsed": 2,
+        "providerFailures": 5,
+        "searchResults": {
+          "tavily": 34
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 1,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3984,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12000,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12000,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12014,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12015,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 7703,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "FAILED",
+            "count": 0,
+            "message": "Tavily 请求超时",
+            "httpStatus": null,
+            "durationMs": 12014,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": null
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 10233,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          }
+        ],
+        "rejectedNonJobUrls": 3,
+        "uniqueUrls": 32,
+        "pagesSelected": 20,
+        "pagesFetched": 9,
+        "pagesAnalyzed": 20,
+        "pagesWithPosting": 1,
+        "extractionSuccess": 1,
+        "pagesExtracted": 1,
+        "modelPagesAccepted": 0,
+        "deterministicPagesAccepted": 1,
+        "hardFilterPass": 1,
+        "filterStats": {
+          "input": 1,
+          "kept": 1,
+          "rejectedCity": 0,
+          "rejectedType": 0,
+          "rejectedSize": 0,
+          "unknownCity": 0,
+          "unknownType": 0
+        },
+        "extractionDiagnostics": {
+          "modelRows": 0,
+          "modelAccepted": 0,
+          "deterministicAccepted": 1,
+          "accepted": 1,
+          "rejected": {
+            "DETERMINISTIC_INSUFFICIENT": 19,
+            "MODEL_UNAVAILABLE": 19
+          },
+          "noRowPages": 19,
+          "modelErrors": 19,
+          "modelFailures": 0,
+          "modelLatencyMs": 0,
+          "modelInputTokens": 0,
+          "modelOutputTokens": 0,
+          "missingCompany": 0,
+          "missingType": 0,
+          "fuzzyJd": 0,
+          "modelAttempts": 0
+        },
+        "detailChecks": 1,
+        "extractionFailures": 0,
+        "pendingUrls": 9
+      },
+      "providers": [
+        "tavily"
+      ]
+    }
+  ],
+  "queryPlan": {
+    "keyword": "后端开发",
+    "expansions": [
+      "后端开发",
+      "服务端开发",
+      "后端研发",
+      "Java 后端",
+      "Python 后端",
+      "后端工程师"
+    ],
+    "cities": [
+      "330100",
+      "110100",
+      "310100"
+    ],
+    "candidateTypes": [
+      "INTERNSHIP"
+    ],
+    "companySizes": [],
+    "includeUnknownSize": true,
+    "freshnessDays": 30,
+    "searchProviders": [
+      "tavily"
+    ],
+    "queries": [
+      {
+        "query": "杭州 后端开发 实习 招聘 职位",
+        "cityCode": "330100",
+        "cityName": "杭州",
+        "keyword": "后端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "北京 后端开发 实习 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "后端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "上海 后端开发 实习 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "后端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "杭州 服务端开发 实习 招聘 职位",
+        "cityCode": "330100",
+        "cityName": "杭州",
+        "keyword": "服务端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "北京 服务端开发 实习 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "服务端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "上海 服务端开发 实习 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "服务端开发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "杭州 后端研发 实习 招聘 职位",
+        "cityCode": "330100",
+        "cityName": "杭州",
+        "keyword": "后端研发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "北京 后端研发 实习 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "后端研发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "上海 后端研发 实习 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "后端研发",
+        "category": "后端开发",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "杭州 Java 后端 实习 招聘 职位",
+        "cityCode": "330100",
+        "cityName": "杭州",
+        "keyword": "Java 后端",
+        "category": "Java 后端",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "北京 Java 后端 实习 招聘 职位",
+        "cityCode": "110100",
+        "cityName": "北京",
+        "keyword": "Java 后端",
+        "category": "Java 后端",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "上海 Java 后端 实习 招聘 职位",
+        "cityCode": "310100",
+        "cityName": "上海",
+        "keyword": "Java 后端",
+        "category": "Java 后端",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      }
+    ],
+    "coverage": {
+      "cities": {
+        "杭州": 0,
+        "北京": 0,
+        "上海": 1
+      },
+      "categories": {
+        "后端开发": 1,
+        "Java 后端": 0
+      },
+      "cells": [
+        {
+          "cityCode": "330100",
+          "cityName": "杭州",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 1,
+          "analyzed": 1,
+          "extracted": 0,
+          "rejected": 1,
+          "completed": false
+        },
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 17,
+          "analyzed": 7,
+          "extracted": 0,
+          "rejected": 7,
+          "completed": false
+        },
+        {
+          "cityCode": "310100",
+          "cityName": "上海",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 16,
+          "analyzed": 14,
+          "extracted": 1,
+          "rejected": 13,
+          "completed": true
+        },
+        {
+          "cityCode": "330100",
+          "cityName": "杭州",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        },
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        },
+        {
+          "cityCode": "310100",
+          "cityName": "上海",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        }
+      ],
+      "completedCells": 1,
+      "totalCells": 6
+    },
+    "adjustments": [],
+    "version": "job-search-query-v4"
+  },
+  "warnings": [
+    "SEARCH_SLOW",
+    "SEMANTIC_SCORE_UNAVAILABLE",
+    "MODEL_UNAVAILABLE_HTTP:402",
+    "SEARCH_INCOMPLETE",
+    "SOME_SOURCES_PARTIAL_FAILURE",
+    "UNKNOWN_VERIFICATION:1"
+  ],
+  "dedupe": {
+    "rawCount": 9,
+    "validCount": 9,
+    "uniqueCount": 9,
+    "mergedCount": 0,
+    "methods": {},
+    "duplicateRate": 0.0
+  },
+  "metrics": {
+    "funnel": {
+      "searchResults": {
+        "tavily": 34
+      },
+      "uniqueUrls": 32,
+      "uniquePostings": 9,
+      "jobDetailPages": 1,
+      "extractionAttempted": 9,
+      "extractionSuccess": 0,
+      "verification": {
+        "counts": {
+          "ACTIVE_CONFIRMED": 8,
+          "ACTIVE_PROBABLE": 0,
+          "UNKNOWN": 1,
+          "CLOSED": 0
+        },
+        "reasons": {
+          "ACTIVE_EVIDENCE_FOUND": 8,
+          "DETAIL_NOT_FOUND": 1
+        },
+        "records": 10,
+        "rates": {
+          "officialVerificationRate": 0.8889,
+          "unknownRate": 0.1111,
+          "closedRate": 0.0
+        }
+      },
+      "hardFilterPass": 9,
+      "finalRecommendations": 9
+    },
+    "counts": {
+      "ACTIVE_CONFIRMED": 8,
+      "ACTIVE_PROBABLE": 0,
+      "UNKNOWN": 1,
+      "CLOSED": 0
+    },
+    "reasons": {
+      "ACTIVE_EVIDENCE_FOUND": 8,
+      "DETAIL_NOT_FOUND": 1
+    },
+    "failures": {
+      "source:providerFailures": 9,
+      "extract:DETERMINISTIC_INSUFFICIENT": 19,
+      "extract:MODEL_UNAVAILABLE": 19
+    },
+    "stageMs": {
+      "plan": 2639,
+      "search": 34217,
+      "detail": 9702,
+      "normalize": 0
+    },
+    "sourceCounts": {
+      "company_official": 0,
+      "baidu": 8,
+      "tencent": 0,
+      "greenhouse": 0,
+      "web": 1
+    },
+    "cityCoverage": {
+      "北京市": 6,
+      "上海市": 3
+    },
+    "jobCategoryCoverage": {
+      "后端开发": 6,
+      "Java 后端": 1,
+      "大模型应用开发": 1,
+      "TapTap 全栈开发实习生（上海）": 1
+    },
+    "queryCoverage": {
+      "cities": {
+        "杭州": 0,
+        "北京": 0,
+        "上海": 1
+      },
+      "categories": {
+        "后端开发": 1,
+        "Java 后端": 0
+      },
+      "cells": [
+        {
+          "cityCode": "330100",
+          "cityName": "杭州",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 1,
+          "analyzed": 1,
+          "extracted": 0,
+          "rejected": 1,
+          "completed": false
+        },
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 17,
+          "analyzed": 7,
+          "extracted": 0,
+          "rejected": 7,
+          "completed": false
+        },
+        {
+          "cityCode": "310100",
+          "cityName": "上海",
+          "category": "后端开发",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 16,
+          "analyzed": 14,
+          "extracted": 1,
+          "rejected": 13,
+          "completed": true
+        },
+        {
+          "cityCode": "330100",
+          "cityName": "杭州",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        },
+        {
+          "cityCode": "110100",
+          "cityName": "北京",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        },
+        {
+          "cityCode": "310100",
+          "cityName": "上海",
+          "category": "Java 后端",
+          "candidateType": "INTERNSHIP",
+          "queries": 0,
+          "providers": [],
+          "found": 0,
+          "analyzed": 0,
+          "extracted": 0,
+          "rejected": 0,
+          "completed": false
+        }
+      ],
+      "completedCells": 1,
+      "totalCells": 6
+    },
+    "sourceDiversity": {
+      "sources": 2,
+      "providers": [
+        "tavily"
+      ],
+      "uniqueDomains": 2
+    },
+    "rates": {
+      "officialVerificationRate": 0.8889,
+      "unknownRate": 0.1111,
+      "closedRate": 0.0,
+      "extractionSuccessRate": 0.0,
+      "duplicateRate": 0.0,
+      "staleRate": 0.8889
+    },
+    "freshnessLagDays": 324.11,
+    "evaluation": {
+      "status": "NOT_MEASURED",
+      "reason": "缺少人工标注的相关岗位全集，未计算 Recall@K / NDCG@10"
+    },
+    "postingIds": [
+      "36a5c50b6b85f84675419e87fd27ce6c",
+      "6ba0169b7e729352192cc2888d6cc954",
+      "94e2c9da94686131bc51c3fb366eb5e9",
+      "94e2c9da94686131bc51c3fb366eb5e9",
+      "94e2c9da94686131bc51c3fb366eb5e9",
+      "94e2c9da94686131bc51c3fb366eb5e9",
+      "e7d3bb44cfe1aabfa9de29108ea37eff",
+      "8eb02c5b899e0050f6340e10ee35c0bb",
+      "95d9b296d692c3526c81b0c0b30b92e6"
+    ],
+    "collection": {
+      "stopReason": "API_LIMIT",
+      "pendingBySource": {
+        "web": 9
+      },
+      "pendingUrlsBySource": {
+        "web": [
+          "https://www.wondercv.com/xiaozhao/netease-games-internship-beijing-hangzhou-guangzhou-20240-5fcb1f",
+          "https://offerseek.ai/jobs/248682",
+          "https://job.usth.edu.cn/detail/job?id=3229370&list=1&menu_id=15266&state=%7B%22k%22%3A%22%22%2C%22zy%22%3A%22%22%2C%22is_practice%22%3A%221%22%2C%22city%22%3A%22%E5%85%A8%E9%83%A8%22%2C%22city_path%22%3Anull%2C%22degree%22%3A%22%22%2C%22salary_max%22%3A%22%22%2C%22salary_min%22%3A%22%22%2C%22industry%22%3A%22%22%2C%22property%22%3A%22%22%2C%22scale%22%3A%22%22%2C%22page%22%3A1%7D",
+          "https://www.yingjiesheng.com/zhuanye/jisuanji/list_9.html",
+          "https://www.ncss.cn/student/jobs/UBFYtqwEqTHgibpbhDHWPP/detail.html",
+          "https://www.job.ustc.edu.cn/Recruitment/info.aspx?itemid=30224",
+          "https://www.zhipin.com/job_detail/cb06c3e416fb15380ndz3964ElZU.html",
+          "https://cn.indeed.com/q-%E7%BA%BF%E4%B8%8A-%E5%AE%9E%E4%B9%A0-l-%E4%B8%8A%E6%B5%B7%E5%B8%82-%E5%A5%89%E8%B4%A4%E5%8C%BA-%E8%81%8C%E4%BD%8D.html",
+          "https://www.brgroup.com/careers/jobs?recruitmentType=social"
+        ]
+      }
+    },
+    "jdUnderstanding": {
+      "attempted": 9,
+      "modelMatched": 0,
+      "ruleFallback": 9,
+      "failedBatches": 0
+    }
+  },
+  "meta": {
+    "graph": "job-search-graph-v3",
+    "modelCalls": 0,
+    "modelDegraded": true,
+    "budget": {
+      "rounds": 1,
+      "queries": 12,
+      "pages": 20,
+      "detailChecks": 0,
+      "pagesFetched": 9,
+      "apiCalls": 60,
+      "cacheHits": 0,
+      "elapsedMs": 66922,
+      "limits": {
+        "maxQueriesPerRound": 12,
+        "maxPagesPerRound": 20,
+        "maxDetailPages": 20,
+        "maxPageFetch": 20,
+        "maxApiCalls": 60,
+        "maxElapsedSeconds": 150.0,
+        "maxRounds": 3,
+        "targetResults": 10,
+        "minResults": 5
+      },
+      "stages": {
+        "plan": 2639,
+        "search": 34217,
+        "detail": 9702,
+        "normalize": 0
+      }
+    },
+    "companyRegistry": {
+      "companies": [],
+      "registered": [
+        {
+          "key": "greenhouse:stripe",
+          "company": "Stripe",
+          "platform": "greenhouse"
+        }
+      ]
+    }
+  },
+  "llmDiagnostics": [
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "keyword",
+      "systemChars": 119,
+      "userChars": 19,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "httpStatus": 402,
+      "durationMs": 2639
+    }
+  ],
+  "httpAttempts": {
+    "api.tavily.com": 22,
+    "careers.tencent.com": 2,
+    "boards-api.greenhouse.io": 1,
+    "talent.baidu.com": 4,
+    "offerseek.ai": 1,
+    "cn.indeed.com": 1,
+    "tavily.com": 1,
+    "careers.caterpillar.com": 1,
+    "www.wondercv.com": 3,
+    "jobs.bilibili.com": 1,
+    "offer.gfjianli.com": 11,
+    "www.googletagmanager.com": 1,
+    "api.gfjianli.com": 1,
+    "recruit.wanyantech.com": 2,
+    "lf3-cdn-tos.bytescm.com": 3,
+    "lf-package-cn.feishucdn.com": 4
+  },
+  "itemCount": 9,
+  "items": [
+    {
+      "title": "后端开发实习生（J105812）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-09-15T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/81cddbb8-2363-4306-916a-27c392b36cd2",
+      "semanticScore": null
+    },
+    {
+      "title": "Java工程师实习生（J106251）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-09-24T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.980469+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/a3431f5a-582d-4829-899b-a70a2882604a",
+      "semanticScore": null
+    },
+    {
+      "title": "后端研发实习生（GO/Python方向）（J91811）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2025-08-14T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/259d103a-ee44-4f03-aed6-d3953cc16044",
+      "semanticScore": null
+    },
+    {
+      "title": "后端研发实习生（GO方向）（J85202）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2025-05-19T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/697fa264-041e-4037-8451-44a43ba550f6",
+      "semanticScore": null
+    },
+    {
+      "title": "后端研发实习生（GO方向）（J82980）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2025-03-12T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/cd1d46ab-4ac8-46a2-93d0-9d63f861e2a6",
+      "semanticScore": null
+    },
+    {
+      "title": "后端研发实习生（GO方向）（J85202）",
+      "company": "百度",
+      "city": "北京市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2025-05-19T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/c7b8d78e-7553-405c-9278-2b046d9b4c4a",
+      "semanticScore": null
+    },
+    {
+      "title": "后端研发（Python）方向实习生（J89661）",
+      "company": "百度",
+      "city": "上海市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2025-07-09T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.037089+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/166d8095-9be0-4080-ac93-d902d4dc988f",
+      "semanticScore": null
+    },
+    {
+      "title": "大模型应用后端研发实习生（GO/Python方向）（J101073）",
+      "company": "百度",
+      "city": "上海市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "baidu",
+      "searchProviders": [],
+      "publishedAt": "2026-06-25T00:00:00+00:00",
+      "fetchedAt": "2026-11-12T08:02:36.704950+00:00",
+      "verification": "VERIFIED",
+      "verificationStatus": "ACTIVE_CONFIRMED",
+      "verificationReason": "ACTIVE_EVIDENCE_FOUND",
+      "warnings": [
+        "MISSING_SALARY",
+        "MISSING_EDUCATION",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN",
+        "STALE_POSTING"
+      ],
+      "url": "https://talent.baidu.com/jobs/detail/INTERN/15f123ac-2755-4324-b5ba-25682d0f9b40",
+      "semanticScore": null
+    },
+    {
+      "title": "TapTap 全栈开发实习生（上海）",
+      "company": "心动×TapTap",
+      "city": "上海市",
+      "salary": [
+        null,
+        null
+      ],
+      "experience": null,
+      "education": "BACHELOR",
+      "companySize": "SIZE_UNKNOWN",
+      "source": "web",
+      "searchProviders": [
+        "tavily"
+      ],
+      "publishedAt": "2026-10-16T00:00:00",
+      "fetchedAt": "2026-11-12T08:03:39.858419+00:00",
+      "verification": "UNVERIFIED",
+      "verificationStatus": "UNKNOWN",
+      "verificationReason": "DETAIL_NOT_FOUND",
+      "warnings": [
+        "DETERMINISTIC_EXTRACTION",
+        "UNVERIFIED_SOURCE",
+        "MISSING_SALARY",
+        "MISSING_EXPERIENCE",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://offerseek.ai/jobs/251368",
+      "semanticScore": null
+    }
+  ]
+}

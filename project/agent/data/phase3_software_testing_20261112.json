@@ -1,0 +1,1292 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-pro",
+  "now": "2026-11-12T07:54:44.153317+00:00",
+  "sourceStatus": [
+    {
+      "key": "company_official",
+      "name": "企业招聘官网",
+      "status": "PARTIAL",
+      "count": 0,
+      "message": "引擎 tavily 发现 28 个链接（21 个域名），分析 6 页，筛选后 0 个岗位；模型批次失败 6 次，确定性兜底 0 条；6 页未提取到岗位（规则拒绝 12 条，主要原因 DETERMINISTIC_INSUFFICIENT）；仍有 22 个候选页面待处理；官网归属确认 0 条",
+      "httpStatus": null,
+      "durationMs": 6687,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 4,
+        "providerCount": 1,
+        "discovered": 29,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 0,
+        "cacheHits": 0,
+        "fetchAttempted": 4,
+        "fetchSucceeded": 2,
+        "fetchFailed": 2,
+        "fetchFailureReasons": {
+          "PAGE_ACCESS_FAILED": 2
+        },
+        "fetchBodyChars": 30045,
+        "renderUsed": 0,
+        "searchResults": {
+          "tavily": 35
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3593,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3562,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3313,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 17,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3375,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          }
+        ],
+        "rejectedNonJobUrls": 1,
+        "uniqueUrls": 29,
+        "pagesSelected": 6,
+        "pagesFetched": 4,
+        "pagesAnalyzed": 6,
+        "pagesWithPosting": 0,
+        "pagesExtracted": 0,
+        "modelPagesAccepted": 0,
+        "deterministicPagesAccepted": 0,
+        "hardFilterPass": 0,
+        "filterStats": {
+          "input": 0,
+          "kept": 0,
+          "rejectedCity": 0,
+          "rejectedType": 0,
+          "rejectedSize": 0,
+          "unknownCity": 0,
+          "unknownType": 0
+        },
+        "extractionDiagnostics": {
+          "modelRows": 0,
+          "modelAccepted": 0,
+          "deterministicAccepted": 0,
+          "accepted": 0,
+          "rejected": {
+            "DETERMINISTIC_INSUFFICIENT": 6,
+            "MODEL_FAILED": 6
+          },
+          "noRowPages": 6,
+          "modelErrors": 6,
+          "modelFailures": 6,
+          "modelLatencyMs": 0,
+          "modelInputTokens": 0,
+          "modelOutputTokens": 0,
+          "missingCompany": 0,
+          "missingType": 0,
+          "fuzzyJd": 0,
+          "modelAttempts": 6
+        },
+        "detailChecks": 0,
+        "extractionFailures": 0,
+        "pendingUrls": 22
+      },
+      "providers": [
+        "tavily"
+      ]
+    },
+    {
+      "key": "baidu",
+      "name": "百度招聘官网",
+      "status": "PARTIAL",
+      "count": 0,
+      "message": "官网当前列表确认 18 个职位，条件筛选后 0 条；每个关键词取官网首屏",
+      "httpStatus": null,
+      "durationMs": 3312,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 4,
+        "discovered": 18,
+        "confirmedOpen": 18
+      },
+      "providers": []
+    },
+    {
+      "key": "tencent",
+      "name": "腾讯招聘官网",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "官方接口返回 5 条，筛选后 0 条",
+      "httpStatus": 200,
+      "durationMs": 453,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {
+        "queries": 1,
+        "discovered": 5,
+        "normalized": 5,
+        "hardFilterPass": 0
+      },
+      "providers": []
+    },
+    {
+      "key": "greenhouse",
+      "name": "公司招聘官网（Greenhouse ATS）",
+      "status": "EMPTY",
+      "count": 0,
+      "message": "ATS 官方接口可用，但当前条件下没有匹配岗位",
+      "httpStatus": null,
+      "durationMs": 3062,
+      "verification": "VERIFIED",
+      "requiresCredentials": false,
+      "verificationCounts": {},
+      "providers": []
+    },
+    {
+      "key": "web",
+      "name": "AI 全网搜索",
+      "status": "PARTIAL",
+      "count": 1,
+      "message": "首轮：引擎 tavily 发现 61 个链接（38 个域名），分析 14 页，筛选后 1 个岗位；模型批次失败 10 次，确定性兜底 1 条；13 页未提取到岗位（规则拒绝 26 条，主要原因 DETERMINISTIC_INSUFFICIENT）；已达到本轮查询预算；仍有 47 个候选页面待处理；补搜：引擎 tavily 发现 63 个链接（36 个域名），分析 20 页，筛选后 3 个岗位；模型批次失败 14 次，确定性兜底 3 条；17 页未提取到岗位（规则拒绝 34 条，主要原因 DETERMINISTIC_INSUFFICIENT）；仍有 43 个候选页面待处理；其中 0 条符合岗位关键词",
+      "httpStatus": null,
+      "durationMs": 27250,
+      "verification": "UNVERIFIED",
+      "requiresCredentials": true,
+      "verificationCounts": {
+        "queries": 12,
+        "providerCount": 1,
+        "discovered": 79,
+        "checked": 0,
+        "confirmedOpen": 0,
+        "probable": 0,
+        "closed": 0,
+        "unknown": 4,
+        "cacheHits": 0,
+        "fetchAttempted": 15,
+        "fetchSucceeded": 9,
+        "fetchFailed": 6,
+        "fetchFailureReasons": {
+          "HTTP_403": 2,
+          "PAGE_ACCESS_FAILED": 2,
+          "DETAIL_NOT_FOUND": 1,
+          "TIMEOUT": 1
+        },
+        "fetchBodyChars": 35953,
+        "renderUsed": 1,
+        "searchResults": {
+          "tavily": 155
+        },
+        "providerStatus": [
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2171,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 13,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2625,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2171,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 14,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2921,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 15,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3359,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 18,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2250,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 15,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2796,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3311,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3687,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 2343,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "EMPTY",
+            "count": 0,
+            "message": "Tavily 未返回结果",
+            "httpStatus": 200,
+            "durationMs": 3593,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          },
+          {
+            "key": "tavily",
+            "name": "Tavily",
+            "status": "OK",
+            "count": 16,
+            "message": "",
+            "httpStatus": 200,
+            "durationMs": 3421,
+            "attempts": 1,
+            "page": 0,
+            "nextPage": null,
+            "credits": 1
+          }
+        ],
+        "rejectedNonJobUrls": 2,
+        "uniqueUrls": 79,
+        "pagesSelected": 34,
+        "pagesFetched": 15,
+        "pagesAnalyzed": 34,
+        "pagesWithPosting": 4,
+        "extractionSuccess": 4,
+        "pagesExtracted": 4,
+        "modelPagesAccepted": 0,
+        "deterministicPagesAccepted": 4,
+        "hardFilterPass": 4,
+        "filterStats": {
+          "input": 4,
+          "kept": 4,
+          "rejectedCity": 0,
+          "rejectedType": 0,
+          "rejectedSize": 0,
+          "unknownCity": 3,
+          "unknownType": 2
+        },
+        "extractionDiagnostics": {
+          "modelRows": 0,
+          "modelAccepted": 0,
+          "deterministicAccepted": 4,
+          "accepted": 4,
+          "rejected": {
+            "DETERMINISTIC_INSUFFICIENT": 30,
+            "MODEL_FAILED": 30
+          },
+          "noRowPages": 30,
+          "modelErrors": 30,
+          "modelFailures": 24,
+          "modelLatencyMs": 0,
+          "modelInputTokens": 0,
+          "modelOutputTokens": 0,
+          "missingCompany": 0,
+          "missingType": 0,
+          "fuzzyJd": 0,
+          "modelAttempts": 24
+        },
+        "detailChecks": 4,
+        "extractionFailures": 0,
+        "pendingUrls": 43
+      },
+      "providers": [
+        "tavily"
+      ]
+    }
+  ],
+  "queryPlan": {
+    "keyword": "软件测试",
+    "expansions": [
+      "软件测试",
+      "测试工程师",
+      "自动化测试",
+      "测试开发"
+    ],
+    "cities": [
+      "440100",
+      "440300",
+      "441900"
+    ],
+    "candidateTypes": [
+      "INTERNSHIP"
+    ],
+    "companySizes": [],
+    "includeUnknownSize": true,
+    "freshnessDays": 30,
+    "searchProviders": [
+      "tavily"
+    ],
+    "queries": [
+      {
+        "query": "广州 软件测试 实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "软件测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 软件测试 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "软件测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "东莞 软件测试 实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "软件测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "广州 测试工程师 实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "测试工程师",
+        "category": "测试工程师",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 测试工程师 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "测试工程师",
+        "category": "测试工程师",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "东莞 测试工程师 实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "测试工程师",
+        "category": "测试工程师",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "广州 自动化测试 实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "自动化测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 自动化测试 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "自动化测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "东莞 自动化测试 实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "自动化测试",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "广州 测试开发 实习 招聘 职位",
+        "cityCode": "440100",
+        "cityName": "广州",
+        "keyword": "测试开发",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "深圳 测试开发 实习 招聘 职位",
+        "cityCode": "440300",
+        "cityName": "深圳",
+        "keyword": "测试开发",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      },
+      {
+        "query": "东莞 测试开发 实习 招聘 职位",
+        "cityCode": "441900",
+        "cityName": "东莞",
+        "keyword": "测试开发",
+        "category": "软件测试",
+        "candidateType": "INTERNSHIP",
+        "freshness": "month"
+      }
+    ],
+    "coverage": {
+      "cities": {
+        "广州": 1,
+        "深圳": 0,
+        "东莞": 0
+      },
+      "categories": {
+        "软件测试": 1,
+        "测试工程师": 0
+      },
+      "cells": [
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 47,
+          "analyzed": 30,
+          "extracted": 1,
+          "rejected": 28,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 13,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 3,
+          "completed": true
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 48,
+          "analyzed": 24,
+          "extracted": 0,
+          "rejected": 21,
+          "completed": true
+        },
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 14,
+          "analyzed": 8,
+          "extracted": 0,
+          "rejected": 8,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 15,
+          "analyzed": 4,
+          "extracted": 0,
+          "rejected": 4,
+          "completed": false
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 8,
+          "extracted": 0,
+          "rejected": 8,
+          "completed": false
+        }
+      ],
+      "completedCells": 3,
+      "totalCells": 6
+    },
+    "adjustments": [
+      "没有新增查询，继续处理已召回页面"
+    ],
+    "version": "job-search-query-v4"
+  },
+  "warnings": [
+    "SEARCH_SLOW",
+    "QUERY_ADJUSTED",
+    "MODEL_UNDERSTANDING_DEGRADED:1",
+    "SEMANTIC_SCORE_UNAVAILABLE",
+    "SEARCH_INCOMPLETE",
+    "SOME_SOURCES_PARTIAL_FAILURE",
+    "UNKNOWN_VERIFICATION:1"
+  ],
+  "dedupe": {
+    "rawCount": 1,
+    "validCount": 1,
+    "uniqueCount": 1,
+    "mergedCount": 0,
+    "methods": {},
+    "duplicateRate": 0.0
+  },
+  "metrics": {
+    "funnel": {
+      "searchResults": {
+        "tavily": 190
+      },
+      "uniqueUrls": 98,
+      "uniquePostings": 1,
+      "jobDetailPages": 4,
+      "extractionAttempted": 1,
+      "extractionSuccess": 0,
+      "verification": {
+        "counts": {
+          "ACTIVE_CONFIRMED": 0,
+          "ACTIVE_PROBABLE": 0,
+          "UNKNOWN": 1,
+          "CLOSED": 0
+        },
+        "reasons": {
+          "DETAIL_NOT_FOUND": 1
+        },
+        "records": 2,
+        "rates": {
+          "officialVerificationRate": 0.0,
+          "unknownRate": 1.0,
+          "closedRate": 0.0
+        }
+      },
+      "hardFilterPass": 1,
+      "finalRecommendations": 1
+    },
+    "counts": {
+      "ACTIVE_CONFIRMED": 0,
+      "ACTIVE_PROBABLE": 0,
+      "UNKNOWN": 1,
+      "CLOSED": 0
+    },
+    "reasons": {
+      "DETAIL_NOT_FOUND": 1
+    },
+    "failures": {
+      "source:modelFailures": 30,
+      "extract:DETERMINISTIC_INSUFFICIENT": 36,
+      "extract:MODEL_FAILED": 36
+    },
+    "stageMs": {
+      "plan": 1485,
+      "search": 4857,
+      "detail": 3384,
+      "normalize": 0
+    },
+    "sourceCounts": {
+      "company_official": 0,
+      "baidu": 0,
+      "tencent": 0,
+      "greenhouse": 0,
+      "web": 1
+    },
+    "cityCoverage": {
+      "未知": 1
+    },
+    "jobCategoryCoverage": {
+      "测试工程师": 1
+    },
+    "queryCoverage": {
+      "cities": {
+        "广州": 1,
+        "深圳": 0,
+        "东莞": 0
+      },
+      "categories": {
+        "软件测试": 1,
+        "测试工程师": 0
+      },
+      "cells": [
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 47,
+          "analyzed": 30,
+          "extracted": 1,
+          "rejected": 28,
+          "completed": true
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 13,
+          "analyzed": 3,
+          "extracted": 0,
+          "rejected": 3,
+          "completed": true
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "软件测试",
+          "candidateType": "INTERNSHIP",
+          "queries": 3,
+          "providers": [
+            "tavily"
+          ],
+          "found": 48,
+          "analyzed": 24,
+          "extracted": 0,
+          "rejected": 21,
+          "completed": true
+        },
+        {
+          "cityCode": "440100",
+          "cityName": "广州",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 14,
+          "analyzed": 8,
+          "extracted": 0,
+          "rejected": 8,
+          "completed": false
+        },
+        {
+          "cityCode": "440300",
+          "cityName": "深圳",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 15,
+          "analyzed": 4,
+          "extracted": 0,
+          "rejected": 4,
+          "completed": false
+        },
+        {
+          "cityCode": "441900",
+          "cityName": "东莞",
+          "category": "测试工程师",
+          "candidateType": "INTERNSHIP",
+          "queries": 1,
+          "providers": [
+            "tavily"
+          ],
+          "found": 18,
+          "analyzed": 8,
+          "extracted": 0,
+          "rejected": 8,
+          "completed": false
+        }
+      ],
+      "completedCells": 3,
+      "totalCells": 6
+    },
+    "sourceDiversity": {
+      "sources": 1,
+      "providers": [
+        "tavily"
+      ],
+      "uniqueDomains": 1
+    },
+    "rates": {
+      "officialVerificationRate": 0.0,
+      "unknownRate": 1.0,
+      "closedRate": 0.0,
+      "extractionSuccessRate": 0.0,
+      "duplicateRate": 0.0,
+      "staleRate": 0.0
+    },
+    "freshnessLagDays": null,
+    "evaluation": {
+      "status": "NOT_MEASURED",
+      "reason": "缺少人工标注的相关岗位全集，未计算 Recall@K / NDCG@10"
+    },
+    "postingIds": [
+      "91cd2587f0bc5d50213810adcf5f8edf"
+    ],
+    "collection": {
+      "stopReason": "API_LIMIT",
+      "pendingBySource": {
+        "company_official": 22,
+        "web": 43
+      }
+    },
+    "jdUnderstanding": {
+      "attempted": 1,
+      "modelMatched": 0,
+      "ruleFallback": 1,
+      "failedBatches": 1
+    }
+  },
+  "meta": {
+    "graph": "job-search-graph-v3",
+    "modelCalls": 0,
+    "modelDegraded": true,
+    "budget": {
+      "rounds": 2,
+      "queries": 16,
+      "pages": 40,
+      "detailChecks": 0,
+      "pagesFetched": 19,
+      "apiCalls": 60,
+      "cacheHits": 0,
+      "elapsedMs": 32296,
+      "limits": {
+        "maxQueriesPerRound": 12,
+        "maxPagesPerRound": 20,
+        "maxDetailPages": 20,
+        "maxPageFetch": 20,
+        "maxApiCalls": 60,
+        "maxElapsedSeconds": 150.0,
+        "maxRounds": 3,
+        "targetResults": 10,
+        "minResults": 5
+      },
+      "stages": {
+        "plan": 1485,
+        "search": 4857,
+        "detail": 3384,
+        "normalize": 0
+      }
+    },
+    "companyRegistry": {
+      "companies": [
+        {
+          "key": "greenhouse:stripe",
+          "lastCollectedAt": "2026-11-12T07:54:14.639456+00:00",
+          "lastStatus": "AVAILABLE",
+          "lastCount": 787
+        }
+      ],
+      "registered": [
+        {
+          "key": "greenhouse:stripe",
+          "company": "Stripe",
+          "platform": "greenhouse"
+        }
+      ]
+    }
+  },
+  "llmDiagnostics": [
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "keyword",
+      "systemChars": 119,
+      "userChars": 19,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 1485
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 294,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 858
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6966,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 858
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5581,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 1015
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6966,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 294,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 438
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5581,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 859
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 4755,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 532
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5098,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 547
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5404,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 547
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6457,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 547
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5098,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 437
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6457,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 437
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5404,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 437
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 4755,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 452
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5383,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 514
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5383,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 516
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6323,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 390
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5997,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6273,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 421
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 4667,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 436
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5997,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6323,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 437
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 4667,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6273,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 469
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5460,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 407
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6050,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 421
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3297,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 514
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 6050,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 405
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 5460,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 530
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "postings",
+      "systemChars": 856,
+      "userChars": 3297,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 594
+    },
+    {
+      "operation": "JOB_SEARCH",
+      "schema": "{\n  \"items\": [\n    {\n      \"sourceKey\": \"输入中的来源 key\",\n      \"sourceUrl\": \"输入中的原始岗位链接\",\n      \"requirements\": {\n        \"educationMin\": null,\n        \"graduationYearMin\": null,\n        \"graduationYearMax\": null,\n        \"experienceMonthsMin\": null,\n        \"skills\": [\"skillCatalog 中的 code\"],\n        \"requiredSkillLevels\": {},\n        \"quotes\": {}\n      },\n      \"semanticScore\": 0.7,\n      \"reasons\": [\"仅引用输入事实的解释\"],\n      \"gaps\": [\n        {\n          \"skillCode\": \"requirements.skills 中的 code\",\n          \"suggestion\": \"针对该技能的训练建议\"\n        }\n      ]\n    }\n  ]\n}",
+      "systemChars": 1322,
+      "userChars": 2104,
+      "status": "ERROR",
+      "errorType": "LLMProviderError",
+      "durationMs": 421
+    }
+  ],
+  "httpAttempts": {
+    "api.tavily.com": 16,
+    "careers.tencent.com": 2,
+    "talent.baidu.com": 4,
+    "boards-api.greenhouse.io": 1,
+    "m.liepin.com": 6,
+    "jobs.51job.com": 1,
+    "www.wondercv.com": 3,
+    "career.gdufs.edu.cn": 1,
+    "www.gz12355.net": 1,
+    "gosuncn.zhiye.com": 2,
+    "aidynamic.com": 1,
+    "www.ncss.cn": 1,
+    "www.deepexi.com": 1,
+    "yushengji.hotjob.cn": 1,
+    "cn.indeed.com": 1,
+    "www.gaoxiaojob.com": 1,
+    "m.51job.com": 1,
+    "acdn.bstatics.com": 11,
+    "msearch.51job.com": 1,
+    "jobs.bytedance.com": 1,
+    "job.gzus.edu.cn": 1,
+    "zhiwei.yingjiesheng.com": 1,
+    "www.nowcoder.com": 1
+  },
+  "itemCount": 1,
+  "items": [
+    {
+      "title": "测试工程师",
+      "company": "滴普科技",
+      "city": null,
+      "salary": [
+        null,
+        null
+      ],
+      "experience": "应届",
+      "education": null,
+      "companySize": "SIZE_UNKNOWN",
+      "source": "web",
+      "searchProviders": [
+        "tavily"
+      ],
+      "publishedAt": null,
+      "fetchedAt": "2026-11-12T07:54:35.833498+00:00",
+      "verification": "UNVERIFIED",
+      "verificationStatus": "UNKNOWN",
+      "verificationReason": "DETAIL_NOT_FOUND",
+      "warnings": [
+        "CANDIDATE_TYPE_UNKNOWN",
+        "EXPERIENCE_FROM_TEXT",
+        "DETERMINISTIC_EXTRACTION",
+        "CITY_UNKNOWN",
+        "UNVERIFIED_SOURCE",
+        "MISSING_SALARY",
+        "MISSING_PUBLISHED_AT",
+        "MISSING_EDUCATION",
+        "COMPANY_SIZE_UNKNOWN"
+      ],
+      "url": "https://www.deepexi.com/join-us/campus/c8",
+      "semanticScore": null
+    }
+  ]
+}

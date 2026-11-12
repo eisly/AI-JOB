@@ -147,3 +147,11 @@ mvn test
 ```
 
 `BackendApplicationTest` 使用 H2；`DatabaseQueryTest` 需要真实 MySQL 和演示数据。投递与登录集成测试需要独立 `career_business_test` 数据库，登录测试还需要隔离 Redis 与 SMTP 测试服务；投递测试可用 `-Dintegration-tests=true` 强制执行。测试会写入测试库和 Redis，请勿指向共享或生产服务。
+
+### 官网优先搜索与匿名渲染
+
+默认来源增加 `company_official`：企业官网/企业委托 ATS 优先，第三方仅补缺或兜底。官网归属需要企业入口链接或可信配置，不能仅凭网站名称确认。可设置 `AGENT_JOB_SEARCH_COMPANY_SITES` 为 JSON 对象（公司名称到完整招聘域名的映射），例如 `{"示例有限公司":"careers.example.com"}`。
+
+安装根目录 requirements.txt 后，使用同一 Python 环境执行 `python -m playwright install chromium`。渲染不读取个人浏览器或登录态，单次搜索最多 4 页、并发 2、每页 10 秒；总预算默认 150 秒，取数预留最后 30 秒分析收尾。浏览器不可用时继续返回静态结果及未确认状态。
+
+字段 `companySizeText` 和 `fieldSources` 存入既有岗位 JSON 快照，无数据库迁移；旧搜索记录不会自动补写。字段缺失需要重新搜索。公开站点可能只返回空壳、登录页或验证码，不能保证所有字段可得。真实核对结果见 `project/agent/data/verify_official_priority_20261107.json`。

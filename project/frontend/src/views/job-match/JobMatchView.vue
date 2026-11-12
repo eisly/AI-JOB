@@ -755,7 +755,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
           <el-button v-if="importTask?.status === 'SUCCEEDED' && importedJobId" size="small" :loading="importRetrying" @click="retryImportedJob">重新读取岗位详情</el-button>
           <el-button v-else-if="lastImportBody && (!importTask || canRetryTrackedTask(importTask))" size="small" :loading="importRetrying" @click="retryImport">按原参数重试</el-button>
         </el-alert>
-        <TaskStatus v-if="importTask" :task="importTask">
+        <TaskStatus v-if="importTask" :task="importTask" :reasoning="importTracker.reasoningText.value">
           <template #actions>
             <el-button v-if="canRetryTrackedTask(importTask)" size="small" type="primary" :loading="importRetrying" @click="retryImport">按原参数重试</el-button>
           </template>
@@ -847,7 +847,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         <el-alert v-if="matchActionError" class="task-alert" :title="errorMessage(matchActionError)" type="error" :closable="false" show-icon>
           <el-button v-if="lastMatchBody && (!matchTask || canRetryTrackedTask(matchTask))" size="small" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
         </el-alert>
-        <TaskStatus v-if="matchTask" :task="matchTask">
+        <TaskStatus v-if="matchTask" :task="matchTask" :reasoning="matchTracker.reasoningText.value">
           <template #actions>
             <el-button v-if="canRetryTrackedTask(matchTask)" size="small" type="primary" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
           </template>
@@ -1082,7 +1082,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         </el-form>
         <el-alert v-if="planActionError" :title="errorMessage(planActionError)" type="error" :closable="false" show-icon />
         <div v-if="planAuthorityLoading" class="authority-loading" v-loading="true">正在读取已生成的训练计划</div>
-        <TaskStatus v-if="planTask" :task="planTask">
+        <TaskStatus v-if="planTask" :task="planTask" :reasoning="planTracker.reasoningText.value">
           <template #actions>
             <el-button v-if="canRetryTrackedTask(planTask)" size="small" type="primary" :loading="planRetrying" @click="retryPlan">按原参数重试</el-button>
           </template>

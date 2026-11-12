@@ -1,12 +1,11 @@
 package com.aijob.backend.job;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -24,6 +23,9 @@ import com.aijob.backend.task.TaskService;
 
 @Service
 public class JobService {
+
+    private static final Pattern INTERNSHIP_WORD = Pattern.compile("\\bintern(ship)?\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern GRADUATION_YEAR = Pattern.compile("\\d{4}\\s*届");
 
     private final JobMapper mapper;
     private final ResumeMapper resumes;
@@ -85,14 +87,17 @@ public class JobService {
         String jobId = UUID.randomUUID().toString();
         String sourceId = UUID.randomUUID().toString();
         String versionId = UUID.randomUUID().toString();
-        String roleCode = roleCode(title + " " + jdText);
+        String combined = title + " " + jdText;
+        String roleCode = roleCode(combined);
+        String type = candidateType(combined);
         Map<String, Object> payload = Map.of("jobId", jobId, "jobVersion", 1, "jdText", jdText,
                 "skillCatalog", profiles.agentSkillCatalog());
         return tasks.create(userId, "POST", route, key, body, "JD_ANALYZE", "JOB", jobId,
                 Map.of("jobVersion", 1), payload, taskId -> {
                     mapper.insertPrivateSource(sourceId);
                     mapper.insertPrivateJob(jobId, sourceId, userId, sourceUrl);
-                    mapper.insertJobVersion(versionId, jobId, title, company, roleCode, jdText, json.sha256(jdText));
+                    mapper.insertJobVersion(versionId, jobId, title, company, roleCode, type,
+                            jdText, json.sha256(jdText));
                 });
     }
 
@@ -200,6 +205,9 @@ public class JobService {
                 "user_id", "profile_version", "resume_version_id", "batch_id", "rank_no", "eligibility_status");
         Map<String, Object> snapshot = json.map(String.valueOf(item.get("source_snapshot_json")));
         result.put("title", snapshot.get("title"));
+        result.put("companyName", snapshot.get("companyName"));
+        result.put("cityCode", snapshot.get("cityCode"));
+        result.put("candidateType", snapshot.get("candidateType"));
         result.put("source", snapshot.get("source"));
         result.put("sourceUrl", snapshot.get("sourceUrl"));
         result.put("verifiedAt", snapshot.get("verifiedAt"));
@@ -234,6 +242,18 @@ public class JobService {
                 : json.convert(json.parse(String.valueOf(row.get("requirements_json"))), Object.class));
         result.put("isFavorite", mapper.isFavorite(userId, String.valueOf(row.get("id"))) > 0);
         return result;
+    }
+
+    static String candidateType(String text) {
+        String value = text == null ? "" : text.toLowerCase();
+        if (value.contains("实习") || INTERNSHIP_WORD.matcher(value).find()) {
+            return "INTERNSHIP";
+        }
+        if (value.contains("校招") || value.contains("校园招聘") || value.contains("应届")
+                || value.contains("毕业生") || GRADUATION_YEAR.matcher(value).find()) {
+            return "CAMPUS";
+        }
+        return "EXPERIENCED";
     }
 
     public String roleCode(String text) {

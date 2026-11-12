@@ -1,5 +1,8 @@
 import { ApiError as RequestError, request } from './request'
+import { getAccessToken, getDevUserId } from './session'
 import { REQUEST_TIMEOUT_MS } from '@/features/workbench/constants'
+import type { ApplicationSummary } from '@/types/application'
+import type { MockSourceKey } from './mock/workbench.mock'
 import type {
   ApiError,
   ApiErrorCategory,
@@ -41,17 +44,6 @@ export function toApiError(error: unknown): ApiError {
     traceId: error.traceId || undefined,
   }
 }
-
-type MockSourceKey =
-  | 'user'
-  | 'profile'
-  | 'matchBatches'
-  | 'matchDetail'
-  | 'plans'
-  | 'interviews'
-  | 'growth'
-  | 'tasks'
-  | 'resumes'
 
 type MockModule = typeof import('./mock/workbench.mock')
 
@@ -103,7 +95,9 @@ async function requestOrMock<T>(
 }
 
 export function getCurrentUser(options?: RequestOptions): Promise<ApiResult<UserVO>> {
-  return requestOrMock('user', '/api/v1/users/me', undefined, options, (scenario) => scenario.user)
+  const devUserId = getAccessToken() ? '' : getDevUserId()
+  const path = devUserId ? `/api/v1/users/${encodeURIComponent(devUserId)}` : '/api/v1/users/me'
+  return requestOrMock('user', path, undefined, options, (scenario) => scenario.user)
 }
 
 export async function getProfile(options?: RequestOptions): Promise<ApiResult<ProfileVO | null>> {
@@ -117,13 +111,22 @@ export async function getProfile(options?: RequestOptions): Promise<ApiResult<Pr
   }
 }
 
-export function getMatchBatches(options?: RequestOptions): Promise<ApiResult<PageResult<MatchBatchVO>>> {
-  return requestOrMock('matchBatches', '/api/v1/job-matches', { current: 1, size: 20 }, options, (scenario) => ({
+export async function getMatchBatches(options?: RequestOptions): Promise<ApiResult<MatchBatchVO[]>> {
+  const result = await requestOrMock('matchBatches', '/api/v1/job-matches', { current: 1, size: 20 }, options, (scenario) => ({
     total: scenario.matchBatches.length,
     records: scenario.matchBatches,
     current: 1,
     size: 20,
   }))
+  return { ...result, data: result.data.records }
+}
+
+export async function getApplicationTotal(options?: RequestOptions): Promise<ApiResult<number>> {
+  const result = await requestOrMock<Pick<ApplicationSummary, 'total'>>(
+    'applications', '/api/v1/applications/summary', undefined, options,
+    (scenario) => ({ total: scenario.applicationTotal }),
+  )
+  return { ...result, data: result.data.total }
 }
 
 export function getMatchBatchDetail(matchId: string, options?: RequestOptions): Promise<ApiResult<MatchBatchVO>> {

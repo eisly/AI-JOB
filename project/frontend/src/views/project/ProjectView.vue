@@ -131,6 +131,7 @@ const {
   task: recommendationTask,
   loading: recommendationTaskLoading,
   error: recommendationTaskError,
+  reasoningText: recommendationReasoning,
   restart: restartRecommendationTask,
 } = useTask(recommendationTaskId, {
   onDone: async task => {
@@ -148,6 +149,7 @@ const {
   task: planTask,
   loading: planTaskLoading,
   error: planTaskError,
+  reasoningText: planReasoning,
   restart: restartPlanTask,
 } = useTask(planTaskId, {
   onDone: async task => {
@@ -612,7 +614,7 @@ onMounted(() => {
           </el-form>
           <div v-if="recommendationTaskId" class="task-block">
             <el-skeleton v-if="recommendationTaskLoading && !recommendationTask" :rows="2" animated />
-            <TaskStatus v-else :task="recommendationTask">
+            <TaskStatus v-else :task="recommendationTask" :reasoning="recommendationReasoning">
               <template #actions>
                 <el-button v-if="recommendationTask?.status === 'FAILED'" size="small" :loading="recommendSubmitting" @click="retryRecommendationTask">按原条件重试</el-button>
               </template>
@@ -645,15 +647,15 @@ onMounted(() => {
                 <span>生成时间：{{ formatDate(recommendation.createdAt) }}</span>
                 <span>推荐 ID：{{ recommendation.id }}</span>
               </div>
-              <el-alert class="ai-notice" type="info" :closable="false" show-icon title="以下内容为 AI 学习项目建议，不是你的既有项目经历，也不代表真实工作经验。" />
-              <el-alert v-if="recommendation.status === 'FAILED'" class="inline-alert" type="error" title="推荐生成失败，请调整条件后重新提交。" :closable="false" show-icon />
+              <el-alert class="ai-notice" type="info" :closable="false" show-icon title="以下是供练习的项目建议。" />
+              <el-alert v-if="recommendation.status === 'FAILED'" class="inline-alert" type="error" title="推荐生成失败，可从上方按原条件重试。" :closable="false" show-icon />
               <el-result v-else-if="recommendation.status === 'GENERATING'" icon="info" title="推荐仍在生成中" sub-title="可稍后刷新推荐；任务恢复后会自动读取权威结果。">
                 <template #extra><el-button :loading="recommendationLoading" @click="loadRecommendation(recommendation.id)">刷新推荐状态</el-button></template>
               </el-result>
               <el-empty v-else-if="!recommendation.items.length" description="本次没有返回候选项目，可调整条件后重试" />
               <div v-else class="recommendation-grid">
                 <article v-for="item in recommendation.items" :key="item.id" class="recommendation-card">
-                  <div class="recommendation-card__eyebrow">AI 建议 · 非既有经历</div>
+                  <div class="recommendation-card__eyebrow">{{ item.reason.startsWith('本地规则建议 ·') ? '本地规则建议' : 'AI 建议' }}</div>
                   <div class="recommendation-card__heading">
                     <h3>{{ item.title }}</h3>
                     <el-tag>{{ difficultyLabels[item.difficulty] }}</el-tag>
@@ -684,7 +686,7 @@ onMounted(() => {
           <div class="panel__heading"><h2>计划生成任务</h2></div>
           <el-alert v-if="planSubmitError" class="inline-alert" type="error" :title="errorMessage(planSubmitError)" :closable="false" show-icon />
           <el-skeleton v-if="planTaskLoading && !planTask" :rows="2" animated />
-          <TaskStatus v-else :task="planTask">
+          <TaskStatus v-else :task="planTask" :reasoning="planReasoning">
             <template #actions>
               <el-button v-if="planTask?.status === 'FAILED'" size="small" :loading="planSubmitting" @click="retryPlanTask">按原参数重试</el-button>
             </template>

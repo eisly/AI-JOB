@@ -354,14 +354,26 @@ export interface SearchAliasVO {
   verification: 'VERIFIED' | 'UNVERIFIED'
 }
 
+export interface JobFieldSource {
+  sourceUrl: string
+  sourceName: string
+  sourceType: string
+  rawText: string
+  fetchedAt: string
+}
+
 export interface JobSearchItemVO extends MatchItemVO {
+  companySizeText?: string | null
+  fieldSources?: Record<string, JobFieldSource> | null
   batchId: string
   rankNo: number
   companyName: string
   cityCode: string | null
+  cityName?: string | null
   candidateType: ProfileVO['candidateType']
   companySize: CompanySize
   publishedAt: string | null
+  updatedAt?: string | null
   fetchedAt: string | null
   recruitmentStatus?: 'OPEN' | 'PROBABLE' | 'CLOSED' | 'UNKNOWN' | null
   recruitmentCheckedAt?: string | null
@@ -404,22 +416,78 @@ export interface ResourceRef {
   quote: string
 }
 
+export interface ResourceLinkVO {
+  label: string
+  url: string
+}
+
+export type PlanCategory = 'BASIC' | 'RESUME_PROJECT' | 'GITHUB'
+export type PlanItemEvidenceStatus = 'ASSESSED' | 'PENDING'
+
 export interface PlanItemVO {
   id: string
   skillCode: string
   title: string
   kind: 'READING' | 'PRACTICE' | 'INTERVIEW'
+  category: PlanCategory
+  objective: string
+  reason: string
+  method: string
+  completionCriteria: string
+  evidenceStatus: PlanItemEvidenceStatus
+  evidenceQuote: string | null
+  resourceLinks: ResourceLinkVO[]
   estimatedMinutes: number
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
   resourceRefs: ResourceRef[]
 }
 
+export interface PlanGithubBasisVO {
+  status: 'PENDING' | 'AVAILABLE' | 'UNAVAILABLE' | 'DISABLED'
+  candidateCount?: number
+  fetchedAt?: string | null
+  reason?: string | null
+}
+
+export interface PlanBasisVO {
+  source: 'MATCH' | 'RESUME'
+  summary?: string
+  resumeVersionId: string | null
+  resumeVersionNo?: number | null
+  targetDirection: string | null
+  matchItemId: string | null
+  matchTitle: string | null
+  matchReferenced?: boolean
+  dailyMinutes: number
+  days: number
+  generatedAt: string
+  limitations?: string[]
+  github?: PlanGithubBasisVO
+}
+
+export interface MatchSummaryVO {
+  id: string
+  title: string | null
+  companyName: string | null
+  matchScore: number | null
+}
+
 export interface LearningPlanVO {
   id: string
-  matchItemId: string
+  source: 'MATCH' | 'RESUME'
+  matchItemId: string | null
+  resumeVersionId: string | null
+  targetDirection: string | null
+  supersedesPlanId: string | null
+  generationNo: number
   profileVersion: number
+  dailyMinutes: number
+  days: number
   status: 'GENERATING' | 'ACTIVE' | 'COMPLETED' | 'FAILED'
   title: string
+  generatedAt: string
+  basis: PlanBasisVO | null
+  matchSummary?: MatchSummaryVO | null
   items: PlanItemVO[]
 }
 

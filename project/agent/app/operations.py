@@ -108,7 +108,7 @@ PROMPT_VERSIONS: dict[str, str] = {
     JD_ANALYZE: "jd-analyze-v3",
     JOB_MATCH: "semantic-v2",
     JOB_SEARCH: "job-search-v1",
-    LEARNING_PLAN: "learning-plan-v2",
+    LEARNING_PLAN: "learning-plan-v3",
     LEARNING_QUESTION: "learning-question-v2",
     LEARNING_EVALUATE: "answer-evaluate-v3",
     INTERVIEW_TURN: "interview-turn-v5",

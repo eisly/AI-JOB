@@ -56,8 +56,9 @@ public class EligibilityService {
         if (expected == null) {
             return item(field, "PASS", string(actual), null, "未设要求", quote);
         }
-        if (actual == null) {
-            return item(field, "UNKNOWN", null, string(expected), "缺少已确认事实，无法确定", quote);
+        if (actual == null || ("education".equals(field) && !EDUCATION.contains(String.valueOf(actual)))
+                || (!"education".equals(field) && !(actual instanceof Number))) {
+            return item(field, "UNKNOWN", string(actual), string(expected), "缺少可用于核验的已确认事实", quote);
         }
         boolean pass = switch (field) {
             case "education" -> EDUCATION.indexOf(String.valueOf(actual)) >= EDUCATION.indexOf(String.valueOf(expected));

@@ -198,6 +198,8 @@ def _match(request: LLMRequest) -> dict[str, Any]:
 
 def _plan(request: LLMRequest) -> dict[str, Any]:
     payload = _payload(request)
+    github = request.context.get("github") or {}
+    source = str(payload.get("planSource") or "MATCH")
     gaps = ((payload.get("matchItem") or {}).get("gaps")) or []
     allowed = [str(item) for item in payload.get("allowedSkillCodes") or []]
     gap_skills = [
@@ -208,21 +210,64 @@ def _plan(request: LLMRequest) -> dict[str, Any]:
     selected = gap_skills or allowed
     daily = int(payload.get("dailyMinutes") or 30)
     days = int(payload.get("days") or 7)
-    budget = daily * days
-    count = max(1, min(len(selected), budget // 20 if budget >= 20 else 1))
-    items = []
-    for index, skill in enumerate(selected[:count]):
-        minutes = min(20, budget)
-        items.append(
-            {
-                "skillCode": skill,
-                "title": f"{skill} 专项训练",
-                "kind": ("PRACTICE", "READING", "INTERVIEW")[index % 3],
-                "estimatedMinutes": minutes,
-                "resourceRefs": [],
-            }
-        )
-    return {"title": "差距专项提升计划", "items": items}
+    budget = max(5, daily * days)
+    items: list[dict[str, Any]] = []
+    remaining = budget
+
+    def add(skill: str, title: str, kind: str, category: str, minutes: int,
+            extra: dict[str, Any] | None = None) -> None:
+        nonlocal remaining
+        if not skill:
+            return
+        minutes = min(minutes, remaining)
+        if minutes < 5:
+            return
+        remaining -= minutes
+        item: dict[str, Any] = {
+            "skillCode": skill,
+            "title": title,
+            "kind": kind,
+            "category": category,
+            "objective": f"掌握 {skill} 的核心能力",
+            "reason": "结合目标方向与可用证据安排",
+            "method": "完成阅读与场景练习并记录结果",
+            "completionCriteria": "提交有效训练记录并达到完成标准",
+            "evidenceStatus": "ASSESSED",
+            "estimatedMinutes": minutes,
+            "resourceRefs": [],
+        }
+        if extra:
+            item.update(extra)
+        items.append(item)
+
+    primary = selected[0] if selected else ""
+    if source == "RESUME":
+        resume = payload.get("resume") or {}
+        text = str(resume.get("projectsText") or "").strip()
+        if text:
+            add(primary, "简历项目深挖", "INTERVIEW", "RESUME_PROJECT", 30, {"evidenceQuote": text[:40]})
+        candidates = github.get("candidates") if isinstance(github, dict) else None
+        if github.get("status") == "AVAILABLE" and candidates:
+            candidate = candidates[0]
+            add(
+                primary,
+                f"学习开源项目 {candidate.get('fullName')}",
+                "READING",
+                "GITHUB",
+                30,
+                {
+                    "resourceLinks": [
+                        {"label": str(candidate.get("fullName")), "url": str(candidate.get("htmlUrl"))}
+                    ]
+                },
+            )
+    for index, skill in enumerate(selected):
+        if len(items) >= 20 or remaining < 5:
+            break
+        add(skill, f"{skill} 专项训练", ("PRACTICE", "READING", "INTERVIEW")[index % 3], "BASIC", 20)
+    if not items and primary:
+        add(primary, f"{primary} 专项训练", "PRACTICE", "BASIC", 5)
+    return {"title": "差距专项提升计划", "summary": "根据可用证据生成的训练计划", "items": items}
 
 
 def _question(request: LLMRequest) -> dict[str, Any]:
