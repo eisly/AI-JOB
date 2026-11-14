@@ -1,6 +1,7 @@
 import { request } from './request'
 import { taskApi } from './tasks'
 import type { TaskVO } from './types'
+import { useUserStore } from '@/stores/user'
 
 export interface TaskSubmission {
   path: string
@@ -9,11 +10,19 @@ export interface TaskSubmission {
   businessPath: string
 }
 
-const storageKey = 'ai-job-task-submissions-v1'
+/** 任务提交记录按账号隔离：key 追加用户 ID，切换账号后不会命中旧账号的重试记录（S06） */
+function currentStorageKey(): string {
+  try {
+    const userId = useUserStore().userInfo?.id || 'anon'
+    return `ai-job-task-submissions-v1:${userId}`
+  } catch {
+    return 'ai-job-task-submissions-v1:anon'
+  }
+}
 
 function readRegistry() {
   try {
-    return JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<string, TaskSubmission>
+    return JSON.parse(localStorage.getItem(currentStorageKey()) || '{}') as Record<string, TaskSubmission>
   } catch {
     return {} as Record<string, TaskSubmission>
   }
@@ -22,7 +31,7 @@ function readRegistry() {
 function writeRegistry(registry: Record<string, TaskSubmission>) {
   try {
     const entries = Object.entries(registry).sort((a, b) => b[0].localeCompare(a[0])).slice(-200)
-    localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(entries)))
+    localStorage.setItem(currentStorageKey(), JSON.stringify(Object.fromEntries(entries)))
   } catch {
     return
   }

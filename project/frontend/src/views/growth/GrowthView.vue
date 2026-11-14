@@ -308,7 +308,7 @@ onMounted(() => {
       <div class="panel__heading">
         <div>
           <h2>技能能力摘要</h2>
-          <p class="section-note">暂无有效评分不等于 0 分；样本阈值只是产品展示状态，不是统计置信结论。</p>
+          <p class="section-note">暂无有效评分不等于 0 分；样本阈值只是产品展示状态，不是统计置信结论。技能评分证据仅来自训练答题与面试答题的有效评价（简历自述不计分）；面试整体评分不会复制为技能分；项目实战为自报任务进度，不产生技能评分证据。</p>
         </div>
       </div>
       <AsyncState :loading="growthLoading && !growth" :error="growth ? null : growthError" :empty="!!growth && !growth.skills.length" empty-text="暂无技能能力摘要" empty-description="完成有效训练或面试评价后，能力摘要会依据证据重新计算。" @retry="loadGrowth">
@@ -398,6 +398,10 @@ onMounted(() => {
       <el-alert v-if="suggestionSubmitError" class="inline-alert" type="error" :closable="false" show-icon>
         <template #title>{{ errorMessage(suggestionSubmitError) }}</template>
         <el-button size="small" :disabled="!growth || suggestionBusy" @click="generateSuggestions">按最新摘要重试</el-button>
+      </el-alert>
+      <el-alert v-if="growth?.suggestionStale && growth.suggestions.length" class="inline-alert" type="warning" :closable="false" show-icon>
+        <template #title>{{ growth.suggestionStaleReason }}</template>
+        <el-button size="small" :disabled="!growth || suggestionBusy" @click="generateSuggestions">基于当前画像重新生成</el-button>
       </el-alert>
       <AsyncState :loading="growthLoading && !growth" :error="growth ? null : growthError" :empty="!!growth && !growth.suggestions.length && !suggestionBusy" empty-text="暂无成长建议" empty-description="可基于当前画像版本生成下一步建议。" @retry="loadGrowth">
         <ol v-if="growth?.suggestions.length" class="suggestion-list">

@@ -99,6 +99,11 @@ public class TaskResultService {
             reference.put("resourceType", task.getResourceType());
             reference.put("resourceId", task.getResourceId());
             reference.put("version", version);
+            // S03/A05：合并业务结果摘要（如搜索 outcome），任务列表据此区分执行完成与业务结果不可用/部分失败
+            Map<String, Object> summary = handler.resultSummary(task);
+            if (summary != null && !summary.isEmpty()) {
+                reference.putAll(summary);
+            }
             if (mapper.succeed(taskId, json.stringify(reference), digest) == 0) {
                 throw BusinessException.conflict("任务状态已变化", "INVALID_STATE");
             }

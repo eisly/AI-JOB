@@ -100,7 +100,7 @@ public class ProjectService {
             throw BusinessException.validation("difficulty", "项目难度非法");
         }
         int maxDurationWeeks = Data.integer(body, "maxDurationWeeks", 12, 1, 12);
-        List<String> allowedSkills = allowedSkills(body, matchItem);
+        List<String> allowedSkills = allowedSkills(userId, body, matchItem);
         Map<String, Object> profile = profiles.get(userId);
         long profileVersion = ((Number) profile.get("profileVersion")).longValue();
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -290,14 +290,14 @@ public class ProjectService {
         return result;
     }
 
-    private List<String> allowedSkills(Map<String, Object> body, Map<String, Object> matchItem) {
+    private List<String> allowedSkills(String userId, Map<String, Object> body, Map<String, Object> matchItem) {
         List<String> result = new ArrayList<>();
         for (Object raw : Data.list(body, "skillCodes", false, 5)) {
             if (!(raw instanceof String value) || value.isBlank() || value.length() > 64) {
                 throw BusinessException.validation("skillCodes", "技能编码非法");
             }
             String code = value.trim();
-            profiles.requireSkill(code);
+            profiles.requireSkill(userId, code);
             if (!result.contains(code)) {
                 result.add(code);
             }
@@ -316,7 +316,7 @@ public class ProjectService {
             }
         }
         if (result.isEmpty()) {
-            profiles.agentSkillCatalog().stream().limit(20).forEach(item -> result.add(String.valueOf(item.get("code"))));
+            profiles.agentSkillCatalog(userId).stream().limit(20).forEach(item -> result.add(String.valueOf(item.get("code"))));
         }
         if (result.isEmpty()) {
             throw BusinessException.conflict("技能目录为空，无法生成项目推荐", "INVALID_STATE");

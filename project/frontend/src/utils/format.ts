@@ -27,6 +27,25 @@ export const taskTypeLabels: Record<string, string> = {
   GROWTH_ANALYZE: '成长建议生成',
 }
 
+export const taskStageLabels: Record<string, string> = {
+  QUEUED: '排队等待执行',
+  AI_RUNNING: 'AI 处理中',
+  DONE: '已完成',
+  FINISHED: '已结束',
+  input_ready: '输入就绪',
+  calling_model: '正在调用模型',
+  repairing_output: '正在修正模型输出',
+  validating_result: '正在校验结果',
+  using_local_project_rules: '正在生成本地规则方案',
+  search_planning: '正在规划搜索',
+  searching_sources: '正在检索岗位来源',
+  search_candidates_available: '已获得候选岗位',
+  search_adjusting: '正在补充搜索',
+  search_normalizing: '正在归一化岗位数据',
+  understanding_jd: '正在理解 JD',
+  finalizing_result: '正在汇总结果',
+}
+
 export const commonStatusLabels: Record<string, string> = {
   UPLOADED: '待解析',
   PARSING: '解析中',
@@ -102,6 +121,21 @@ export const searchSourceStatusLabels: Record<string, string> = {
   SKIPPED: '未选择',
 }
 
+/** 搜索前来源配置检查状态标签：均为静态配置检查结论，不代表已实际联网验证连接 */
+export const sourceHealthLabels: Record<string, string> = {
+  UNCONFIGURED: '未配置',
+  READY_TO_TRY: '已配置（检索时验证）',
+  UNAVAILABLE: '暂未接入',
+}
+
+/** 任务业务结果标签（S03/A05）：任务列表区分"执行完成"与"业务结果不可用/部分失败" */
+export const taskOutcomeLabels: Record<string, string> = {
+  OK: '正常完成',
+  PARTIAL: '部分来源失败，已保留可用结果',
+  EMPTY: '搜索完成，本次无匹配结果',
+  NO_RESULTS_SOURCE_FAILED: '来源失败，无可用结果',
+}
+
 export const searchWarningLabels: Record<string, string> = {
   MISSING_SALARY: '薪资未提供',
   MISSING_EDUCATION: '学历要求未提供',
@@ -169,11 +203,13 @@ export function displayScore(score?: number | null) {
 }
 
 export function emptyFacts(): ResumeFacts {
-  return { education: null, graduationYear: null, experienceMonths: null, major: null, skills: [], warnings: [] }
+  return { education: null, graduationYear: null, experienceMonths: null, major: null, skills: [], internships: [], awards: [], warnings: [] }
 }
 
 export function cloneFacts(facts?: ResumeFacts | null): ResumeFacts {
-  return facts ? JSON.parse(JSON.stringify(facts)) as ResumeFacts : emptyFacts()
+  if (!facts) return emptyFacts()
+  const copied = JSON.parse(JSON.stringify(facts)) as ResumeFacts
+  return { ...emptyFacts(), ...copied, internships: copied.internships || [], awards: copied.awards || [] }
 }
 
 export function errorMessage(reason: unknown) {

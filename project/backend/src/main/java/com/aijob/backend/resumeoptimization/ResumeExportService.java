@@ -67,7 +67,12 @@ public class ResumeExportService {
             document.save(output);
             return output.toByteArray();
         } catch (IOException ex) {
-            throw BusinessException.dependencyUnavailable("PDF 导出失败");
+            // E02：错误说明必须可操作——指明根因（缺中文字体）、给出配置恢复方法，并提示 DOCX 替代路径
+            throw BusinessException.dependencyUnavailable(
+                    "PDF 导出失败：服务器缺少可用的中文字体文件（已尝试配置路径与系统字体目录）。"
+                            + "恢复方法：在服务端配置 app.files.pdf-font-path 指向中文字体文件"
+                            + "（如微软雅黑 msyh.ttc 或思源黑体），或安装系统字体后重试；"
+                            + "恢复后无需重新采纳优化稿即可导出。当前可改用 DOCX 导出，内容一致且不依赖服务器字体。");
         }
     }
 

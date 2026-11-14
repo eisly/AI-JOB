@@ -17,6 +17,7 @@ import {
   type ApplicationSummary,
   type ApplicationVO,
 } from '@/types/application'
+import { formatDate as formatLocalDateTime } from '@/utils/format'
 import ApplicationForm from './ApplicationForm.vue'
 import ApplicationDetail from './ApplicationDetail.vue'
 import ApplicationDeleteConfirm from './ApplicationDeleteConfirm.vue'
@@ -121,6 +122,12 @@ function refreshAll(): void {
 function handleFilterChange(): void {
   page.current = 1
   loadList()
+}
+
+/** 空态清除筛选：回到全部记录 */
+function clearStatusFilter(): void {
+  statusFilter.value = ''
+  handleFilterChange()
 }
 
 function handlePageChange(current: number): void {
@@ -274,8 +281,9 @@ function formatDate(value: string | null): string {
   return value ?? '—'
 }
 
+/** 时间戳按用户本地时区（Asia/Shanghai）展示，不再暴露 UTC 原文 */
 function formatDateTime(value: string): string {
-  return value.replace('T', ' ').replace('Z', ' UTC')
+  return formatLocalDateTime(value)
 }
 </script>
 
@@ -356,7 +364,13 @@ function formatDateTime(value: string): string {
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无投递记录，点击右上角新增" />
+          <el-empty
+            :description="statusFilter
+              ? `当前筛选（${APPLICATION_STATUS_LABELS[statusFilter]}）没有投递记录，可清除筛选查看全部记录`
+              : '暂无投递记录，点击右上角新增'"
+          >
+            <el-button v-if="statusFilter" type="primary" plain @click="clearStatusFilter">清除筛选</el-button>
+          </el-empty>
         </template>
       </el-table>
 

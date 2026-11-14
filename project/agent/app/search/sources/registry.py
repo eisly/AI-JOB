@@ -9,6 +9,7 @@ from .lever import LeverSource
 from .tencent import TencentCareerSource
 from .unavailable import BossZhipinSource, LiepinSource, ZhaopinSource
 from .web import WebSearchSource
+from ..providers import resolve_providers
 
 from .company_official import CompanyOfficialSource
 
@@ -66,3 +67,18 @@ def source_catalog() -> list[dict[str, Any]]:
         }
         for adapter in ALL_SOURCES.values()
     ]
+
+
+def configured_source_health(settings: Any) -> list[dict[str, str]]:
+    provider_ready = bool(resolve_providers(settings))
+    result: list[dict[str, str]] = []
+    for key in configured_source_keys(settings):
+        adapter = ALL_SOURCES[key]
+        if not adapter.available:
+            status, message = "UNAVAILABLE", "暂未接入"
+        elif key in {"web", "company_official"} and not provider_ready:
+            status, message = "UNCONFIGURED", "搜索服务未配置"
+        else:
+            status, message = "READY_TO_TRY", "将在检索时验证连接"
+        result.append({"key": key, "name": adapter.name, "status": status, "message": message})
+    return result

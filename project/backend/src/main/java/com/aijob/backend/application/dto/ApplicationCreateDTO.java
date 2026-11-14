@@ -53,6 +53,13 @@ public class ApplicationCreateDTO {
     /** 备注，≤2000 字符 */
     private String note;
 
+    /**
+     * 同一岗位重复添加确认标记。
+     * 同一用户对同一岗位已存在投递记录时，首次提交返回 409（DUPLICATE_APPLICATION）；
+     * 用户明确确认再次添加后传 true 创建独立的新记录。
+     */
+    private Boolean confirmDuplicate;
+
     public String getJobId() {
         return jobId;
     }
@@ -155,5 +162,13 @@ public class ApplicationCreateDTO {
 
     public void setNote(String note) {
         this.note = note;
+    }
+
+    public Boolean getConfirmDuplicate() {
+        return confirmDuplicate;
+    }
+
+    public void setConfirmDuplicate(Boolean confirmDuplicate) {
+        this.confirmDuplicate = confirmDuplicate;
     }
 }

@@ -61,6 +61,12 @@ public class JobController {
         return jobs.importJob(users.resolveCurrentUserId(), request.getRequestURI(), Data.idempotencyKey(key), body);
     }
 
+    @PutMapping("/jobs/{jobId}/extracted-fields")
+    public CommonResult<Map<String, Object>> correctFields(@PathVariable String jobId,
+                                                            @RequestBody Map<String, Object> body) {
+        return Responses.ok(jobs.correctPrivateJob(users.resolveCurrentUserId(), Data.uuid(jobId, "jobId"), body));
+    }
+
     @PutMapping("/favorites/{jobId}")
     public CommonResult<Boolean> favorite(@PathVariable String jobId,
                                            @RequestBody(required = false) Map<String, Object> body) {

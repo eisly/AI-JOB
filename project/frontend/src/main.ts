@@ -20,8 +20,10 @@ app.use(router)
 app.use(ElementPlus)
 
 setUnauthorizedHandler(() => {
-  if (router.currentRoute.value.path !== '/login') {
-    router.push('/login')
+  const current = router.currentRoute.value
+  if (current.path !== '/login') {
+    // L02：会话中途失效跳转登录时保留原地址并标记过期，登录页显示"登录已过期"提示
+    router.push({ name: 'login', query: { redirect: current.fullPath, expired: '1' } })
   }
 })
 

@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -83,19 +84,27 @@ public class ProfileService {
     }
 
     public List<Map<String, Object>> skillCatalog() {
-        return mapper.skills().stream().map(view::map).toList();
+        return skillCatalog(null);
     }
 
-    public List<Map<String, Object>> skillCatalog(String query) {
+    public List<Map<String, Object>> skillCatalog(String userId) {
+        return mapper.skills(userId).stream().map(view::map).toList();
+    }
+
+    public List<Map<String, Object>> skillCatalog(String userId, String query) {
         String q = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
         if (q.length() > 50) throw BusinessException.validation("q", "q 长度不能超过 50");
-        return skillCatalog().stream().filter(item -> q.isEmpty()
+        return skillCatalog(userId).stream().filter(item -> q.isEmpty()
                 || String.valueOf(item.get("name")).toLowerCase(java.util.Locale.ROOT).contains(q)
                 || String.valueOf(item.get("code")).toLowerCase(java.util.Locale.ROOT).contains(q)).toList();
     }
 
     public List<Map<String, Object>> agentSkillCatalog() {
-        return mapper.skills().stream().map(row -> {
+        return agentSkillCatalog(null);
+    }
+
+    public List<Map<String, Object>> agentSkillCatalog(String userId) {
+        return mapper.skills(userId).stream().map(row -> {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("code", row.get("code"));
             item.put("name", row.get("name"));
@@ -104,9 +113,26 @@ public class ProfileService {
     }
 
     public void requireSkill(String code) {
-        if (mapper.skillEnabled(code) == 0) {
+        requireSkill(null, code);
+    }
+
+    public void requireSkill(String userId, String code) {
+        if (mapper.skillEnabled(userId, code) == 0) {
             throw BusinessException.validation("skillCode", "技能目录中不存在: " + code);
         }
+    }
+
+    @Transactional
+    public Map<String, Object> createCustomSkill(String userId, Map<String, Object> body) {
+        String name = Data.text(body, "name", true, 100);
+        if (name.chars().anyMatch(Character::isISOControl)) {
+            throw BusinessException.validation("name", "技能名称不能包含控制字符");
+        }
+        Map<String, Object> existing = mapper.skillByName(userId, name);
+        if (existing != null) return view.map(existing);
+        String code = "CUSTOM_" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
+        mapper.insertCustomSkill(userId, code, name);
+        return view.map(mapper.skillByName(userId, name));
     }
 
     public void confirmFacts(String userId, String versionId, Map<String, Object> facts, long expectedVersion) {

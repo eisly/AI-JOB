@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TaskStatus, TaskVO } from '@/api/types'
-import { taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import { taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
 import ModelReasoning from '@/components/ModelReasoning.vue'
 
 const props = defineProps<{ task: TaskVO | null; compact?: boolean; reasoning?: string }>()
@@ -34,7 +34,7 @@ const tagType = computed(() => {
       <strong>{{ taskTypeLabels[task.type] || task.type }}</strong>
       <el-tag :type="tagType" size="small">{{ taskStatusLabels[task.status] || task.status }}</el-tag>
     </div>
-    <div class="task-status__stage">{{ task.stage === 'using_local_project_rules' ? '正在生成本地规则方案' : task.stage || '等待状态更新' }}</div>
+    <div class="task-status__stage">{{ (task.stage && taskStageLabels[task.stage]) || task.stage || '等待状态更新' }}</div>
     <el-progress v-if="task.progress !== null" :percentage="Math.max(0, Math.min(100, task.progress))" :status="task.status === 'FAILED' ? 'exception' : task.status === 'SUCCEEDED' ? 'success' : undefined" />
     <div v-else-if="!compact" class="task-status__unknown">进度暂无法估算</div>
     <el-alert v-if="task.error" :title="task.error.message" :description="errorDescription" type="error" :closable="false" show-icon />

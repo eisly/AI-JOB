@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ApiError } from '@/api/request'
 import { createApplication, getApplicationDetail, updateApplication } from '@/api/application'
+import { cityLabels } from '@/utils/format'
 import {
   APPLICATION_STATUSES,
   APPLICATION_STATUS_LABELS,
@@ -47,6 +48,13 @@ const localBaseline = ref<ApplicationVO | null>(null)
 /** 409 冲突确认框 */
 const conflictVisible = ref(false)
 const reloading = ref(false)
+/** 同一岗位重复添加确认框（DUPLICATE_APPLICATION） */
+const duplicateVisible = ref(false)
+const duplicateExistingCount = ref(0)
+let pendingCreatePayload: ApplicationCreatePayload | null = null
+
+/** 城市候选：优先展示已有编码映射，允许输入未收录编码 */
+const cityOptions = computed(() => Object.entries(cityLabels).map(([code, name]) => ({ code, name })))
 
 const form = reactive<ApplicationFormFieldValues>({
   companyName: '',
@@ -99,10 +107,14 @@ function fromVO(vo: ApplicationVO): ApplicationFormFieldValues {
   }
 }
 
+/** P02：表单填充期间抑制"日期已清除"提示，避免打开编辑弹窗时误报 */
+let suppressDateClearNotice = false
+
 watch(
   () => [props.visible, props.baseline, props.plan] as const,
   ([visible]) => {
     if (visible) {
+      suppressDateClearNotice = true
       conflictVisible.value = false
       localBaseline.value = props.baseline ? { ...props.baseline } : null
       if (props.mode === 'edit' && props.baseline) {
@@ -124,9 +136,25 @@ watch(
         })
       }
       formRef.value?.clearValidate()
+      void nextTick(() => {
+        suppressDateClearNotice = false
+      })
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => form.status,
+  (status) => {
+    // 状态-日期一致性：待投递状态不允许携带实际投递日期，切换时联动清空并明确告知（P02）
+    if (status === 'PLANNED' && form.appliedDate !== '') {
+      form.appliedDate = ''
+      if (!suppressDateClearNotice) {
+        ElMessage.info('状态改为待投递时，已自动清除原实际投递日期；如需保留日期请改选已投递')
+      }
+    }
+  },
 )
 
 function buildCreatePayload() {
@@ -170,7 +198,8 @@ async function handleSubmit() {
       emit('success', saved)
       dialogVisible.value = false
     } else {
-      const saved = await createApplication(buildCreatePayload())
+      const payload = buildCreatePayload()
+      const saved = await createApplication(payload)
       ElMessage.success('新增成功')
       emit('success', saved)
       dialogVisible.value = false
@@ -182,11 +211,42 @@ async function handleSubmit() {
   }
 }
 
+/** 用户确认重复添加：携带 confirmDuplicate=true 重新提交，形成独立记录 */
+async function handleConfirmDuplicate() {
+  if (!pendingCreatePayload) return
+  duplicateVisible.value = false
+  submitting.value = true
+  try {
+    const saved = await createApplication({ ...pendingCreatePayload, confirmDuplicate: true })
+    ElMessage.success('已再次添加，形成独立投递记录')
+    emit('success', saved)
+    dialogVisible.value = false
+  } catch (e) {
+    handleRequestError(e)
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** 用户取消重复添加：关闭确认框，保留表单输入 */
+function handleCancelDuplicate() {
+  duplicateVisible.value = false
+  pendingCreatePayload = null
+}
+
 function handleRequestError(e: unknown) {
   if (e instanceof ApiError) {
     if (e.isVersionConflict) {
       // 保留用户输入，交由确认框决定是否重新加载
       conflictVisible.value = true
+      return
+    }
+    if (e.status === 409 && e.key === 'DUPLICATE_APPLICATION') {
+      // 同一岗位已有投递记录：保留输入，交由确认框决定是否再次添加
+      pendingCreatePayload = buildCreatePayload()
+      const details = e.details as { existingCount?: number } | undefined
+      duplicateExistingCount.value = details?.existingCount ?? 1
+      duplicateVisible.value = true
       return
     }
     ElMessage.error(e.message)
@@ -241,8 +301,22 @@ function handleClosed() {
       <el-form-item label="岗位名称" prop="jobTitle">
         <el-input v-model="form.jobTitle" maxlength="100" show-word-limit placeholder="如：Java 后端开发工程师" />
       </el-form-item>
-      <el-form-item label="城市编码" prop="cityCode">
-        <el-input v-model="form.cityCode" maxlength="12" placeholder="如：330100（可选）" />
+      <el-form-item label="城市" prop="cityCode">
+        <el-select
+          v-model="form.cityCode"
+          filterable
+          allow-create
+          clearable
+          placeholder="搜索或输入城市（可选）"
+          style="width: 260px"
+        >
+          <el-option
+            v-for="city in cityOptions"
+            :key="city.code"
+            :label="city.name"
+            :value="city.code"
+          />
+        </el-select>
       </el-form-item>
       <el-form-item label="学历" prop="education">
         <el-input v-model="form.education" maxlength="50" placeholder="如：本科（可选）" />
@@ -274,7 +348,14 @@ function handleClosed() {
         <el-date-picker v-model="form.plannedDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期（可选）" style="width: 200px" />
       </el-form-item>
       <el-form-item label="实际投递" prop="appliedDate">
-        <el-date-picker v-model="form.appliedDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期（可选）" style="width: 200px" />
+        <el-date-picker
+          v-model="form.appliedDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          :disabled="form.status === 'PLANNED'"
+          placeholder="待投递状态不可填写"
+          style="width: 200px"
+        />
       </el-form-item>
       <el-form-item label="面试日期" prop="interviewDate">
         <el-date-picker v-model="form.interviewDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期（可选）" style="width: 200px" />
@@ -316,6 +397,26 @@ function handleClosed() {
         <el-button :disabled="reloading" @click="handleCancelReload">保留我的输入</el-button>
         <el-button type="primary" :loading="reloading" @click="handleReloadLatest">
           {{ reloading ? '加载中…' : '重新加载最新数据' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 同一岗位重复添加确认框：确认后创建独立的新投递记录 -->
+    <el-dialog
+      v-model="duplicateVisible"
+      title="该岗位已有投递记录"
+      width="440px"
+      append-to-body
+      :close-on-click-modal="false"
+    >
+      <p style="line-height: 1.7; margin: 0">
+        该岗位已有 {{ duplicateExistingCount }} 条投递记录，可在投递列表中查看进度。<br />
+        如需再次投递（如不同批次），选择「仍然添加」将创建<strong>独立的新记录</strong>；取消则保留当前输入不做保存。
+      </p>
+      <template #footer>
+        <el-button @click="handleCancelDuplicate">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleConfirmDuplicate">
+          {{ submitting ? '提交中…' : '仍然添加' }}
         </el-button>
       </template>
     </el-dialog>

@@ -261,6 +261,13 @@ def create_app(
             "storage": settings.storage_backend,
         }
 
+    @app.get("/internal/ai/v1/jobs/source-health")
+    async def job_source_health(request: Request, principal: Principal = Depends(principal_dependency)) -> JSONResponse:
+        from .search.sources.registry import configured_source_health
+
+        return _result({"checkedAt": utcnow().isoformat(),
+                        "sources": configured_source_health(settings)}, trace_id=_trace_id(request))
+
     @app.post("/internal/ai/v1/resumes/parse", status_code=202)
     async def resume_parse(
         request: Request,

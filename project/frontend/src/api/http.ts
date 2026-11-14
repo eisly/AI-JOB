@@ -121,6 +121,11 @@ export function errorMessage(error: unknown): string {
     if (payload) {
       return payload
     }
+    // 超时与"后端未启动"必须区分：超时时服务端可能仍在处理（如同步发邮件），
+    // 误报为服务未启动会诱导用户立即重复操作
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return '请求超时，服务可能仍在处理中，请稍候查看结果，请勿立即重复操作'
+    }
     if (!error.response) {
       return '无法连接后端服务，请确认后端已启动'
     }

@@ -24,6 +24,13 @@ public interface GrowthMapper {
             """)
     Map<String,Object> latestReady(@Param("userId") String userId, @Param("profileVersion") long profileVersion);
 
+    /** 不限版本取最新 READY 建议：画像版本变化后旧建议仍可查看，由服务层标注过期（G03） */
+    @Select("""
+            SELECT * FROM growth_advice WHERE user_id=#{userId} AND status='READY'
+              ORDER BY created_at DESC,id DESC LIMIT 1
+            """)
+    Map<String,Object> latestReadyAnyVersion(@Param("userId") String userId);
+
     @Select("SELECT * FROM growth_advice WHERE id=#{id} AND user_id=#{userId} FOR UPDATE")
     Map<String,Object> lockAdvice(@Param("id") String id, @Param("userId") String userId);
 

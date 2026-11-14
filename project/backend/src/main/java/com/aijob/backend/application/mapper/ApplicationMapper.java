@@ -55,6 +55,21 @@ public interface ApplicationMapper {
             """)
     Application selectByIdAndUserIdForUpdate(@Param("id") String id, @Param("userId") String userId);
 
+    /** 统计同一用户对同一岗位的既有投递记录数（含全部状态），用于重复添加提示。 */
+    @Select("""
+            SELECT COUNT(*) FROM application_record
+            WHERE user_id = #{userId} AND job_id = #{jobId}
+            """)
+    int countByUserIdAndJobId(@Param("userId") String userId, @Param("jobId") String jobId);
+
+    /**
+     * 锁定用户行（MySQL InnoDB FOR UPDATE）：用于新增投递的事务串行化。
+     * 同一用户的并发创建在"锁用户行 → 重复检查 → 插入"事务内串行执行，
+     * 后到的请求能读到先到请求已插入的记录并返回 409，防止并发静默制造重复（P01）。
+     */
+    @Select("SELECT id FROM app_user WHERE id = #{userId} FOR UPDATE")
+    String lockUser(@Param("userId") String userId);
+
     @Select("""
             <script>
             SELECT id, user_id, job_id, company_name, job_title, city_code, education,

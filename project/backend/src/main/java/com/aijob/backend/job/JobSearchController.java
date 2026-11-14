@@ -18,6 +18,7 @@ import com.aijob.backend.common.CurrentUserResolver;
 import com.aijob.backend.common.Data;
 import com.aijob.backend.common.PageResult;
 import com.aijob.backend.common.Responses;
+import com.aijob.backend.task.AgentClient;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -27,10 +28,18 @@ public class JobSearchController {
 
     private final CurrentUserResolver users;
     private final JobSearchService searches;
+    private final AgentClient agent;
 
-    public JobSearchController(CurrentUserResolver users, JobSearchService searches) {
+    public JobSearchController(CurrentUserResolver users, JobSearchService searches, AgentClient agent) {
         this.users = users;
         this.searches = searches;
+        this.agent = agent;
+    }
+
+    @GetMapping("/source-health")
+    public CommonResult<Map<String, Object>> sourceHealth() {
+        users.resolveCurrentUserId();
+        return Responses.ok(agent.sourceHealth());
     }
 
     @PostMapping

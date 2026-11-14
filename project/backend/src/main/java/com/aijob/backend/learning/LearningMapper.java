@@ -124,6 +124,13 @@ public interface LearningMapper {
     @Select("SELECT question_id FROM learning_session WHERE user_id=#{userId} AND question_id IS NOT NULL")
     List<String> usedQuestionIds(@Param("userId") String userId);
 
+    /** 已用题的题干列表：选题与生成新题时按归一化题干排除等价重复 */
+    @Select("""
+            SELECT q.stem FROM learning_session s JOIN question q ON q.id=s.question_id
+            WHERE s.user_id=#{userId} AND s.question_id IS NOT NULL
+            """)
+    List<String> usedQuestionStems(@Param("userId") String userId);
+
     @Update("UPDATE learning_session SET status=#{status},version=version+1,updated_at=UTC_TIMESTAMP(3) WHERE id=#{id}")
     int updateSessionStatus(@Param("id") String id, @Param("status") String status);
 
@@ -140,20 +147,25 @@ public interface LearningMapper {
     @Select("SELECT * FROM question WHERE id=#{id} AND status='ACTIVE'")
     Map<String,Object> question(@Param("id") String id);
 
-    @Select("SELECT * FROM question WHERE status='ACTIVE' ORDER BY created_at ASC,id ASC LIMIT 50")
+    /** 候选题仅取真实环境的 ACTIVE 题：排除 FAKE（fake 模型生成）与 LEGACY（V12 前历史生成题，来源不可追溯），
+     * 真实用户不得收到未批准的模拟题或来源不明的历史生成题（T01）。 */
+    @Select("""
+            SELECT * FROM question WHERE status='ACTIVE' AND generation_env NOT IN ('FAKE','LEGACY')
+            ORDER BY created_at ASC,id ASC LIMIT 50
+            """)
     List<Map<String,Object>> questionCandidates();
 
     @Insert("""
             INSERT INTO question (id,root_question_id,question_version,stem,type,skill_codes_json,difficulty,source_type,
-              reference_answer,rubric_json,citations_json,generated_task_id,created_by)
+              reference_answer,rubric_json,citations_json,generated_task_id,created_by,generation_env)
             VALUES (#{id},#{id},1,#{stem},#{type},#{skillCodesJson},#{difficulty},'GENERATED',#{referenceAnswer},
-              #{rubricJson},#{citationsJson},#{taskId},#{userId})
+              #{rubricJson},#{citationsJson},#{taskId},#{userId},#{generationEnv})
             """)
     int insertGeneratedQuestion(@Param("id") String id, @Param("stem") String stem, @Param("type") String type,
                                 @Param("skillCodesJson") String skillCodesJson, @Param("difficulty") String difficulty,
                                 @Param("referenceAnswer") String referenceAnswer, @Param("rubricJson") String rubricJson,
                                 @Param("citationsJson") String citationsJson, @Param("taskId") String taskId,
-                                @Param("userId") String userId);
+                                @Param("userId") String userId, @Param("generationEnv") String generationEnv);
 
     @Insert("""
             INSERT INTO learning_answer (id,session_id,user_id,content,content_hash,task_id)
@@ -182,13 +194,14 @@ public interface LearningMapper {
     int evaluated(@Param("id") String id, @Param("evaluationJson") String evaluationJson);
 
     @Insert("""
-            INSERT INTO user_mistake (id,user_id,question_id,last_answer_id,wrong_count,resolved)
-            VALUES (#{id},#{userId},#{questionId},#{answerId},1,0)
+            INSERT INTO user_mistake (id,user_id,question_id,last_answer_id,wrong_count,resolved,cause)
+            VALUES (#{id},#{userId},#{questionId},#{answerId},1,0,#{cause})
             ON DUPLICATE KEY UPDATE last_answer_id=VALUES(last_answer_id),wrong_count=wrong_count+1,
-              resolved=0,updated_at=UTC_TIMESTAMP(3)
+              resolved=0,cause=VALUES(cause),updated_at=UTC_TIMESTAMP(3)
             """)
     int wrong(@Param("id") String id, @Param("userId") String userId,
-              @Param("questionId") String questionId, @Param("answerId") String answerId);
+              @Param("questionId") String questionId, @Param("answerId") String answerId,
+              @Param("cause") String cause);
 
     @Update("UPDATE user_mistake SET resolved=1,last_answer_id=#{answerId},updated_at=UTC_TIMESTAMP(3) WHERE user_id=#{userId} AND question_id=#{questionId}")
     int resolve(@Param("userId") String userId, @Param("questionId") String questionId, @Param("answerId") String answerId);

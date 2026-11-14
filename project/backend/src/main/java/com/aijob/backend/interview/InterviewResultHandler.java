@@ -135,7 +135,7 @@ public class InterviewResultHandler implements TaskResultHandler {
         }
         String content = requiredText(question, "content", 3000);
         List<String> skills = ((List<Object>) question.getOrDefault("skillCodes", List.of())).stream().map(String::valueOf).toList();
-        for (String skill : skills) profiles.requireSkill(skill);
+        for (String skill : skills) profiles.requireSkill(task.getUserId(), skill);
         int questionNo = ((Number) question.get("questionNo")).intValue();
         int followUpNo = ((Number) question.get("followUpNo")).intValue();
         int seq = mapper.nextSeq(task.getResourceId());

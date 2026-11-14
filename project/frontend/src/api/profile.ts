@@ -14,6 +14,9 @@ export const profileApi = {
   skills(q?: string) {
     return request<SkillVO[]>('/api/v1/skills', { query: { q } })
   },
+  createCustomSkill(name: string) {
+    return request<SkillVO>('/api/v1/skills/custom', { method: 'POST', body: { name } })
+  },
 }
 
 export const getProfile = profileApi.get

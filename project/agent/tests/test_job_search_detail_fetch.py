@@ -44,11 +44,11 @@ async def test_short_tavily_summary_fetches_detail_page_and_fills_fields(monkeyp
     monkeypatch.setattr("app.search.sources.detail.resolve_public_ipv4", resolve)
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "POST" and request.url.host == "api.tavily.com":
+        if request.method == "POST" and request.url.host == "api.deepseek.com":
             return httpx.Response(200, json={"results": [{
                 "url": URL,
                 "title": "AI应用开发实习生（可留用）",
-                "raw_content": "AI应用开发实习生（可留用） 华创证券 实习 杭州",
+                "content": "AI应用开发实习生（可留用） 华创证券 实习 杭州",
             }]})
         return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=HTML)
 
@@ -56,7 +56,7 @@ async def test_short_tavily_summary_fetches_detail_page_and_fills_fields(monkeyp
         context = SourceContext(
             filters=SearchFilters(cities=("330100",), candidate_types=("INTERNSHIP",)),
             keyword="AI 应用开发实习", limit=10, client=client,
-            settings=SimpleNamespace(tavily_api_key="test", job_search_detail_verification=True),
+            settings=SimpleNamespace(deepseek_api_key="test", job_search_detail_verification=True),
             extra={
                 "llm": ExtractionLLM(),
                 "budget": SearchBudget(BudgetConfig(

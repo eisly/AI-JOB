@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
@@ -32,6 +32,15 @@ const rules: FormRules = {
   email: [{ required: true, type: 'email', message: '请输入有效邮箱地址', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
+
+/** L02：会话失效/需要登录的中性提示——expired=1 表示会话中途失效；仅带 redirect 时提示先登录再继续 */
+const sessionNotice = computed(() => {
+  if (route.query.expired === '1') return '登录已过期，请重新登录后继续'
+  if (typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')) {
+    return '请先登录，登录后将返回原页面'
+  }
+  return ''
+})
 
 const registerRules: FormRules = {
   email: [{ required: true, type: 'email', message: '请输入有效邮箱地址', trigger: 'blur' }],
@@ -88,6 +97,7 @@ async function handleRegister() {
       <div class="login__card">
         <h2 class="login__title">登录</h2>
         <p class="login__subtitle">访问令牌仅保存在当前页面内存中。</p>
+        <el-alert v-if="sessionNotice" :title="sessionNotice" type="warning" show-icon :closable="true" class="login__error" />
         <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" class="login__error" />
         <el-form ref="formRef" :model="form" :rules="rules" size="large" class="login__form" @submit.prevent="handleLogin">
           <el-form-item prop="email"><el-input v-model="form.email" placeholder="请输入邮箱地址" :prefix-icon="Message" autocomplete="email" /></el-form-item>
@@ -99,7 +109,7 @@ async function handleRegister() {
         <el-button class="login__register" plain @click="registerVisible = true">注册账号</el-button>
       </div>
     </div>
-    <el-dialog v-model="registerVisible" title="注册账号" width="420px" :close-on-click-modal="false">
+    <el-dialog v-model="registerVisible" title="注册账号" width="min(420px, calc(100vw - 32px))" :close-on-click-modal="false">
       <el-alert v-if="registerError" :title="registerError" type="error" show-icon :closable="false" class="login__error" />
       <el-form ref="registerRef" :model="registerForm" :rules="registerRules" label-position="top" @submit.prevent="handleRegister">
         <el-form-item label="昵称" prop="nickname"><el-input v-model="registerForm.nickname" maxlength="30" /></el-form-item>

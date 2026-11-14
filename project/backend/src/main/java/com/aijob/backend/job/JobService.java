@@ -4,8 +4,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,14 @@ public class JobService {
 
     private static final Pattern INTERNSHIP_WORD = Pattern.compile("\\bintern(ship)?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern GRADUATION_YEAR = Pattern.compile("\\d{4}\\s*届");
+    private static final Map<String, String> CITY_CODES = Map.of(
+            "北京", "110100", "上海", "310100", "杭州", "330100", "广州", "440100",
+            "深圳", "440300", "南京", "320100", "成都", "510100", "武汉", "420100");
+    private static final String CITY_NAMES = "北京|上海|杭州|广州|深圳|南京|成都|武汉";
+    private static final Pattern JD_CITY = Pattern.compile(
+            "(?:工作地点|工作城市|办公地点|职位地点|工作地址)\\s*[:：]\\s*((?:" + CITY_NAMES
+                    + ")(?:市)?(?:\\s*[、,，/及和]\\s*(?:" + CITY_NAMES + ")(?:市)?)*)");
+    private static final Pattern CITY_NAME = Pattern.compile(CITY_NAMES);
 
     private final JobMapper mapper;
     private final ResumeMapper resumes;
@@ -75,6 +85,60 @@ public class JobService {
         return jobVo(row, userId);
     }
 
+    @Transactional
+    public Map<String, Object> correctPrivateJob(String userId, String jobId, Map<String, Object> body) {
+        Map<String, Object> row = mapper.lockJob(jobId, userId);
+        if (row == null) throw BusinessException.notFound();
+        if (!"PRIVATE".equals(row.get("visibility")) || !userId.equals(row.get("owner_user_id"))
+                || !Set.of("ACTIVE", "FAILED").contains(String.valueOf(row.get("status")))) {
+            throw BusinessException.conflict("只能核对自己已完成或分析失败的个人 JD", "INVALID_STATE");
+        }
+        Integer expected = Data.integer(body, "expectedJobVersion", null, 1, Integer.MAX_VALUE);
+        int current = ((Number) row.get("job_version")).intValue();
+        if (expected == null || expected != current) throw BusinessException.versionConflict(current);
+        String reason = Data.text(body, "reason", true, 500);
+        String quote = Data.text(body, "sourceQuote", true, 1000);
+        String jdText = String.valueOf(row.get("jd_text"));
+        if (!jdText.contains(quote)) throw BusinessException.validation("sourceQuote", "依据必须是 JD 原文片段");
+        if (!body.containsKey("cityCode")) throw BusinessException.validation("cityCode", "请核对工作城市");
+        String cityCode = body.get("cityCode") == null ? null : Data.text(body, "cityCode", false, 12);
+        if (cityCode != null && !cityCode.matches("\\d{6}")) {
+            throw BusinessException.validation("cityCode", "城市编码非法");
+        }
+        if (!body.containsKey("skillCodes")) throw BusinessException.validation("skillCodes", "请核对技能要求");
+        List<Object> rawSkills = Data.list(body, "skillCodes", false, 50);
+        List<String> skills = new ArrayList<>();
+        for (Object raw : rawSkills) {
+            if (!(raw instanceof String code)) throw BusinessException.validation("skillCodes", "技能编码非法");
+            profiles.requireSkill(userId, code);
+            if (!skills.contains(code)) skills.add(code);
+        }
+        Map<String, Object> requirements = row.get("requirements_json") == null
+                ? new LinkedHashMap<>() : json.map(String.valueOf(row.get("requirements_json")));
+        requirements.put("skills", skills);
+        requirements.putIfAbsent("requiredSkillLevels", new LinkedHashMap<>());
+        requirements.putIfAbsent("quotes", new LinkedHashMap<>());
+        for (String field : List.of("educationMin", "graduationYearMin", "graduationYearMax", "experienceMonthsMin")) {
+            requirements.putIfAbsent(field, null);
+        }
+        if (requirements.get("requiredSkillLevels") instanceof Map<?, ?> levels) {
+            Map<String, Object> retained = new LinkedHashMap<>();
+            for (String code : skills) if (levels.containsKey(code)) retained.put(code, levels.get(code));
+            requirements.put("requiredSkillLevels", retained);
+        }
+        if (row.get("requirements_json") != null && java.util.Objects.equals(cityCode, row.get("city_code"))
+                && json.canonical(requirements).equals(json.canonical(json.map(String.valueOf(row.get("requirements_json")))))) {
+            throw BusinessException.validation("body", "提取字段没有变化");
+        }
+        String metadata = json.stringify(Map.of("confirmedByUser", true, "reason", reason, "sourceQuote", quote));
+        if (mapper.insertCorrectedVersion(UUID.randomUUID().toString(), String.valueOf(row.get("job_version_id")),
+                cityCode, json.stringify(requirements), metadata) != 1
+                || mapper.advancePrivateVersion(jobId, userId, current) != 1) {
+            throw BusinessException.conflict("岗位版本已变化，请重新加载", "VERSION_CONFLICT");
+        }
+        return jobVo(mapper.job(jobId, userId), userId);
+    }
+
     public ResponseEntity<CommonResult<Object>> importJob(String userId, String route, String key,
                                                           Map<String, Object> body) {
         String title = Data.text(body, "title", true, 100);
@@ -90,15 +154,30 @@ public class JobService {
         String combined = title + " " + jdText;
         String roleCode = roleCode(combined);
         String type = candidateType(combined);
+        String cityCode = cityCodeFromJd(jdText);
         Map<String, Object> payload = Map.of("jobId", jobId, "jobVersion", 1, "jdText", jdText,
-                "skillCatalog", profiles.agentSkillCatalog());
+                "skillCatalog", profiles.agentSkillCatalog(userId));
         return tasks.create(userId, "POST", route, key, body, "JD_ANALYZE", "JOB", jobId,
                 Map.of("jobVersion", 1), payload, taskId -> {
                     mapper.insertPrivateSource(sourceId);
                     mapper.insertPrivateJob(jobId, sourceId, userId, sourceUrl);
-                    mapper.insertJobVersion(versionId, jobId, title, company, roleCode, type,
+                    mapper.insertJobVersion(versionId, jobId, title, company, cityCode, roleCode, type,
                             jdText, json.sha256(jdText));
                 });
+    }
+
+    static String cityCodeFromJd(String jdText) {
+        Matcher matcher = JD_CITY.matcher(jdText);
+        String city = null;
+        while (matcher.find()) {
+            Matcher names = CITY_NAME.matcher(matcher.group(1));
+            while (names.find()) {
+                String found = CITY_CODES.get(names.group());
+                if (city != null && !city.equals(found)) return null;
+                city = found;
+            }
+        }
+        return city;
     }
 
     @Transactional
@@ -240,6 +319,17 @@ public class JobService {
         result.put("verifiedAt", view.value(row.get("verified_at")));
         result.put("requirements", row.get("requirements_json") == null ? null
                 : json.convert(json.parse(String.valueOf(row.get("requirements_json"))), Object.class));
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        Matcher cityMatch = JD_CITY.matcher(String.valueOf(row.get("jd_text")));
+        if (cityMatch.find()) evidence.put("city", cityMatch.group());
+        if (row.get("analysis_meta_json") != null) {
+            Map<String, Object> meta = json.map(String.valueOf(row.get("analysis_meta_json")));
+            if (Boolean.TRUE.equals(meta.get("confirmedByUser"))) {
+                evidence.put("confirmedQuote", meta.get("sourceQuote"));
+                evidence.put("correctionReason", meta.get("reason"));
+            }
+        }
+        result.put("fieldEvidence", evidence);
         result.put("isFavorite", mapper.isFavorite(userId, String.valueOf(row.get("id"))) > 0);
         return result;
     }

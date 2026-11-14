@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,7 +39,11 @@ public class ProfileController {
 
     @GetMapping("/skills")
     public CommonResult<List<Map<String, Object>>> skills(@RequestParam(required = false) String q) {
-        users.resolveCurrentUserId();
-        return Responses.ok(profiles.skillCatalog(q));
+        return Responses.ok(profiles.skillCatalog(users.resolveCurrentUserId(), q));
+    }
+
+    @PostMapping("/skills/custom")
+    public CommonResult<Map<String, Object>> customSkill(@RequestBody Map<String, Object> body) {
+        return Responses.ok(profiles.createCustomSkill(users.resolveCurrentUserId(), body));
     }
 }

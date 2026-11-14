@@ -522,6 +522,15 @@ async function exportOptimization(format: 'PDF' | 'DOCX') {
   }
 }
 
+/** E02：PDF 失败（多为服务器缺中文字体）时明确引导 DOCX 替代，不用笼统描述误导用户 */
+const exportErrorHint = computed(() => {
+  const message = exportError.value ? errorMessage(exportError.value) : ''
+  if (message.includes('PDF')) {
+    return '可直接点击上方「导出 DOCX」获取内容一致的文件；恢复服务器字体配置后 PDF 可再次导出，无需重新采纳。'
+  }
+  return '请确认优化稿已采纳且服务端文件生成可用后重试。'
+})
+
 async function refreshHistories() {
   await Promise.all([loadDiagnoses(), loadOptimizations()])
 }
@@ -713,7 +722,7 @@ onMounted(() => {
         </div>
       </div>
       <el-alert v-if="currentOptimization?.status === 'ACCEPTED' && optimizationDirty" class="inline-alert" type="warning" title="当前编辑尚未提交，导出按钮已禁用；请先采纳保存最终文本。" :closable="false" show-icon />
-      <el-alert v-if="exportError" class="inline-alert" type="error" :title="`导出失败：${errorMessage(exportError)}`" description="请确认优化稿已采纳且服务端文件生成可用后重试。" :closable="false" show-icon />
+      <el-alert v-if="exportError" class="inline-alert" type="error" :title="`导出失败：${errorMessage(exportError)}`" :description="exportErrorHint" :closable="false" show-icon />
       <AsyncState :loading="optimizationDetailLoading" :error="optimizationDetailError" :empty="!currentOptimization" empty-text="选择历史优化稿或发起定向优化" @retry="loadOptimization(selectedOptimizationId)">
         <template v-if="currentOptimization">
           <div class="detail-summary">

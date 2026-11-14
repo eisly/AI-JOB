@@ -42,6 +42,9 @@ export interface TaskResult {
   resourceType: string
   resourceId: string
   version: number
+  /** 业务结果摘要（S03/A05）：搜索任务区分执行完成与业务结果不可用/部分失败 */
+  outcome?: string
+  resultCount?: number
 }
 
 export interface TaskError {
@@ -80,12 +83,21 @@ export interface SkillFact {
   confirmed: boolean
 }
 
+export interface ResumeEvidenceFact {
+  claim: string
+  quote: string
+  location: string
+  confirmed: boolean
+}
+
 export interface ResumeFacts {
   education: 'HIGH_SCHOOL' | 'ASSOCIATE' | 'BACHELOR' | 'MASTER' | 'DOCTOR' | null
   graduationYear: number | null
   experienceMonths: number | null
   major: string | null
   skills: SkillFact[]
+  internships: ResumeEvidenceFact[]
+  awards: ResumeEvidenceFact[]
   warnings: string[]
 }
 
@@ -98,6 +110,15 @@ export interface ResumeVersionVO {
   sizeBytes: number
   status: 'UPLOADED' | 'PARSING' | 'PARSED' | 'CONFIRMED' | 'FAILED' | 'DELETED'
   facts: ResumeFacts | null
+  parsedFacts: ResumeFacts | null
+  createdAt: string
+}
+
+export interface ResumeFactRevisionVO {
+  revisionNo: number
+  profileVersion: number | null
+  facts: ResumeFacts
+  reason: string
   createdAt: string
 }
 
@@ -139,6 +160,7 @@ export interface SkillVO {
   name: string
   parentCode: string | null
   enabled: boolean
+  normalizationStatus?: 'STANDARD' | 'PENDING'
 }
 
 export interface DiagnosisItem {
@@ -215,6 +237,7 @@ export interface JobVO {
   status: 'DRAFT' | 'ANALYZING' | 'ACTIVE' | 'CLOSED' | 'FAILED'
   verifiedAt: string | null
   requirements: RequirementVO | null
+  fieldEvidence?: { city?: string; confirmedQuote?: string; correctionReason?: string }
   isFavorite: boolean
 }
 
@@ -313,6 +336,21 @@ export interface JobSearchSourceStatusVO {
   verification: 'VERIFIED' | 'UNVERIFIED'
   requiresCredentials: boolean
   verificationCounts?: { queries?: number; discovered?: number; checked?: number; confirmedOpen?: number; closed?: number; unknown?: number }
+}
+
+/** 搜索前来源状态（配置检查，不实际联网探测）：UNCONFIGURED=服务未配置；READY_TO_TRY=已配置、检索时验证连接；UNAVAILABLE=来源暂未接入 */
+export type SourceHealthStatus = 'UNAVAILABLE' | 'UNCONFIGURED' | 'READY_TO_TRY'
+
+export interface SourceHealthItemVO {
+  key: string
+  name: string
+  status: SourceHealthStatus
+  message: string
+}
+
+export interface SourceHealthVO {
+  checkedAt: string
+  sources: SourceHealthItemVO[]
 }
 
 export interface JobSearchSummaryVO {
@@ -546,6 +584,8 @@ export interface MistakeVO {
   lastAnswerId: string
   wrongCount: number
   resolved: boolean
+  /** 待复习原因：UNKNOWN=回答"不会"；WRONG_ANSWER=回答错误 */
+  cause?: 'UNKNOWN' | 'WRONG_ANSWER' | null
 }
 
 export interface ProjectRecommendationItem {
@@ -630,6 +670,10 @@ export interface InterviewVO {
   pendingTaskId: string | null
   messages: MessageVO[]
   createdAt: string
+  /** U09/U11：岗位名（历史列表主标题）、报告完成类型与实际有效回答数 */
+  jobTitle?: string | null
+  completionType?: 'NORMAL' | 'EARLY_END' | 'NO_VALID_ANSWER' | null
+  answeredCount?: number | null
 }
 
 export interface InterviewReportVO {
@@ -669,6 +713,10 @@ export interface GrowthVO {
   recentEvidence: EvidenceVO[]
   suggestions: string[]
   suggestionTaskId: string | null
+  /** 建议依据的画像版本（G03：画像变化后旧建议仍返回并标注过期） */
+  suggestionProfileVersion?: number | null
+  suggestionStale?: boolean
+  suggestionStaleReason?: string | null
 }
 export type ApplicationStatus = 'PLANNED' | 'APPLIED' | 'INTERVIEWING' | 'CLOSED'
 

@@ -33,7 +33,18 @@ public interface InterviewMapper {
     @Select("SELECT * FROM interview_session WHERE id=#{id} AND user_id=#{userId} FOR UPDATE")
     Map<String,Object> lockSession(@Param("id") String id, @Param("userId") String userId);
 
-    @Select("SELECT * FROM interview_session WHERE user_id=#{userId} ORDER BY created_at DESC,id DESC LIMIT #{size} OFFSET #{offset}")
+    /** U09/U11：列表查询带出岗位名（按会话固定的 job_version）、报告完成类型与实际有效回答数，
+     * 历史列表据此优先展示岗位标题，并区分正常完成/提前结束/无有效回答 */
+    @Select("""
+            SELECT i.*, jv.title AS job_title, ir.completion_type,
+              (SELECT COUNT(*) FROM interview_turn_evaluation e
+                WHERE e.interview_id=i.id AND e.overall_score IS NOT NULL) AS answered_count
+            FROM interview_session i
+            LEFT JOIN job_version jv ON jv.job_id=i.job_id AND jv.version_no=i.job_version
+            LEFT JOIN interview_report ir ON ir.interview_id=i.id
+            WHERE i.user_id=#{userId}
+            ORDER BY i.created_at DESC,i.id DESC LIMIT #{size} OFFSET #{offset}
+            """)
     List<Map<String,Object>> page(@Param("userId") String userId, @Param("size") int size, @Param("offset") long offset);
 
     @Select("SELECT COUNT(*) FROM interview_session WHERE user_id=#{userId}")

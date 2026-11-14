@@ -2,7 +2,7 @@
 name: resume_parse
 description: 从简历文本提取候选事实、受控技能与原文证据。
 operation: RESUME_PARSE
-version: resume-parse-v2
+version: resume-parse-v3
 tools: build_model_input,parse_model_output,validate_result_contract
 ---
 
@@ -15,6 +15,7 @@ tools: build_model_input,parse_model_output,validate_result_contract
 - 每条 skill 的 quote 必须是 documentText 中的逐字片段，保持原文，不要改写；location 使用 page:N、paragraph:N 或 text:N。
 - confirmed 必须为 false，不要输出 true。
 - 实习不得自动计入全职 experienceMonths；如有歧义写入 warnings。
+- 将明确写出的实习和获奖/奖学金经历分别放入 internships、awards；每条都保留简历原文的逐字 quote 和位置，不能只放在 warnings 中。
 
 ## 输出结构
 
@@ -33,6 +34,12 @@ tools: build_model_input,parse_model_output,validate_result_contract
         "location": "page:1;paragraph:5",
         "confirmed": false
       }
+    ],
+    "internships": [
+      {"claim": "实习经历原文概述", "quote": "简历原文逐字片段", "location": "page:1;paragraph:6", "confirmed": false}
+    ],
+    "awards": [
+      {"claim": "获奖经历原文概述", "quote": "简历原文逐字片段", "location": "page:1;paragraph:7", "confirmed": false}
     ],
     "warnings": ["歧义或未计入项"]
   },

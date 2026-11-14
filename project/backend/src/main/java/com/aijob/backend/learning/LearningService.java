@@ -90,7 +90,7 @@ public class LearningService {
             throw BusinessException.stale("匹配输入已过期，请重新匹配");
         }
         Map<String, Object> matchItem = matchItemInput(jobService.matchItemVo(match));
-        List<String> allowedSkills = allowedSkills(matchItem);
+        List<String> allowedSkills = allowedSkills(userId, matchItem);
         Map<String, Object> payload = Map.of("planSource", "MATCH", "matchItem", matchItem,
                 "profileVersion", profileVersion, "dailyMinutes", dailyMinutes, "days", days,
                 "allowedSkillCodes", allowedSkills, "knowledgeRefs", List.of());
@@ -146,7 +146,7 @@ public class LearningService {
             }
         }
 
-        List<String> allowedSkills = resumeAllowedSkills(resume.facts(), targetDirection, matchItem);
+        List<String> allowedSkills = resumeAllowedSkills(userId, resume.facts(), targetDirection, matchItem);
         if (allowedSkills.isEmpty()) {
             throw BusinessException.validation("targetDirection", "技能目录中没有可用于目标方向的技能");
         }
@@ -228,7 +228,7 @@ public class LearningService {
         long profileVersion = ((Number) profiles.get(userId).get("profileVersion")).longValue();
         List<Map<String, Object>> candidates = candidates(String.valueOf(item.get("skill_code")), null);
         Map<String, Object> payload = questionPayload(sessionId, String.valueOf(item.get("skill_code")), candidates,
-                mapper.usedQuestionIds(userId), "SELECT_OR_GENERATE");
+                mapper.usedQuestionIds(userId), mapper.usedQuestionStems(userId), "SELECT_OR_GENERATE");
         Map<String, Object> versions = Map.of("profileVersion", profileVersion);
         return tasks.create(userId, "POST", route, key, body, "LEARNING_QUESTION", "LEARNING_SESSION", sessionId,
                 versions, payload, taskId -> {
@@ -352,7 +352,7 @@ public class LearningService {
         List<Map<String, Object>> candidates = List.of(candidate(question));
         Map<String, Object> payload = questionPayload(sessionId,
                 ((List<String>) json.convert(json.parse(String.valueOf(question.get("skill_codes_json"))), List.class)).get(0),
-                candidates, List.of(), "REUSE_ONLY");
+                candidates, List.of(), List.of(), "REUSE_ONLY");
         Map<String, Object> versions = Map.of("profileVersion", profileVersion, "questionVersion", questionVersion);
         return tasks.create(userId, "POST", route, key, body, "LEARNING_QUESTION", "LEARNING_SESSION", sessionId,
                 versions, payload, taskId -> mapper.insertSession(sessionId, userId,
@@ -484,13 +484,15 @@ public class LearningService {
         result.put("lastAnswerId", mistake.get("last_answer_id"));
         result.put("wrongCount", mistake.get("wrong_count"));
         result.put("resolved", mistake.get("resolved"));
+        result.put("cause", mistake.get("cause"));
         return result;
     }
 
     private Map<String, Object> questionPayload(String sessionId, String skillCode, List<Map<String, Object>> candidates,
-                                                 List<String> excluded, String mode) {
+                                                 List<String> excluded, List<String> excludedStems, String mode) {
         return Map.of("sessionId", sessionId, "planItem", Map.of("skillCode", skillCode, "difficulty", "MEDIUM"),
                 "candidateQuestions", candidates, "excludedQuestionIds", excluded,
+                "excludedQuestionStems", excludedStems,
                 "knowledgeRefs", List.of(), "mode", mode);
     }
 
@@ -573,10 +575,10 @@ public class LearningService {
         return input;
     }
 
-    private List<String> resumeAllowedSkills(Map<String, Object> facts, String targetDirection,
+    private List<String> resumeAllowedSkills(String userId, Map<String, Object> facts, String targetDirection,
                                              Map<String, Object> matchItem) {
         Map<String, String> catalog = new LinkedHashMap<>();
-        for (Map<String, Object> item : profiles.agentSkillCatalog()) {
+        for (Map<String, Object> item : profiles.agentSkillCatalog(userId)) {
             catalog.put(String.valueOf(item.get("code")), String.valueOf(item.get("name")));
         }
         LinkedHashSet<String> chosen = new LinkedHashSet<>();
@@ -597,7 +599,7 @@ public class LearningService {
             }
         }
         if (matchItem != null) {
-            for (String code : allowedSkills(matchItem)) {
+            for (String code : allowedSkills(userId, matchItem)) {
                 if (chosen.size() >= 20) break;
                 if (catalog.containsKey(code)) chosen.add(code);
             }
@@ -688,14 +690,14 @@ public class LearningService {
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> allowedSkills(Map<String, Object> matchItem) {
+    private List<String> allowedSkills(String userId, Map<String, Object> matchItem) {
         List<String> skills = new ArrayList<>();
         for (Map<String, Object> gap : (List<Map<String, Object>>) matchItem.getOrDefault("gaps", List.of())) {
             String code = String.valueOf(gap.get("skillCode"));
             if (!skills.contains(code)) skills.add(code);
         }
         if (skills.isEmpty()) {
-            profiles.agentSkillCatalog().stream().limit(20).forEach(item -> skills.add(String.valueOf(item.get("code"))));
+            profiles.agentSkillCatalog(userId).stream().limit(20).forEach(item -> skills.add(String.valueOf(item.get("code"))));
         }
         return skills;
     }

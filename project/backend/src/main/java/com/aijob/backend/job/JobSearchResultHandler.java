@@ -105,6 +105,34 @@ public class JobSearchResultHandler implements TaskResultHandler {
         jobs.updateBatch(original.getResourceId(), "GENERATING", newTaskId);
     }
 
+    /**
+     * S03/A05：搜索业务结果摘要。任务执行成功不等于业务有结果——
+     * 来源全部失败且无结果、部分来源失败但有结果、正常空结果、正常有结果
+     * 需要在任务列表可区分。依据落库的 summary（warnings + uniqueCount）判定 outcome。
+     */
+    @Override
+    public Map<String, Object> resultSummary(AiTask task) {
+        Map<String, Object> search = mapper.search(task.getResourceId(), task.getUserId());
+        if (search == null || search.get("summary_json") == null) {
+            return Map.of();
+        }
+        Map<String, Object> summary = json.map(String.valueOf(search.get("summary_json")));
+        List<String> warnings = strings(summary.get("warnings"), 20, 64);
+        int uniqueCount = summary.get("uniqueCount") instanceof Number number ? number.intValue() : 0;
+        boolean sourceFailed = warnings.contains("SEARCH_FAILED");
+        boolean sourcePartial = warnings.contains("SOURCE_PARTIAL");
+        String outcome;
+        if (uniqueCount > 0) {
+            outcome = (sourceFailed || sourcePartial) ? "PARTIAL" : "OK";
+        } else {
+            outcome = sourceFailed ? "NO_RESULTS_SOURCE_FAILED" : "EMPTY";
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("outcome", outcome);
+        result.put("resultCount", uniqueCount);
+        return result;
+    }
+
     @SuppressWarnings("unchecked")
     private int search(AiTask task, JsonNode result) {
         Map<String, Object> batch = jobs.lockBatch(task.getResourceId(), task.getUserId());
@@ -698,7 +726,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
             boolean web = "web".equals(candidate.sourceKey);
             mapper.upsertSource(UUID.randomUUID().toString(), candidate.sourceKey,
                     web ? "AI 全网搜索" : candidate.sourceName, candidate.sourceType,
-                    web ? "https://api.tavily.com" : baseUrl, candidate.verification);
+                    web ? "https://api.deepseek.com" : baseUrl, candidate.verification);
             sourceId = mapper.sourceId(candidate.sourceKey);
         }
         if (sourceId == null) {

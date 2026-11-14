@@ -340,12 +340,46 @@ class ApplicationIntegrationTest {
     }
 
     @Test
-    void createAllowsDuplicateJobRecords() throws Exception {
+    void createDuplicateJobRequiresExplicitConfirmation() throws Exception {
         createRecordForUserA();
-        createRecordForUserA();
+        // 未确认的重复添加返回 409，并携带已有记录信息
+        mockMvc.perform(post("/api/v1/applications").with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(Map.of(
+                                "jobId", JOB_PUBLIC_ACTIVE,
+                                "companyName", "云启智能（虚构）",
+                                "jobTitle", "Java 后端开发工程师",
+                                "status", "APPLIED"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.key").value("DUPLICATE_APPLICATION"))
+                .andExpect(jsonPath("$.error.details.existingCount").value(1));
+        // 确认后允许再次添加，形成独立记录
+        mockMvc.perform(post("/api/v1/applications").with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(Map.of(
+                                "jobId", JOB_PUBLIC_ACTIVE,
+                                "companyName", "云启智能（虚构）",
+                                "jobTitle", "Java 后端开发工程师",
+                                "status", "APPLIED",
+                                "confirmDuplicate", true))))
+                .andExpect(status().isOk());
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM application_record WHERE user_id = ?", Integer.class, USER_A);
         assertEquals(2, count);
+    }
+
+    @Test
+    void createRejectsPlannedStatusWithAppliedDate() throws Exception {
+        mockMvc.perform(post("/api/v1/applications").with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(Map.of(
+                                "companyName", "公司甲",
+                                "jobTitle", "岗位乙",
+                                "status", "PLANNED",
+                                "appliedDate", "2026-10-26"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.key").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.details.fields[0].field").value("appliedDate"));
     }
 
     @Test
@@ -559,6 +593,42 @@ class ApplicationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("APPLIED"))
                 .andExpect(jsonPath("$.data.interviewDate").value("2026-10-28"));
+    }
+
+    @Test
+    void patchRejectsPlannedStatusWithRetainedAppliedDate() throws Exception {
+        // 创建已投递且带实际投递日期的记录
+        String body = mockMvc.perform(post("/api/v1/applications").with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(Map.of(
+                                "companyName", "回退校验公司",
+                                "jobTitle", "回退校验岗位",
+                                "status", "APPLIED",
+                                "appliedDate", "2026-10-26"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> created = (Map<String, Object>) objectMapper.readValue(body, Map.class).get("data");
+        String id = (String) created.get("id");
+
+        // 回退到待投递但保留实际投递日期：拒绝
+        mockMvc.perform(patch("/api/v1/applications/{id}", id).with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(Map.of("expectedVersion", 1, "status", "PLANNED"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.fields[0].field").value("appliedDate"));
+
+        // 同时清空实际投递日期：允许回退
+        Map<String, Object> clearBody = new java.util.HashMap<>();
+        clearBody.put("expectedVersion", 1);
+        clearBody.put("status", "PLANNED");
+        clearBody.put("appliedDate", null);
+        mockMvc.perform(patch("/api/v1/applications/{id}", id).with(asUser(USER_A))
+                        .contentType(APPLICATION_JSON)
+                        .content(createBody(clearBody)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PLANNED"))
+                .andExpect(jsonPath("$.data.appliedDate").doesNotExist());
     }
 
     @Test

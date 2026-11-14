@@ -34,11 +34,11 @@ def _html(*, closed: bool = False, apply: bool = True) -> str:
 
 async def _run(detail_response: httpx.Response, monkeypatch) -> object:
     def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "POST" and request.url.host == "api.tavily.com":
+        if request.method == "POST" and request.url.host == "api.deepseek.com":
             return httpx.Response(200, json={"results": [{
                 "url": "https://careers.example.com/job/1",
                 "title": "AI 应用开发实习生",
-                "raw_content": f"AI 应用开发实习生 示例公司 深圳 {JD}",
+                "content": f"AI 应用开发实习生 示例公司 深圳 {JD}",
             }]})
         if isinstance(detail_response, Exception):
             raise detail_response
@@ -52,7 +52,7 @@ async def _run(detail_response: httpx.Response, monkeypatch) -> object:
         context = SourceContext(
             filters=SearchFilters(cities=("440300",), candidate_types=("INTERNSHIP",)),
             keyword="AI 应用开发实习", limit=10, client=client,
-            settings=SimpleNamespace(tavily_api_key="test", job_search_detail_verification=True),
+            settings=SimpleNamespace(deepseek_api_key="test", job_search_detail_verification=True),
             extra={"llm": ExtractionLLM(),
                    "budget": SearchBudget(BudgetConfig(max_queries_per_round=1, max_pages_per_round=5,
                                                        max_detail_pages=5, max_api_calls=20))},

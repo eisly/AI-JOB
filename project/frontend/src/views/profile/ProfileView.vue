@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Calendar, Cpu, InfoFilled, Reading, School } from '@element-plus/icons-vue'
@@ -15,6 +16,14 @@ import {
 } from '@/api/profile'
 import { findJobRoleByLabel, findJobRoleByValue, MAX_JOB_ROLE_LENGTH } from '@/config/jobRoles'
 import JobRoleCascader from './components/JobRoleCascader.vue'
+
+const router = useRouter()
+
+/** U04：仅开发环境启用工作台 Mock 时才标识"演示数据"；真实账号页面不再误显演示标识 */
+const isDemoMode = import.meta.env.DEV === true && import.meta.env.VITE_WORKBENCH_MOCK === 'true'
+
+/** U05：最近一次保存成功时间——保存后提供持续可见的工作台/匹配入口，不弹框打断编辑上下文 */
+const savedAt = ref('')
 
 const CANDIDATE_OPTIONS: { value: CandidateType; label: string }[] = [
   { value: 'INTERNSHIP', label: '实习' },
@@ -201,6 +210,7 @@ const handleSave = async () => {
     const updated = await savePreferences(payload)
     profile.value = updated
     fillForm(updated)
+    savedAt.value = new Date().toLocaleString('zh-CN', { hour12: false })
     ElMessage.success('求职偏好已保存')
   } catch (err) {
     if (err instanceof ApiError && err.code === 40901) {
@@ -235,7 +245,7 @@ onMounted(load)
   <div class="profile-page" v-loading="loading">
     <div class="profile-page__meta">
       <span class="profile-page__date">{{ todayText }}</span>
-      <el-tag type="danger" effect="light" size="small">演示数据</el-tag>
+      <el-tag v-if="isDemoMode" type="danger" effect="light" size="small">演示数据</el-tag>
       <span v-if="profile" class="profile-page__updated">
         画像更新于 {{ formatDateTime(profile.updatedAt) }}
       </span>
@@ -292,10 +302,9 @@ onMounted(load)
             <el-select
               v-model="form.cities"
               multiple
+              filterable
               :multiple-limit="5"
-              collapse-tags
-              collapse-tags-tooltip
-              placeholder="请选择期望城市，最多 5 个"
+              placeholder="可搜索并选择期望城市，最多 5 个"
               class="preferences-form__control"
             >
               <el-option v-for="item in cityOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -332,6 +341,14 @@ onMounted(load)
             <div class="preferences-form__actions">
               <el-button type="primary" :loading="saving" @click="handleSave">保存求职偏好</el-button>
               <el-button @click="handleReset">重置</el-button>
+            </div>
+          </div>
+          <!-- U05：保存成功后提供持续可见的工作台/岗位匹配入口，不弹框打断编辑上下文 -->
+          <div v-if="savedAt" class="preferences-form__saved">
+            <span>求职偏好已保存于 {{ savedAt }}</span>
+            <div class="preferences-form__saved-actions">
+              <el-button type="primary" plain size="small" @click="router.push('/jobs?tab=matches')">前往岗位匹配</el-button>
+              <el-button size="small" @click="router.push('/dashboard')">前往工作台</el-button>
             </div>
           </div>
         </el-form>

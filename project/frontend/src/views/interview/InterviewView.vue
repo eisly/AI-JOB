@@ -457,7 +457,10 @@ async function startNew() {
       report: undefined,
     },
   })
-  if (!jobs.value.length && !resumes.value.length) await loadOptions()
+  await loadOptions()
+  if (!optionsError.value && (!jobs.value.length || !resumes.value.length)) {
+    ElMessage.warning('请先准备面试所需的岗位和简历')
+  }
 }
 
 function nullableScore(value: number | null | undefined) {
@@ -504,7 +507,8 @@ onMounted(async () => {
     <section v-if="activeTask" class="panel task-panel">
       <div class="panel__heading">
         <h2>当前异步任务</h2>
-        <el-tag :type="tracker.connected.value ? 'success' : 'info'" size="small">
+        <el-tag v-if="isTerminalTask(activeTask.status)" type="info" size="small">已结束</el-tag>
+        <el-tag v-else :type="tracker.connected.value ? 'success' : 'info'" size="small">
           {{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}
         </el-tag>
       </div>
@@ -538,6 +542,14 @@ onMounted(async () => {
         empty-description="需要至少一个已分析且进行中的岗位，以及一份最新版本为已确认状态的简历。"
         @retry="loadOptions"
       >
+        <template #empty>
+          <p v-if="!jobs.length">当前没有可用于面试的已分析岗位，请先导入并确认岗位信息。</p>
+          <p v-if="!resumes.length">当前没有已确认的最新简历，请先在简历中心完成确认。</p>
+          <div class="actions">
+            <el-button v-if="!jobs.length" type="primary" @click="router.push('/jobs?tab=personal')">前往导入岗位</el-button>
+            <el-button v-if="!resumes.length" type="primary" @click="router.push('/resume')">前往确认简历</el-button>
+          </div>
+        </template>
         <el-form label-position="top" class="prepare-form" @submit.prevent="createInterview">
           <div class="form-grid">
             <el-form-item label="已分析岗位" required>
@@ -707,9 +719,11 @@ onMounted(async () => {
         <div class="history-list">
           <article v-for="item in history" :key="item.id" class="history-item" :class="{ 'history-item--active': item.id === selectedInterviewId }">
             <button class="history-item__main" type="button" @click="openInterview(item.id)">
-              <span class="history-item__title">面试 {{ item.id.slice(0, 8) }}</span>
+              <span class="history-item__title">{{ item.jobTitle || `面试 ${item.id.slice(0, 8)}` }}</span>
               <el-tag size="small" :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'primary'">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
-              <span class="muted">{{ item.questionLimit }} 个主问题</span>
+              <el-tag v-if="item.completionType === 'EARLY_END'" size="small" type="warning">提前结束</el-tag>
+              <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER'" size="small" type="info">无有效回答</el-tag>
+              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} / {{ item.questionLimit }} 个主问题</span>
               <time class="muted">{{ formatDate(item.createdAt) }}</time>
             </button>
             <div class="history-item__actions">

@@ -1,6 +1,6 @@
 import { downloadBinary, request } from './request'
 import { submitTrackedTask } from './task-registry'
-import type { DownloadVO, Page, PageQuery, ProfileVO, ResumeFacts, ResumeVersionVO, ResumeVO } from './types'
+import type { DownloadVO, Page, PageQuery, ProfileVO, ResumeFactRevisionVO, ResumeFacts, ResumeVersionVO, ResumeVO } from './types'
 
 export const resumeApi = {
   list(query: PageQuery = {}) {
@@ -28,6 +28,14 @@ export const resumeApi = {
       body: { expectedProfileVersion, facts },
       idempotency: true,
     })
+  },
+  correct(versionId: string, expectedProfileVersion: number, facts: ResumeFacts, reason: string) {
+    return request<ProfileVO>(`/api/v1/resume-versions/${versionId}/corrections`, {
+      method: 'POST', body: { expectedProfileVersion, facts, reason }, idempotency: true,
+    })
+  },
+  corrections(versionId: string) {
+    return request<ResumeFactRevisionVO[]>(`/api/v1/resume-versions/${versionId}/corrections`)
   },
   remove(resumeId: string) {
     return request<boolean>(`/api/v1/resumes/${resumeId}`, { method: 'DELETE' })

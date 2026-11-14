@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { jobApi } from '@/api/jobs'
 import { jobSearchApi } from '@/api/job-searches'
+import { ApiError } from '@/api/request'
 import { profileApi } from '@/api/profile'
 import { getJobRoleLabel } from '@/config/jobRoles'
 import { taskApi } from '@/api/tasks'
@@ -16,11 +17,13 @@ import type {
   JobSearchVO,
   Page,
   ProfileVO,
+  SourceHealthVO,
   TaskVO,
 } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
+import { useUserStore } from '@/stores/user'
 import {
   candidateTypeLabels,
   cityLabels,
@@ -31,15 +34,19 @@ import {
   formatSalary,
   searchSourceStatusLabels,
   searchWarningLabels,
+  sourceHealthLabels,
 } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const emit = defineEmits<{ plan: [item: JobSearchItemVO] }>()
+const userStore = useUserStore()
 const linkedSearchId = typeof route.query.searchId === 'string' ? route.query.searchId : ''
 const linkedTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : ''
-const taskStorageKey = 'ai-job-job-search-task'
-const searchStorageKey = 'ai-job-job-search-id'
+// 恢复状态按账号隔离：key 追加用户 ID，切换账号后不会读取旧账号的搜索/任务 ID（S06）
+const storageOwner = computed(() => userStore.userInfo?.id || 'anon')
+const taskStorageKey = computed(() => `ai-job-job-search-task:${storageOwner.value}`)
+const searchStorageKey = computed(() => `ai-job-job-search-id:${storageOwner.value}`)
 
 const profile = ref<ProfileVO | null>(null)
 const profileLoading = ref(false)
@@ -99,8 +106,8 @@ function writeStorage(key: string, value: string) {
   }
 }
 
-const taskId = ref(linkedTaskId || (linkedSearchId ? '' : readStorage(taskStorageKey)))
-const searchId = ref(linkedSearchId || (linkedTaskId ? '' : readStorage(searchStorageKey)))
+const taskId = ref(linkedTaskId || (linkedSearchId ? '' : readStorage(taskStorageKey.value)))
+const searchId = ref(linkedSearchId || (linkedTaskId ? '' : readStorage(searchStorageKey.value)))
 const {
   task,
   loading: taskLoading,
@@ -115,8 +122,8 @@ const {
       return
     }
     searchId.value = id
-    writeStorage(searchStorageKey, id)
-    writeStorage(taskStorageKey, '')
+    writeStorage(searchStorageKey.value, id)
+    writeStorage(taskStorageKey.value, '')
     await loadSearch(id)
     await loadItems()
   },
@@ -158,6 +165,11 @@ async function loadSearch(id = searchId.value) {
   } catch (reason) {
     searchError.value = reason
     search.value = null
+    // S06：恢复记录中的失效搜索 ID（如数据清理后残留）自动清理，刷新后不再反复报 404
+    if (reason instanceof ApiError && reason.status === 404 && searchId.value === id) {
+      searchId.value = ''
+      writeStorage(searchStorageKey.value, '')
+    }
     return false
   } finally {
     searchLoading.value = false
@@ -211,9 +223,9 @@ async function createSearch() {
     if (keyword) body.keyword = keyword
     const created = await jobSearchApi.create(body)
     taskId.value = created.id
-    writeStorage(taskStorageKey, created.id)
+    writeStorage(taskStorageKey.value, created.id)
     searchId.value = ''
-    writeStorage(searchStorageKey, '')
+    writeStorage(searchStorageKey.value, '')
     search.value = null
     page.records = []
     page.total = 0
@@ -249,7 +261,7 @@ async function retrySearch() {
   try {
     const next = await retryTrackedTask(task.value)
     taskId.value = next.id
-    writeStorage(taskStorageKey, next.id)
+    writeStorage(taskStorageKey.value, next.id)
     search.value = null
     page.records = []
     page.total = 0
@@ -318,6 +330,10 @@ function warningLabel(code: string) {
 
 const sourceIncomplete = computed(() => search.value?.summary?.warnings?.includes('SEARCH_INCOMPLETE') || false)
 const sourceFailed = computed(() => search.value?.summary?.warnings?.includes('SEARCH_FAILED') || false)
+const sourceUnavailable = computed(() => sourceFailed.value || !!search.value?.sources?.some(source => ['FAILED', 'UNAVAILABLE'].includes(source.status)))
+const hasItemFilters = computed(() => Boolean(itemFilters.keyword || itemFilters.cityCode || itemFilters.candidateType || itemFilters.companySizes.length || !itemFilters.includeUnknownSize))
+/** S02：有可用岗位但被筛选条件排空——此时优先提示筛选无结果，不得误报为来源不可用 */
+const filteredEmpty = computed(() => hasItemFilters.value && (search.value?.summary?.uniqueCount ?? 0) > 0 && !page.records.length)
 const webUnavailable = computed(() => {
   const web = search.value?.sources?.find(source => source.key === 'web')
   return web && ['FAILED', 'UNAVAILABLE', 'PARTIAL'].includes(web.status)
@@ -409,7 +425,27 @@ async function toggleFavorite(item: JobSearchItemVO) {
   }
 }
 
+/** 搜索前来源状态（S01）：静态配置检查结论 + 最近检测时间，明确区分"配置检查"与"连接成功" */
+const sourceHealth = ref<SourceHealthVO | null>(null)
+const sourceHealthLoading = ref(false)
+const sourceHealthError = ref<unknown>(null)
+const sourceHealthUnconfigured = computed(() =>
+  sourceHealth.value?.sources.some(item => item.status === 'UNCONFIGURED') ?? false)
+
+async function loadSourceHealth() {
+  sourceHealthLoading.value = true
+  sourceHealthError.value = null
+  try {
+    sourceHealth.value = await jobSearchApi.sourceHealth()
+  } catch (reason) {
+    sourceHealthError.value = reason
+  } finally {
+    sourceHealthLoading.value = false
+  }
+}
+
 onMounted(async () => {
+  void loadSourceHealth()
   await loadProfile()
   if (searchId.value) {
     await loadSearch(searchId.value)
@@ -445,6 +481,30 @@ onMounted(async () => {
             <span>求职类型：{{ candidateTypeLabels[profile.candidateType] || '未设置' }}</span>
             <span>城市：{{ profile.cities?.length ? profile.cities.map(code => cityLabels[code] || code).join('、') : '未设置' }}</span>
           </div>
+          <div v-if="sourceHealth" class="source-health">
+            <details>
+              <summary>
+                来源状态（配置检查）· 检测时间 {{ formatDate(sourceHealth.checkedAt) }}
+                <span v-if="sourceHealthLoading" class="muted">检测中…</span>
+              </summary>
+              <div class="source-health__items">
+                <el-tag
+                  v-for="item in sourceHealth.sources"
+                  :key="item.key"
+                  size="small"
+                  :type="item.status === 'READY_TO_TRY' ? 'success' : item.status === 'UNCONFIGURED' ? 'warning' : 'info'"
+                >
+                  {{ item.name }}：{{ sourceHealthLabels[item.status] || item.status }}
+                </el-tag>
+              </div>
+              <p class="muted source-health__note">
+                以上为服务端配置检查结论，不代表已实际联网验证连接；连接将在本次检索时验证。
+                <template v-if="sourceHealthUnconfigured">存在未配置的搜索服务，相关来源本次搜索将不可用；可联系管理员配置搜索服务，或直接导入个人 JD 进行匹配。</template>
+              </p>
+            </details>
+          </div>
+          <el-alert v-if="sourceHealthError" class="inline-alert" type="info" :closable="false" show-icon title="来源状态暂时无法检测，不影响发起搜索。" />
+          <el-alert v-if="sourceUnavailable" class="inline-alert" type="warning" :closable="false" show-icon title="上次搜索有来源不可用；本次搜索仍可能无法获取完整岗位。可查看下方来源诊断，或导入个人 JD。" />
           <el-alert v-if="!profileReady" class="inline-alert" type="warning" :closable="false" show-icon title="请先确认简历并保存目标岗位、求职类型和城市偏好，再到本页搜索。" />
           <div class="form-grid">
             <el-form-item label="岗位关键词（可选）">
@@ -493,6 +553,10 @@ onMounted(async () => {
           <el-button v-if="task && taskIsActive(task)" size="small" :loading="canceling" @click="cancelSearch">取消</el-button>
         </template>
       </TaskStatus>
+      <el-alert v-if="task?.status === 'SUCCEEDED' && task.result?.outcome === 'NO_RESULTS_SOURCE_FAILED'" type="warning" :closable="false" show-icon>
+        <template #title>本次搜索执行完成，但来源失败，未获得可用岗位。可调整条件后重新发起搜索。</template>
+        <el-button size="small" type="primary" :disabled="busying || !profileReady" @click="createSearch">重新搜索</el-button>
+      </el-alert>
       <el-alert v-if="taskError" type="warning" :closable="false" show-icon>
         <template #title>任务事件连接异常，业务任务未被取消。{{ errorMessage(taskError) }}</template>
         <el-button size="small" @click="restartTask">恢复任务状态</el-button>
@@ -568,7 +632,11 @@ onMounted(async () => {
               <el-button @click="resetFilters">重置</el-button>
             </div>
           </div>
-          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" :empty-text="sourceFailed ? '检索失败' : '暂未找到符合条件的相关岗位'" :empty-description="sourceFailed || sourceIncomplete ? '请查看来源诊断。' : '可调整筛选条件后重新搜索。'" @retry="loadItems">
+          <AsyncState :loading="itemsLoading" :error="itemsError" :empty="!page.records.length" :empty-text="filteredEmpty ? '当前筛选没有匹配岗位' : sourceUnavailable ? '岗位来源不可用或结果不完整' : hasItemFilters ? '当前筛选没有匹配岗位' : '本次搜索没有匹配岗位'" :empty-description="filteredEmpty ? '本次搜索有可用岗位，可清除筛选查看全部结果。' : sourceUnavailable ? '请查看来源诊断，或导入个人 JD 继续匹配。' : hasItemFilters ? '可清除筛选查看本次搜索的全部岗位。' : '可放宽城市或求职类型后重新搜索。'" @retry="loadItems">
+            <template #empty>
+              <el-button v-if="hasItemFilters" @click="resetFilters">清除筛选</el-button>
+              <el-button type="primary" plain @click="router.push({ name: 'jobs', query: { tab: 'personal' } })">导入个人 JD</el-button>
+            </template>
             <div class="search-list">
               <article v-for="item in page.records" :key="item.id" class="search-card">
                 <div class="search-card__heading">
@@ -698,6 +766,10 @@ onMounted(async () => {
 .inline-alert { margin: 0 0 14px; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .profile-line { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 16px; color: $ai-text-secondary; font-size: 12px; }
+.source-health { margin: -8px 0 14px; }
+.source-health summary { cursor: pointer; color: $ai-text-secondary; font-size: 12px; user-select: none; }
+.source-health__items { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.source-health__note { margin: 6px 0 0; font-size: 12px; line-height: 1.6; }
 .source-table { margin-bottom: 14px; }
 .summary-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
 .summary-grid > div { display: flex; flex-direction: column; gap: 3px; padding: 11px; border: 1px solid #e3ebf8; border-radius: 9px; background: #fbfdff; }

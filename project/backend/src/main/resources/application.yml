@@ -29,7 +29,10 @@ spring:
           starttls:
             enable: false
           connectiontimeout: 3000
-          timeout: 3000
+          # M01：读/写超时放宽到 20 秒覆盖慢 SMTP（实测 16 秒延迟曾被 3 秒超时误判为失败）；
+          # 前端找回密码请求超时为 45 秒，可完整覆盖
+          timeout: 20000
+          writetimeout: 20000
 
 mybatis:
   configuration:

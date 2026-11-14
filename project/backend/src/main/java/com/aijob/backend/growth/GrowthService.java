@@ -46,12 +46,23 @@ public class GrowthService {
 
     public Map<String, Object> summary(String userId) {
         long profileVersion = profileVersion(userId);
-        Map<String, Object> advice = mapper.latestReady(userId, profileVersion);
+        // G03：画像版本变化后旧建议不再"隐身"，仍返回最新一条 READY 建议并标注依据版本与过期原因；
+        // 生成新建议成功后（版本对齐）过期标注自然消失。
+        Map<String, Object> advice = mapper.latestReadyAnyVersion(userId);
         List<String> suggestions = List.of();
         String suggestionTaskId = null;
+        long suggestionProfileVersion = 0;
+        boolean suggestionStale = false;
+        String suggestionStaleReason = null;
         if (advice != null) {
             suggestions = json.convert(json.parse(String.valueOf(advice.get("suggestions_json"))), List.class);
             suggestionTaskId = String.valueOf(advice.get("task_id"));
+            suggestionProfileVersion = ((Number) advice.get("profile_version")).longValue();
+            if (suggestionProfileVersion != profileVersion) {
+                suggestionStale = true;
+                suggestionStaleReason = "该建议基于画像 v" + suggestionProfileVersion + " 生成，画像已更新至 v"
+                        + profileVersion + "，建议内容可能已过时；可基于当前画像重新生成。";
+            }
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("profileVersion", profileVersion);
@@ -59,6 +70,9 @@ public class GrowthService {
         result.put("recentEvidence", abilityMapper.recent(userId, 10).stream().map(this::evidenceVo).toList());
         result.put("suggestions", suggestions);
         result.put("suggestionTaskId", suggestionTaskId);
+        result.put("suggestionProfileVersion", advice == null ? null : suggestionProfileVersion);
+        result.put("suggestionStale", suggestionStale);
+        result.put("suggestionStaleReason", suggestionStaleReason);
         return result;
     }
 
@@ -67,7 +81,7 @@ public class GrowthService {
         int page = Data.page(current);
         int pageSize = Data.size(size);
         if (skillCode != null) {
-            profiles.requireSkill(skillCode);
+            profiles.requireSkill(userId, skillCode);
         }
         if (sourceType != null && !SOURCE_TYPES.contains(sourceType)) {
             throw BusinessException.validation("sourceType", "非法证据来源: " + sourceType);

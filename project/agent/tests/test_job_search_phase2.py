@@ -61,7 +61,7 @@ async def test_pending_urls_survive_across_rounds_with_distinct_hits_and_metrics
     def respond(request):
         requests.append(request)
         return httpx.Response(200, json={"results": [
-            {"url": f"https://example.org/jobs/{n}", "title": title, "raw_content": body}
+            {"url": f"https://example.org/jobs/{n}", "title": title, "content": body}
             for n in range(100, 104)
         ]})
 
@@ -73,7 +73,7 @@ async def test_pending_urls_survive_across_rounds_with_distinct_hits_and_metrics
     async def emit_candidates(rows):
         candidates.extend(rows)
 
-    settings = SimpleNamespace(tavily_api_key="test", job_search_max_pages_per_round=1,
+    settings = SimpleNamespace(deepseek_api_key="test", job_search_max_pages_per_round=1,
                                job_search_max_queries_per_round=1, job_search_max_page_fetch=0,
                                job_search_detail_verification=False, job_search_max_rounds=3)
     payload = {"sources": ["web"], "filters": {"keyword": "Java 后端", "cities": ["440100"],
@@ -86,7 +86,7 @@ async def test_pending_urls_survive_across_rounds_with_distinct_hits_and_metrics
     assert counts["uniqueUrls"] == 4
     assert result["metrics"]["collection"]["pendingBySource"] == {"web": 1}
     assert result["metrics"]["collection"]["pendingUrlsBySource"] == {"web": ["https://example.org/jobs/103"]}
-    assert result["metrics"]["funnel"]["searchResults"]["tavily"] == len(requests) * 4
+    assert result["metrics"]["funnel"]["searchResults"]["deepseek"] == len(requests) * 4
     assert len({row["sourceUrl"] for row in candidates}) == 3
     result["items"][0]["candidateType"] = None
     assert validate_result_contract("JOB_SEARCH", result)["items"][0]["candidateType"] is None

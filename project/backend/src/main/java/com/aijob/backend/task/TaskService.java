@@ -167,7 +167,9 @@ public class TaskService {
     }
 
     public void appendEvent(AiTask task, String type, Object payload) {
-        long seq = task.getLastEventSeq() + 1;
+        // 序号必须以数据库当前最大序号为准：回调终态前会先同步 Agent 事件（syncTask），
+        // 若沿用内存 task 快照 +1 会与已写入的事件序号冲突（uk_task_id_seq），导致回调整体回滚并被 Agent 重试。
+        long seq = mapper.nextEventSeq(task.getId());
         appendEvent(task.getId(), seq, type, payload);
         mapper.updateLastEvent(task.getId(), seq);
         task.setLastEventSeq(seq);

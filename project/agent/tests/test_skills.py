@@ -99,7 +99,7 @@ def _rewrite(path: Path, old: str, new: str) -> None:
 
 def test_registry_rejects_version_mismatch(tmp_path):
     directory = _copy_prompts(tmp_path)
-    _rewrite(directory / "resume_parse.md", "version: resume-parse-v2", "version: wrong")
+    _rewrite(directory / "resume_parse.md", "version: resume-parse-v3", "version: wrong")
     with pytest.raises(ValueError, match="version 与 PROMPT_VERSIONS 不一致"):
         SkillRegistry(directory)
 

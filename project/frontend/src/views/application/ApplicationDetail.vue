@@ -5,6 +5,7 @@ import {
   type ApplicationStatus,
   type ApplicationVO,
 } from '@/types/application'
+import { cityLabels, formatDate as formatLocalDateTime } from '@/utils/format'
 
 /**
  * 投递记录详情弹层（纯展示）。
@@ -42,8 +43,15 @@ const statusTagType = (status: ApplicationStatus | string): 'info' | 'primary' |
 
 function formatDateTime(value: string | null): string {
   if (!value) return '—'
-  return value.replace('T', ' ').replace('Z', ' UTC')
+  return formatLocalDateTime(value)
 }
+
+/** 城市编码优先展示中文名称，未收录编码原样展示并标注 */
+const cityDisplay = computed(() => {
+  const code = props.record?.cityCode
+  if (!code) return '—'
+  return cityLabels[code] ?? `编码 ${code}`
+})
 </script>
 
 <template>
@@ -59,7 +67,7 @@ function formatDateTime(value: string | null): string {
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="版本">v{{ record.version }}</el-descriptions-item>
-          <el-descriptions-item label="城市编码">{{ record.cityCode ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="城市">{{ cityDisplay }}</el-descriptions-item>
           <el-descriptions-item label="学历">{{ record.education ?? '—' }}</el-descriptions-item>
           <el-descriptions-item label="薪资">{{ record.salaryText ?? '—' }}</el-descriptions-item>
           <el-descriptions-item label="关联岗位">{{ record.jobId ?? '手动录入' }}</el-descriptions-item>

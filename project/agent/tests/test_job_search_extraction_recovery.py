@@ -138,7 +138,7 @@ async def _emit(_stage: str, _percent: int | None = None) -> None:
 
 def pipeline() -> JobSearchPipeline:
     runtime = SearchRuntime(
-        settings=SimpleNamespace(tavily_api_key="test"),
+        settings=SimpleNamespace(deepseek_api_key="test"),
         llm=None,
         emit_stage=_emit,
         client=None,

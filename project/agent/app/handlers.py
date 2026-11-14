@@ -75,6 +75,7 @@ from .schemas import (
     ProjectRecommendPayload,
     ReportModelOutput,
     Requirement,
+    ResumeEvidenceFact,
     ResumeDiagnosePayload,
     ResumeOptimizePayload,
     ResumeParsePayload,
@@ -312,6 +313,32 @@ class ResumeParseHandler(BaseHandler):
     output_model = ParseModelOutput
     prompt_version = PROMPT_VERSIONS[RESUME_PARSE]
 
+    @staticmethod
+    def evidence_facts(field: str, items: list[ResumeEvidenceFact], text: str) -> list[ResumeEvidenceFact]:
+        result: list[ResumeEvidenceFact] = []
+        for item in items:
+            if not quote_in_text(item.quote, text):
+                raise HandlerValidationError(f"{field} 的 quote 不在简历原文中")
+            if not any(norm_text(item.quote) == norm_text(existing.quote) for existing in result):
+                result.append(item.model_copy(update={"quote": item.quote.strip(), "confirmed": False}))
+
+        marker = (r"实习|\bintern(?:ship)?\b" if field == "internships"
+                  else r"获奖|奖学金|一等奖|二等奖|三等奖|金奖|银奖|铜奖")
+        headings = {"实习经历", "实习经验", "获奖经历", "奖项荣誉", "荣誉奖项"}
+        for number, raw_line in enumerate(text.splitlines(), 1):
+            line = raw_line.strip()
+            if not line or line in headings or not re.search(marker, line, re.IGNORECASE):
+                continue
+            quote = line[:1000]
+            if any(norm_text(quote) in norm_text(item.quote) or norm_text(item.quote) in norm_text(quote)
+                   for item in result):
+                continue
+            result.append(ResumeEvidenceFact(claim=line[:500], quote=quote,
+                                             location=f"paragraph:{number}", confirmed=False))
+            if len(result) >= 20:
+                break
+        return result
+
     async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
         document = await ctx.files.extract(ctx.payload.document)
         return {"document_text": document.text, "text_hash": document.text_hash}
@@ -355,6 +382,8 @@ class ResumeParseHandler(BaseHandler):
                 skill.model_copy(update={"quote": skill.quote.strip(), "confirmed": False})
             )
         facts.skills = skills
+        facts.internships = self.evidence_facts("internships", facts.internships, text)
+        facts.awards = self.evidence_facts("awards", facts.awards, text)
         facts.warnings = dedupe(facts.warnings, limit=20)
 
         unmapped = dedupe([item for item in output.unmapped_skills if len(item) <= 100], limit=50)
@@ -735,7 +764,7 @@ class LearningQuestionHandler(BaseHandler):
     prompt_version = PROMPT_VERSIONS[LEARNING_QUESTION]
 
     @staticmethod
-    def _from_candidate(candidate: Any) -> AIQuestionResult:
+    def _from_candidate(candidate: Any, provider: str = "") -> AIQuestionResult:
         return AIQuestionResult(
             stem=candidate.stem,
             skill_codes=list(candidate.skill_codes),
@@ -746,6 +775,7 @@ class LearningQuestionHandler(BaseHandler):
             reference_answer=candidate.reference_answer,
             rubric=candidate.rubric.model_copy(deep=True),
             citations=[],
+            model_provider=provider,
         )
 
     @staticmethod
@@ -772,9 +802,14 @@ class LearningQuestionHandler(BaseHandler):
             return result.model_dump(by_alias=True, mode="json"), self._meta(True, ctx)
 
         excluded = {str(item) for item in payload.excluded_question_ids}
-        available = [item for item in payload.candidate_questions if str(item.id) not in excluded]
+        used_stems = {norm_text(item) for item in payload.excluded_question_stems}
+        available = [
+            item
+            for item in payload.candidate_questions
+            if str(item.id) not in excluded and norm_text(item.stem) not in used_stems
+        ]
         if available:
-            result = self._from_candidate(available[0])
+            result = self._from_candidate(available[0], provider=str(getattr(ctx.llm, "name", "")))
             return result.model_dump(by_alias=True, mode="json"), self._meta(True, ctx)
 
         return await super().execute(ctx)
@@ -795,6 +830,10 @@ class LearningQuestionHandler(BaseHandler):
             raise HandlerValidationError("题干过短")
         if not output.reference_answer.strip():
             raise HandlerValidationError("缺少参考答案")
+        # 生成的新题不得与已用题干等价重复（归一化比较），避免连续练习收到重复题
+        used_stems = {norm_text(item) for item in payload.excluded_question_stems}
+        if norm_text(output.stem) in used_stems:
+            raise HandlerValidationError("生成题干与已用题目重复，请换一个考查角度")
 
         refs = {
             (str(item.document_id).lower(), item.document_version, item.chunk_id): item
@@ -815,6 +854,7 @@ class LearningQuestionHandler(BaseHandler):
                 "source_type": "GENERATED",
                 "source_question_id": None,
                 "citations": citations,
+                "model_provider": str(getattr(getattr(ctx, "llm", None), "name", "") or ""),
             }
         )
 
@@ -834,8 +874,15 @@ def _build_evaluation(
     status = str(model_output.evidence_status).upper()
     if status not in {"VALID", "INSUFFICIENT", "INVALID"}:
         raise HandlerValidationError(f"evidenceStatus 非法: {model_output.evidence_status}")
-    if len(answer.strip()) < 2 or answer.strip().lower() in UNUSABLE_ANSWERS:
+    # 回答分类：明确回答"不会"（UNKNOWN）与无效回答（INVALID，过短/乱输入）分开标记。
+    # 两者都不伪造分数，但"不会"在 Java 侧会进入错题本待复习路径。
+    answer_class: str | None = None
+    if answer.strip().lower() in UNUSABLE_ANSWERS:
         status = "INVALID"
+        answer_class = "UNKNOWN"
+    elif len(answer.strip()) < 2:
+        status = "INVALID"
+        answer_class = "INVALID"
 
     dimensions_by_key = {item.key: item for item in model_output.dimensions}
     if status == "VALID" and (set(dimensions_by_key) != set(FIXED_RUBRIC_WEIGHTS) or len(model_output.dimensions) != 3):
@@ -893,6 +940,7 @@ def _build_evaluation(
         model_version=str(meta.get("model") or "unknown"),
         prompt_version=str(meta.get("promptVersion") or PROMPT_VERSIONS[LEARNING_EVALUATE]),
         evidence_status=status,
+        answer_class=answer_class,
     )
     return evaluation, skill_scores
 

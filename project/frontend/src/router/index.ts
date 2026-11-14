@@ -8,14 +8,10 @@ const router = createRouter({
   routes,
 })
 
-let restoreAttempted = false
 router.beforeEach(async to => {
   if (['login', 'register', 'forgot-password', 'reset-password'].includes(String(to.name))) return true
   const user = useUserStore()
-  if (!restoreAttempted && !user.isAuthenticated) {
-    restoreAttempted = true
-    await user.restoreSession()
-  }
+  if (!user.isAuthenticated) await user.restoreSession()
   if (!user.isAuthenticated) return { name: 'login', query: { redirect: to.fullPath } }
   return true
 })

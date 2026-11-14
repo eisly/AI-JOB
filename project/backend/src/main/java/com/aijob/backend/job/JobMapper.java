@@ -26,18 +26,19 @@ public interface JobMapper {
     @Insert("""
             INSERT INTO job_version (id,job_id,version_no,title,company_name,city_code,role_code,candidate_type,
               jd_text,content_hash,requirements_json)
-            VALUES (#{id},#{jobId},1,#{title},#{companyName},NULL,#{roleCode},#{candidateType},#{jdText},
+            VALUES (#{id},#{jobId},1,#{title},#{companyName},#{cityCode},#{roleCode},#{candidateType},#{jdText},
               UNHEX(#{contentHash}),NULL)
             """)
     int insertJobVersion(@Param("id") String id, @Param("jobId") String jobId, @Param("title") String title,
-                         @Param("companyName") String companyName, @Param("roleCode") String roleCode,
+                         @Param("companyName") String companyName, @Param("cityCode") String cityCode,
+                         @Param("roleCode") String roleCode,
                          @Param("candidateType") String candidateType,
                          @Param("jdText") String jdText, @Param("contentHash") String contentHash);
 
     String COLUMNS = """
             j.id,j.current_version AS job_version,j.owner_user_id,j.visibility,j.status,j.source_url,j.verified_at,
             j.created_at,jv.id AS job_version_id,jv.title,jv.company_name,jv.city_code,jv.role_code,jv.candidate_type,
-            jv.min_monthly_salary_cents,jv.max_monthly_salary_cents,jv.jd_text,jv.requirements_json,
+            jv.min_monthly_salary_cents,jv.max_monthly_salary_cents,jv.jd_text,jv.requirements_json,jv.analysis_meta_json,
             s.id AS source_id,s.name AS source_name,s.type AS source_type,s.base_url AS source_base_url,
             s.verification_status,s.verified_at AS source_verified_at
             """;
@@ -100,6 +101,21 @@ public interface JobMapper {
                  @Param("requirementsJson") String requirementsJson, @Param("metaJson") String metaJson,
                  @Param("minSalary") Integer minSalary, @Param("maxSalary") Integer maxSalary,
                  @Param("roleCode") String roleCode);
+
+    @Insert("""
+            INSERT INTO job_version (id,job_id,version_no,title,company_name,city_code,role_code,candidate_type,
+              min_monthly_salary_cents,max_monthly_salary_cents,currency,jd_text,content_hash,requirements_json,analysis_meta_json)
+            SELECT #{newId},job_id,version_no+1,title,company_name,#{cityCode},role_code,candidate_type,
+              min_monthly_salary_cents,max_monthly_salary_cents,currency,jd_text,content_hash,#{requirementsJson},#{metaJson}
+            FROM job_version WHERE id=#{oldId}
+            """)
+    int insertCorrectedVersion(@Param("newId") String newId, @Param("oldId") String oldId,
+                               @Param("cityCode") String cityCode, @Param("requirementsJson") String requirementsJson,
+                               @Param("metaJson") String metaJson);
+
+    @Update("UPDATE job SET current_version=current_version+1,status='ACTIVE',updated_at=UTC_TIMESTAMP(3) WHERE id=#{jobId} AND owner_user_id=#{userId} AND visibility='PRIVATE' AND status IN ('ACTIVE','FAILED') AND current_version=#{expectedVersion}")
+    int advancePrivateVersion(@Param("jobId") String jobId, @Param("userId") String userId,
+                              @Param("expectedVersion") int expectedVersion);
 
     @Insert("INSERT IGNORE INTO job_favorite (id,user_id,job_id) VALUES (#{id},#{userId},#{jobId})")
     int favorite(@Param("id") String id, @Param("userId") String userId, @Param("jobId") String jobId);

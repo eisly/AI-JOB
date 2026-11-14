@@ -8,6 +8,7 @@ import type {
   MatchItemOptionVO,
   Page,
   PageQuery,
+  SourceHealthVO,
 } from './types'
 
 export interface JobSearchItemsQuery extends PageQuery {
@@ -38,5 +39,8 @@ export const jobSearchApi = {
   },
   matchItemOptions() {
     return request<MatchItemOptionVO[]>('/api/v1/job-searches/match-item-options')
+  },
+  sourceHealth() {
+    return request<SourceHealthVO>('/api/v1/job-searches/source-health')
   },
 }

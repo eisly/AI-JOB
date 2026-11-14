@@ -79,6 +79,8 @@ export interface ApplicationCreatePayload {
   interviewDate?: string | null
   closedDate?: string | null
   note?: string | null
+  /** 同一岗位已有投递记录时，用户明确确认再次添加后传 true */
+  confirmDuplicate?: boolean
 }
 
 /**

@@ -145,7 +145,14 @@ public class AuthServiceImpl implements AuthService {
         String code = verificationCodeService.issue(email);
         AppUserAuth user = appUserMapper.selectAuthByEmail(email);
         if (user != null && "ACTIVE".equals(user.getStatus())) {
-            mailService.sendResetCode(user.getEmail(), code);
+            try {
+                mailService.sendResetCode(user.getEmail(), code);
+            } catch (BusinessException ex) {
+                // M02：邮件发送失败不得改变响应——"已注册 503 / 未注册 200"会泄露账号存在性。
+                // 统一按受理成功返回（前端文案为"若该邮箱已注册，验证码已发送"），
+                // 真实失败记录日志供排查；60 秒冷却已防止对故障服务的重复轰炸。
+                log.error("reset code mail failed for registered account, response masked uniformly", ex);
+            }
         }
         if (properties.mail().exposeCodeInResponse()) {
             log.info("reset code for {} is {}", email, code);

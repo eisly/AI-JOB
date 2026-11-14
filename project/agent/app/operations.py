@@ -102,7 +102,7 @@ RESULT_MODELS: dict[str, type] = {
 }
 
 PROMPT_VERSIONS: dict[str, str] = {
-    RESUME_PARSE: "resume-parse-v2",
+    RESUME_PARSE: "resume-parse-v3",
     RESUME_DIAGNOSE: "resume-diagnose-v1",
     RESUME_OPTIMIZE: "resume-optimize-v1",
     JD_ANALYZE: "jd-analyze-v3",

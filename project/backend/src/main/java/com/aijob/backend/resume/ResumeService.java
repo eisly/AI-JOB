@@ -191,7 +191,7 @@ public class ResumeService {
         document.put("mimeType", version.get("mime_type"));
         document.put("sizeBytes", version.get("size_bytes"));
         document.put("text", version.get("extracted_text"));
-        Map<String, Object> payload = Map.of("document", document, "skillCatalog", profiles.agentSkillCatalog());
+        Map<String, Object> payload = Map.of("document", document, "skillCatalog", profiles.agentSkillCatalog(userId));
         return tasks.create(userId, "POST", route, key, request, "RESUME_PARSE", "RESUME_VERSION", versionId,
                 Map.of("resumeVersionId", versionId), payload, taskId -> mapper.updateStatus(versionId, "PARSING"));
     }
@@ -201,13 +201,65 @@ public class ResumeService {
         return idempotency.execute(userId, "POST", route, key, body, 200, () -> confirmFacts(userId, versionId, body));
     }
 
+    public ResponseEntity<CommonResult<Object>> correct(String userId, String versionId, String route, String key,
+                                                         Map<String, Object> body) {
+        return idempotency.execute(userId, "POST", route, key, body, 200, () -> correctFacts(userId, versionId, body));
+    }
+
+    @Transactional
+    public Map<String, Object> correctFacts(String userId, String versionId, Map<String, Object> body) {
+        Map<String, Object> version = mapper.lockVersion(versionId, userId);
+        if (version == null) throw BusinessException.notFound();
+        if (!"CONFIRMED".equals(version.get("status"))) {
+            throw BusinessException.conflict("仅已确认的简历事实可以纠正", "INVALID_STATE");
+        }
+        String reason = Data.text(body, "reason", true, 500);
+        Map<String, Object> facts = validateFacts(userId, Data.object(body, "facts", true));
+        Map<String, Object> profile = profiles.locked(userId);
+        long actual = ((Number) profile.get("profile_version")).longValue();
+        if (requiredVersion(body, "expectedProfileVersion") != actual) throw BusinessException.versionConflict(actual);
+        if (!versionId.equals(profile.get("active_resume_version_id"))) {
+            throw BusinessException.conflict("只能纠正当前生效的简历版本", "INVALID_STATE");
+        }
+        String previous = String.valueOf(version.get("confirmed_facts_json"));
+        if (json.canonical(json.map(previous)).equals(json.canonical(facts))) {
+            throw BusinessException.validation("facts", "事实没有变化");
+        }
+        int revision = mapper.maxFactRevision(versionId);
+        if (revision == 0) {
+            mapper.insertFactRevision(UUID.randomUUID().toString(), versionId, 1, null, previous, "首次确认的事实");
+            revision = 1;
+        }
+        if (mapper.correctFacts(versionId, json.stringify(facts)) == 0) {
+            throw BusinessException.conflict("简历版本状态已变化", "INVALID_STATE");
+        }
+        profiles.confirmFacts(userId, versionId, facts, actual);
+        ability.replaceResumeClaims(userId, versionId, facts);
+        mapper.insertFactRevision(UUID.randomUUID().toString(), versionId, revision + 1, actual + 1,
+                json.stringify(facts), reason);
+        return profiles.get(userId);
+    }
+
+    public List<Map<String, Object>> factRevisions(String userId, String versionId) {
+        if (mapper.version(versionId, userId) == null) throw BusinessException.notFound();
+        return mapper.factRevisions(versionId).stream().map(row -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("revisionNo", row.get("revision_no"));
+            result.put("profileVersion", row.get("profile_version"));
+            result.put("facts", json.map(String.valueOf(row.get("facts_json"))));
+            result.put("reason", row.get("reason"));
+            result.put("createdAt", view.value(row.get("created_at")));
+            return result;
+        }).toList();
+    }
+
     @Transactional
     public Map<String, Object> confirmFacts(String userId, String versionId, Map<String, Object> body) {
         Map<String, Object> version = mapper.lockVersion(versionId, userId);
         if (version == null) {
             throw BusinessException.notFound();
         }
-        Map<String, Object> facts = validateFacts(Data.object(body, "facts", true));
+        Map<String, Object> facts = validateFacts(userId, Data.object(body, "facts", true));
         String status = String.valueOf(version.get("status"));
         if ("CONFIRMED".equals(status)) {
             String confirmed = String.valueOf(version.get("confirmed_facts_json"));
@@ -263,6 +315,8 @@ public class ResumeService {
         String status = String.valueOf(row.get("status"));
         Object facts = "CONFIRMED".equals(status) ? row.get("confirmed_facts_json") : row.get("parsed_facts_json");
         result.put("facts", facts == null ? null : json.convert(json.parse(String.valueOf(facts)), Object.class));
+        Object parsed = row.get("parsed_facts_json");
+        result.put("parsedFacts", parsed == null ? null : json.convert(json.parse(String.valueOf(parsed)), Object.class));
         return result;
     }
 
@@ -275,7 +329,7 @@ public class ResumeService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> validateFacts(Map<String, Object> input) {
+    private Map<String, Object> validateFacts(String userId, Map<String, Object> input) {
         Map<String, Object> facts = new LinkedHashMap<>();
         String education = input.get("education") == null ? null : String.valueOf(input.get("education"));
         if (education != null && !EDUCATION.contains(education)) {
@@ -295,7 +349,7 @@ public class ResumeService {
             }
             Map<String, Object> skill = new LinkedHashMap<>((Map<String, Object>) raw);
             String code = Data.text(skill, "skillCode", true, 64);
-            profiles.requireSkill(code);
+            profiles.requireSkill(userId, code);
             if (!Boolean.TRUE.equals(skill.get("confirmed"))) {
                 throw BusinessException.validation("facts.skills.confirmed", "确认事实的 confirmed 必须为 true");
             }
@@ -308,6 +362,8 @@ public class ResumeService {
             skills.add(normalized);
         }
         facts.put("skills", skills);
+        facts.put("internships", evidenceFacts(input, "internships"));
+        facts.put("awards", evidenceFacts(input, "awards"));
         List<String> warnings = new ArrayList<>();
         for (Object warning : Data.list(input, "warnings", false, 20)) {
             if (!(warning instanceof String value)) {
@@ -317,6 +373,27 @@ public class ResumeService {
         }
         facts.put("warnings", warnings);
         return facts;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> evidenceFacts(Map<String, Object> input, String field) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object raw : Data.list(input, field, false, 20)) {
+            if (!(raw instanceof Map<?, ?>)) {
+                throw BusinessException.validation("facts." + field, "经历事实必须为对象");
+            }
+            Map<String, Object> item = (Map<String, Object>) raw;
+            if (!Boolean.TRUE.equals(item.get("confirmed"))) {
+                throw BusinessException.validation("facts." + field + ".confirmed", "确认事实的 confirmed 必须为 true");
+            }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("claim", Data.text(item, "claim", true, 500));
+            normalized.put("quote", Data.text(item, "quote", true, 1000));
+            normalized.put("location", Data.text(item, "location", true, 200));
+            normalized.put("confirmed", true);
+            result.add(normalized);
+        }
+        return result;
     }
 
     private long requiredVersion(Map<String, Object> body, String field) {

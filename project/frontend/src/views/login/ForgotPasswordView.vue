@@ -20,6 +20,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import axios from 'axios'
 import AuthShell from '@/components/AuthShell.vue'
 import { authApi } from '@/api/auth-legacy'
 import { errorMessage } from '@/api/http'
@@ -36,6 +37,11 @@ const rules: FormRules = {
   ]
 }
 
+function isTimeoutError(error: unknown): boolean {
+  return axios.isAxiosError(error)
+    && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')
+}
+
 async function submit(): Promise<void> {
   if (!formRef.value) {
     return
@@ -50,7 +56,12 @@ async function submit(): Promise<void> {
     ElMessage.success('若该邮箱已注册，验证码已发送，请查收')
     await router.push({ path: '/reset-password', query: { email: form.email } })
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    if (isTimeoutError(error)) {
+      // 超时≠失败：服务端可能仍在发送邮件，立即重发会被 60 秒冷却拦截
+      ElMessage.warning('发送请求超时：验证码邮件可能仍在发送中，请稍候查看邮箱；60 秒内请勿重复发送')
+    } else {
+      ElMessage.error(errorMessage(error))
+    }
   } finally {
     submitting.value = false
   }

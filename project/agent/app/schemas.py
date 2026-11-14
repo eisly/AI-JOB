@@ -46,12 +46,21 @@ class SkillFact(APIModel):
     confirmed: bool = False
 
 
+class ResumeEvidenceFact(APIModel):
+    claim: str = Field(min_length=1, max_length=500)
+    quote: str = Field(min_length=1, max_length=1000)
+    location: str = Field(min_length=1, max_length=200)
+    confirmed: bool = False
+
+
 class ResumeFacts(APIModel):
     education: Education | None = None
     graduation_year: int | None = None
     experience_months: int | None = None
     major: str | None = None
     skills: list[SkillFact] = Field(default_factory=list, max_length=50)
+    internships: list[ResumeEvidenceFact] = Field(default_factory=list, max_length=20)
+    awards: list[ResumeEvidenceFact] = Field(default_factory=list, max_length=20)
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
@@ -181,6 +190,8 @@ class AIQuestionResult(APIModel):
     reference_answer: str = Field(min_length=1, max_length=5000)
     rubric: Rubric
     citations: list[Citation] = Field(default_factory=list, max_length=10)
+    # 生成/复用该题的模型提供方（如 fake-llm / deepseek），Java 落库时据此标记 generation_env 隔离 fake 题
+    model_provider: str = Field(default="", max_length=64)
 
 
 class EvaluationDimension(APIModel):
@@ -200,6 +211,9 @@ class EvaluationVO(APIModel):
     model_version: str = Field(min_length=1, max_length=128)
     prompt_version: str = Field(min_length=1, max_length=64)
     evidence_status: str = "VALID"
+    # 回答分类：UNKNOWN=用户明确回答"不会"；INVALID=回答无效（过短/乱输入）；None=正常作答。
+    # "不会"不伪造分数，但 Java 会写入错题本（cause=UNKNOWN）进入待复习路径。
+    answer_class: str | None = Field(default=None, max_length=16)
 
 
 class SkillScore(APIModel):
@@ -582,6 +596,8 @@ class LearningQuestionPayload(APIModel):
     plan_item: PlanItemSpec
     candidate_questions: list[QuestionCandidate] = Field(default_factory=list, max_length=50)
     excluded_question_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    # 已用题的题干列表（与 excluded_question_ids 对应）：选题与生成新题时按归一化题干排除等价重复
+    excluded_question_stems: list[str] = Field(default_factory=list, max_length=100)
     knowledge_refs: list[Citation] = Field(default_factory=list, max_length=50)
     mode: Literal["SELECT_OR_GENERATE", "REUSE_ONLY"] = "SELECT_OR_GENERATE"
 

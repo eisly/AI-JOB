@@ -51,6 +51,10 @@ public class ResumeResultHandler implements TaskResultHandler {
         for (Map<String, Object> skill : skills) {
             skill.put("confirmed", false);
         }
+        for (String field : List.of("internships", "awards")) {
+            List<Map<String, Object>> evidence = (List<Map<String, Object>>) facts.getOrDefault(field, List.of());
+            for (Map<String, Object> item : evidence) item.put("confirmed", false);
+        }
         if (mapper.parsed(task.getResourceId(), json.stringify(facts), json.stringify(parsed)) == 0) {
             throw BusinessException.conflict("简历版本状态已变化", "INVALID_STATE");
         }

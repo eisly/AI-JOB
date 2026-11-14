@@ -105,4 +105,18 @@ public class ResumeController {
         String id = Data.uuid(versionId, "versionId");
         return resumes.confirm(users.resolveCurrentUserId(), id, request.getRequestURI(), Data.idempotencyKey(key), body);
     }
+
+    @PostMapping("/resume-versions/{versionId}/corrections")
+    public ResponseEntity<CommonResult<Object>> correct(@PathVariable String versionId,
+                                                         @RequestHeader("Idempotency-Key") String key,
+                                                         @RequestBody Map<String, Object> body,
+                                                         HttpServletRequest request) {
+        String id = Data.uuid(versionId, "versionId");
+        return resumes.correct(users.resolveCurrentUserId(), id, request.getRequestURI(), Data.idempotencyKey(key), body);
+    }
+
+    @GetMapping("/resume-versions/{versionId}/corrections")
+    public CommonResult<List<Map<String, Object>>> corrections(@PathVariable String versionId) {
+        return Responses.ok(resumes.factRevisions(users.resolveCurrentUserId(), Data.uuid(versionId, "versionId")));
+    }
 }

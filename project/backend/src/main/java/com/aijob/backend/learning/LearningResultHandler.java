@@ -323,7 +323,7 @@ public class LearningResultHandler implements TaskResultHandler {
             if (skills.isEmpty() || !skills.contains(allowedSkill)) {
                 throw BusinessException.aiSchema("生成题目技能不符合计划项");
             }
-            for (String skill : skills) profiles.requireSkill(skill);
+            for (String skill : skills) profiles.requireSkill(task.getUserId(), skill);
             String stem = requiredText(value, "stem", 3000);
             String difficulty = requiredText(value, "difficulty", 16);
             if (!Set.of("EASY", "MEDIUM", "HARD").contains(difficulty)) {
@@ -343,8 +343,12 @@ public class LearningResultHandler implements TaskResultHandler {
             }
             questionId = UUID.randomUUID().toString();
             version = 1;
+            // fake 模型生成的题标记 FAKE 环境：真实选题查询（questionCandidates）排除 FAKE，
+            // 防止测试环境的模板题进入真实用户的练习池
+            String modelProvider = value.get("modelProvider") == null ? "" : String.valueOf(value.get("modelProvider"));
+            String generationEnv = modelProvider.toLowerCase(Locale.ROOT).contains("fake") ? "FAKE" : "PROD";
             mapper.insertGeneratedQuestion(questionId, stem, type, json.stringify(skills), difficulty, reference,
-                    json.stringify(rubric), json.stringify(citations), task.getId(), task.getUserId());
+                    json.stringify(rubric), json.stringify(citations), task.getId(), task.getUserId(), generationEnv);
         }
         if (mapper.questionReady(task.getResourceId(), questionId, version) == 0) {
             throw BusinessException.conflict("训练会话状态已变化", "INVALID_STATE");
@@ -371,18 +375,24 @@ public class LearningResultHandler implements TaskResultHandler {
             throw BusinessException.conflict("训练回答状态已变化", "INVALID_STATE");
         }
         mapper.updateSessionStatus(String.valueOf(session.get("id")), "COMPLETED");
+        String questionId = String.valueOf(question.get("id"));
+        String answerClass = normalized.evaluation().get("answerClass") == null ? null
+                : String.valueOf(normalized.evaluation().get("answerClass"));
         if ("VALID".equals(String.valueOf(normalized.evaluation().get("evidenceStatus")))) {
             ability.addIndependent(task.getUserId(), "LEARNING_ANSWER", task.getResourceId(), task.getId(),
                     normalized.skillScores(), String.valueOf(normalized.evaluation().get("modelVersion")),
                     String.valueOf(normalized.evaluation().get("promptVersion")));
             BigDecimal overall = new BigDecimal(String.valueOf(normalized.evaluation().get("overallScore")));
-            String questionId = String.valueOf(question.get("id"));
             if (overall.compareTo(BigDecimal.valueOf(60)) < 0) {
-                mapper.wrong(UUID.randomUUID().toString(), task.getUserId(), questionId, task.getResourceId());
+                mapper.wrong(UUID.randomUUID().toString(), task.getUserId(), questionId, task.getResourceId(), "WRONG_ANSWER");
             } else {
                 mapper.resolve(task.getUserId(), questionId, task.getResourceId());
             }
             learning.completePractice(String.valueOf(session.get("plan_id")), String.valueOf(session.get("plan_item_id")));
+        } else if ("UNKNOWN".equals(answerClass)) {
+            // 用户明确回答"不会"：不伪造分数、不计技能证据、不完成计划项，
+            // 但写入错题本（cause=UNKNOWN）进入待复习与弱项推荐路径
+            mapper.wrong(UUID.randomUUID().toString(), task.getUserId(), questionId, task.getResourceId(), "UNKNOWN");
         }
         return 1;
     }

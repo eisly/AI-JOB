@@ -52,15 +52,33 @@ public class ApplicationServiceImpl implements ApplicationService {
     }
 
     @Override
+    @Transactional
     public ApplicationVO create(String userId, ApplicationCreateDTO dto) {
+        // P01 并发防重：锁定用户行使同一用户的并发创建串行化，
+        // 保证"重复检查 → 插入"的原子性；后到的并发请求读到已插入记录并返回 409。
+        applicationMapper.lockUser(userId);
         if (dto.getJobId() != null) {
             int visible = applicationMapper.countVisibleJob(dto.getJobId(), userId);
             if (visible == 0) {
                 throw BusinessException.notFound();
             }
+            // 同一岗位重复添加：先提示已有记录，用户明确确认后才创建独立新记录（业务允许重复投递，但不允许无提示静默重复）。
+            int existing = applicationMapper.countByUserIdAndJobId(userId, dto.getJobId());
+            if (existing > 0 && !Boolean.TRUE.equals(dto.getConfirmDuplicate())) {
+                Map<String, Object> details = new HashMap<>();
+                details.put("jobId", dto.getJobId());
+                details.put("existingCount", existing);
+                throw BusinessException.conflict("该岗位已有 " + existing + " 条投递记录，请确认是否再次添加",
+                        "DUPLICATE_APPLICATION", details);
+            }
         }
         String companyName = requireText("companyName", dto.getCompanyName(), MAX_COMPANY_NAME);
         String jobTitle = requireText("jobTitle", dto.getJobTitle(), MAX_JOB_TITLE);
+        String status = dto.getStatus() == null ? ApplicationStatus.PLANNED.name() : dto.getStatus().name();
+        // 状态-日期一致性：待投递状态不得携带实际投递日期，避免"待投递却已投出"的矛盾记录。
+        if (ApplicationStatus.PLANNED.name().equals(status) && dto.getAppliedDate() != null) {
+            throw BusinessException.validation("appliedDate", "待投递状态不能填写实际投递日期，请清除日期或选择已投递");
+        }
 
         Application entity = new Application();
         entity.setId(UUID.randomUUID().toString().toLowerCase());
@@ -72,7 +90,7 @@ public class ApplicationServiceImpl implements ApplicationService {
         entity.setEducation(optionalText("education", dto.getEducation(), MAX_EDUCATION));
         entity.setSalaryText(optionalText("salaryText", dto.getSalaryText(), MAX_SALARY_TEXT));
         entity.setDescription(optionalText("description", dto.getDescription(), MAX_DESCRIPTION));
-        entity.setStatus(dto.getStatus() == null ? ApplicationStatus.PLANNED.name() : dto.getStatus().name());
+        entity.setStatus(status);
         entity.setPlannedDate(dto.getPlannedDate());
         entity.setAppliedDate(dto.getAppliedDate());
         entity.setInterviewDate(dto.getInterviewDate());
@@ -177,6 +195,12 @@ public class ApplicationServiceImpl implements ApplicationService {
 
         if (!errors.isEmpty()) {
             throw BusinessException.validation(errors);
+        }
+        // 状态-日期一致性：回退到待投递时不得保留实际投递日期。
+        // 用户需在本次提交中同时清除日期（appliedDate 传 null），否则视为矛盾修改并拒绝。
+        if (ApplicationStatus.PLANNED.name().equals(target.getStatus()) && target.getAppliedDate() != null) {
+            throw BusinessException.validation("appliedDate",
+                    "待投递状态不能保留实际投递日期，请同时清空实际投递日期或选择已投递");
         }
         if (!hasAnyChange(dto)) {
             throw BusinessException.validation("body", "至少提交一个修改字段");

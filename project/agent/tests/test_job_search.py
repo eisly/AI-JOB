@@ -264,7 +264,7 @@ async def test_pipeline_adjusts_query_when_empty(monkeypatch: pytest.MonkeyPatch
             return await super().complete(request)
 
     run = runtime(SynonymLLM(), {"cities": ["440300", "310100"], "includeUnknownSize": False})
-    run.settings.tavily_api_key = "test"
+    run.settings.deepseek_api_key = "test"
     result = await JobSearchPipeline(run).run()
     assert adapter.calls >= 2
     assert adapter.contexts[0].filters == adapter.contexts[1].filters

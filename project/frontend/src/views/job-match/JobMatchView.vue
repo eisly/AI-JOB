@@ -11,7 +11,7 @@ import { jobApi } from '@/api/jobs'
 import { learningApi } from '@/api/learning'
 import { profileApi } from '@/api/profile'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
-import type { JobSearchItemVO, JobVO, MatchBatchVO, MatchItemVO, Page, ProfileVO, TaskVO } from '@/api/types'
+import type { JobSearchItemVO, JobVO, MatchBatchVO, MatchItemVO, Page, ProfileVO, SkillVO, TaskVO } from '@/api/types'
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
@@ -246,6 +246,51 @@ const jobDetail = ref<JobVO | null>(null)
 const jobDetailRequestId = ref('')
 const jobDetailLoading = ref(false)
 const jobDetailError = ref<unknown>(null)
+const fieldCorrectionVisible = ref(false)
+const fieldCorrectionPending = ref(false)
+const fieldCorrectionError = ref<unknown>(null)
+const correctionSkills = ref<SkillVO[]>([])
+const fieldCorrection = reactive({ cityCode: '' as string, skillCodes: [] as string[], sourceQuote: '', reason: '' })
+
+async function openFieldCorrection() {
+  if (!jobDetail.value || jobDetail.value.source.type !== 'USER_INPUT') return
+  fieldCorrectionError.value = null
+  fieldCorrection.cityCode = jobDetail.value.cityCode || ''
+  fieldCorrection.skillCodes = [...(jobDetail.value.requirements?.skills || [])]
+  fieldCorrection.sourceQuote = jobDetail.value.fieldEvidence?.confirmedQuote || jobDetail.value.fieldEvidence?.city || ''
+  fieldCorrection.reason = ''
+  try {
+    correctionSkills.value = await profileApi.skills()
+    fieldCorrectionVisible.value = true
+  } catch (reason) {
+    fieldCorrectionError.value = reason
+  }
+}
+
+async function saveFieldCorrection() {
+  const job = jobDetail.value
+  if (!job || fieldCorrectionPending.value) return
+  fieldCorrectionPending.value = true
+  fieldCorrectionError.value = null
+  try {
+    const updated = await jobApi.correctFields(job.id, {
+      expectedJobVersion: job.jobVersion,
+      cityCode: fieldCorrection.cityCode || null,
+      skillCodes: fieldCorrection.skillCodes,
+      sourceQuote: fieldCorrection.sourceQuote.trim(),
+      reason: fieldCorrection.reason.trim(),
+    })
+    replaceJob(updated)
+    fieldCorrectionVisible.value = false
+    await Promise.all([loadPersonalJobs(), loadMatches()])
+    if (selectedMatch.value) await loadMatch(selectedMatch.value.id, false)
+    ElMessage.success(`已保存提取结果，JD 版本更新为 v${updated.jobVersion}`)
+  } catch (reason) {
+    fieldCorrectionError.value = reason
+  } finally {
+    fieldCorrectionPending.value = false
+  }
+}
 
 function replaceJob(job: JobVO) {
   const replaceIn = (records: JobVO[]) => {
@@ -788,7 +833,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                     <p>{{ job.companyName }}</p>
                   </div>
                   <div class="job-card__tags">
-                    <el-tag :type="statusTagType(job.status)" size="small">{{ commonStatusLabels[job.status] || job.status }}</el-tag>
+                    <el-tag :type="statusTagType(job.status)" size="small">{{ job.status === 'ACTIVE' ? '可匹配' : commonStatusLabels[job.status] || job.status }}</el-tag>
                     <el-tag size="small" effect="plain">{{ candidateTypeLabels[job.candidateType] || job.candidateType }}</el-tag>
                   </div>
                 </div>
@@ -1011,18 +1056,23 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               <h2>{{ jobDetail.title }}</h2>
               <p>{{ jobDetail.companyName }}</p>
             </div>
-            <el-tag :type="statusTagType(jobDetail.status)">{{ commonStatusLabels[jobDetail.status] || jobDetail.status }}</el-tag>
+            <el-tag :type="statusTagType(jobDetail.status)">{{ jobDetail.status === 'ACTIVE' ? '可匹配' : commonStatusLabels[jobDetail.status] || jobDetail.status }}</el-tag>
           </div>
           <div class="actions drawer-actions">
             <el-button :type="selectedJobIds.includes(jobDetail.id) ? 'success' : 'primary'" plain @click="toggleJobSelection(jobDetail.id, !selectedJobIds.includes(jobDetail.id))">{{ selectedJobIds.includes(jobDetail.id) ? '取消匹配选择' : '选择用于匹配' }}</el-button>
             <el-button :loading="favoritePendingIds.includes(jobDetail.id)" @click="toggleFavorite(jobDetail)">{{ jobDetail.isFavorite ? '取消收藏' : '收藏岗位' }}</el-button>
+            <el-button v-if="jobDetail.source.type === 'USER_INPUT' && ['ACTIVE', 'FAILED'].includes(jobDetail.status)" type="primary" plain @click="openFieldCorrection">{{ jobDetail.status === 'FAILED' ? '人工补全 JD 字段' : '核对提取结果' }}</el-button>
           </div>
+          <el-alert v-if="fieldCorrectionError && !fieldCorrectionVisible" class="inline-alert" type="error" :title="errorMessage(fieldCorrectionError)" :closable="false" show-icon />
           <el-descriptions :column="2" border>
             <el-descriptions-item label="城市">{{ cityLabels[jobDetail.cityCode || ''] || jobDetail.cityCode || '未明确' }}</el-descriptions-item>
             <el-descriptions-item label="求职类型">{{ candidateTypeLabels[jobDetail.candidateType] || jobDetail.candidateType }}</el-descriptions-item>
             <el-descriptions-item label="薪资">{{ formatSalary(jobDetail.minMonthlySalaryCents, jobDetail.maxMonthlySalaryCents) }}</el-descriptions-item>
             <el-descriptions-item label="JD版本">v{{ jobDetail.jobVersion }}</el-descriptions-item>
           </el-descriptions>
+          <p v-if="jobDetail.fieldEvidence?.city" class="muted">地点原文：{{ jobDetail.fieldEvidence.city }}</p>
+          <p v-else-if="jobDetail.source.type === 'USER_INPUT'" class="muted">地点暂无可追溯的明确原文，请核对 JD。</p>
+          <p v-if="jobDetail.fieldEvidence?.confirmedQuote" class="muted">人工确认依据：{{ jobDetail.fieldEvidence.confirmedQuote }} · {{ jobDetail.fieldEvidence.correctionReason }}</p>
           <section class="drawer-section">
             <h3>岗位JD</h3>
             <div class="pre-wrap jd-full-text">{{ jobDetail.jdText }}</div>
@@ -1033,10 +1083,11 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="最低学历">{{ jobDetail.requirements.educationMin ? educationLabels[jobDetail.requirements.educationMin] : '未明确' }}</el-descriptions-item>
                 <el-descriptions-item label="毕业年份">{{ jobDetail.requirements.graduationYearMin ?? '未明确' }} 至 {{ jobDetail.requirements.graduationYearMax ?? '未明确' }}</el-descriptions-item>
-                <el-descriptions-item label="最低经验">{{ jobDetail.requirements.experienceMonthsMin === null ? '未明确' : `${jobDetail.requirements.experienceMonthsMin}个月` }}</el-descriptions-item>
+                <el-descriptions-item label="最低经验">{{ jobDetail.requirements.experienceMonthsMin == null ? '未明确' : `${jobDetail.requirements.experienceMonthsMin}个月` }}</el-descriptions-item>
               </el-descriptions>
               <h4>技能要求</h4>
               <div class="skill-tags"><el-tag v-for="skill in jobDetail.requirements.skills" :key="skill">{{ skill }}<template v-if="jobDetail.requirements.requiredSkillLevels[skill] !== undefined"> · {{ jobDetail.requirements.requiredSkillLevels[skill] }}</template></el-tag></div>
+              <p v-if="jobDetail.source.type === 'USER_INPUT' && !jobDetail.fieldEvidence?.confirmedQuote" class="muted">技能提取尚未经人工核对，请对照下方 JD 原文确认。</p>
               <div v-if="Object.keys(jobDetail.requirements.requiredSkillLevels).length" class="level-list">
                 <span v-for="([skill, level]) in Object.entries(jobDetail.requirements.requiredSkillLevels)" :key="skill">{{ skill }}：{{ level }}</span>
               </div>
@@ -1044,6 +1095,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               <div v-if="Object.keys(jobDetail.requirements.quotes).length" class="quote-list">
                 <blockquote v-for="([field, quote]) in Object.entries(jobDetail.requirements.quotes)" :key="field"><strong>{{ field }}</strong><p class="pre-wrap">{{ quote }}</p></blockquote>
               </div>
+              <div v-else-if="jobDetail.fieldEvidence?.confirmedQuote" class="quote-list"><blockquote><strong>人工核对依据</strong><p class="pre-wrap">{{ jobDetail.fieldEvidence.confirmedQuote }}</p></blockquote></div>
               <p v-else class="muted">暂无原文引述</p>
             </template>
             <el-empty v-else :image-size="60" description="资格要求尚未解析" />
@@ -1065,6 +1117,18 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         </template>
       </AsyncState>
     </el-drawer>
+
+    <el-dialog v-model="fieldCorrectionVisible" title="核对个人 JD 提取结果" width="600px" class="responsive-dialog" :close-on-click-modal="false">
+      <p class="muted">请选择工作城市与技能，粘贴一段支持修改的 JD 原文。自动分析失败时也可人工补全；保存后生成新的 JD 版本，旧匹配需要重新创建。</p>
+      <el-form label-position="top">
+        <el-form-item label="工作城市"><el-select v-model="fieldCorrection.cityCode" filterable clearable placeholder="原文未明确时留空" class="full-width"><el-option v-for="city in cityOptions" :key="city.value" :label="city.label" :value="city.value" /></el-select></el-form-item>
+        <el-form-item label="技能要求"><el-select v-model="fieldCorrection.skillCodes" multiple filterable clearable placeholder="核对 JD 中提及的技术" class="full-width"><el-option v-for="skill in correctionSkills" :key="skill.code" :label="skill.name" :value="skill.code" /></el-select></el-form-item>
+        <el-form-item label="JD 原文依据"><el-input v-model="fieldCorrection.sourceQuote" type="textarea" :rows="3" maxlength="1000" placeholder="从上方 JD 原文复制一段支持修改的内容" /></el-form-item>
+        <el-form-item label="纠正原因"><el-input v-model="fieldCorrection.reason" type="textarea" :rows="2" maxlength="500" placeholder="说明原提取结果哪里有误" /></el-form-item>
+      </el-form>
+      <el-alert v-if="fieldCorrectionError" class="inline-alert" type="error" :title="errorMessage(fieldCorrectionError)" :closable="false" show-icon />
+      <template #footer><el-button @click="fieldCorrectionVisible = false">取消</el-button><el-button type="primary" :disabled="!fieldCorrection.sourceQuote.trim() || !fieldCorrection.reason.trim()" :loading="fieldCorrectionPending" @click="saveFieldCorrection">确认并保存新版本</el-button></template>
+    </el-dialog>
 
     <el-dialog v-model="planDialogVisible" title="创建专项训练计划" width="560px" class="responsive-dialog" :close-on-click-modal="false">
       <div v-if="planTarget" class="plan-dialog-content">

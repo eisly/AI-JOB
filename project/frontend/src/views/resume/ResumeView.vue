@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox, type UploadFile, type UploadUserFile } from 'e
 import { resumeApi } from '@/api/resumes'
 import { profileApi } from '@/api/profile'
 import { saveBinary } from '@/api/request'
-import type { ProfileVO, ResumeFacts, ResumeVO, ResumeVersionVO, SkillVO } from '@/api/types'
+import type { ProfileVO, ResumeFactRevisionVO, ResumeFacts, ResumeVO, ResumeVersionVO, SkillVO } from '@/api/types'
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
@@ -33,9 +33,16 @@ const facts = ref<ResumeFacts>(emptyFacts())
 const skillCatalog = ref<SkillVO[]>([])
 const skillsLoading = ref(false)
 const skillsError = ref<unknown>(null)
+const customSkillVisible = ref(false)
+const customSkillName = ref('')
+const customSkillPending = ref(false)
+const customSkillError = ref<unknown>(null)
 const profileResult = ref<ProfileVO | null>(null)
 const confirming = ref(false)
 const confirmError = ref<unknown>(null)
+const correctionEditing = ref(false)
+const correctionReason = ref('')
+const factRevisions = ref<ResumeFactRevisionVO[]>([])
 const operationError = ref<unknown>(null)
 const downloadError = ref<unknown>(null)
 const downloading = ref(false)
@@ -56,10 +63,15 @@ const initialized = ref(false)
 
 const selectedResume = computed(() => resumes.value.find(item => item.id === selectedResumeId.value) || null)
 const currentTitle = computed(() => selectedResume.value?.title || selectedVersion.value?.fileName || '简历详情')
-const canEditFacts = computed(() => selectedVersion.value?.status === 'PARSED')
+const canEditFacts = computed(() => selectedVersion.value?.status === 'PARSED' || correctionEditing.value)
 const taskRunning = computed(() => !!task.value && ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED'].includes(task.value.status))
 const educationOptions = Object.entries(educationLabels).map(([value, label]) => ({ value, label }))
 const maxGraduationYear = new Date().getFullYear() + 10
+const evidenceGroups = [
+  { key: 'internships', title: '实习经历' },
+  { key: 'awards', title: '获奖与奖学金' },
+] as const
+type EvidenceKind = typeof evidenceGroups[number]['key']
 
 const { task, deltaText, reasoningText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
   onTerminal: async currentTask => {
@@ -123,6 +135,11 @@ async function findResume(resumeId: string) {
 
 function applyVersion(detail: ResumeVersionVO) {
   const changed = selectedVersionId.value !== detail.id
+  if (changed) {
+    correctionEditing.value = false
+    correctionReason.value = ''
+    factRevisions.value = []
+  }
   selectedVersionId.value = detail.id
   selectedResumeId.value = detail.resumeId
   selectedVersion.value = detail
@@ -148,6 +165,7 @@ async function loadVersion(versionId: string) {
   try {
     const detail = await resumeApi.getVersion(versionId)
     applyVersion(detail)
+    if (detail.status === 'CONFIRMED') factRevisions.value = await resumeApi.corrections(versionId)
   } catch (reason) {
     detailError.value = reason
   } finally {
@@ -422,8 +440,37 @@ function addSkill() {
   facts.value.skills.push({ skillCode: '', claim: '', quote: '', location: '', confirmed: false })
 }
 
+async function createCustomSkill() {
+  const name = customSkillName.value.trim()
+  if (!name || customSkillPending.value) return
+  customSkillPending.value = true
+  customSkillError.value = null
+  try {
+    const skill = await profileApi.createCustomSkill(name)
+    await loadSkills()
+    if (!facts.value.skills.some(item => item.skillCode === skill.code)) {
+      facts.value.skills.push({ skillCode: skill.code, claim: '', quote: '', location: '', confirmed: false })
+    }
+    customSkillVisible.value = false
+    customSkillName.value = ''
+    ElMessage.success(skill.normalizationStatus === 'PENDING' ? '已添加自定义技能，待规范化' : '已添加技能')
+  } catch (reason) {
+    customSkillError.value = reason
+  } finally {
+    customSkillPending.value = false
+  }
+}
+
 function removeSkill(index: number) {
   facts.value.skills.splice(index, 1)
+}
+
+function addEvidence(kind: EvidenceKind) {
+  facts.value[kind].push({ claim: '', quote: '', location: '', confirmed: false })
+}
+
+function removeEvidence(kind: EvidenceKind, index: number) {
+  facts.value[kind].splice(index, 1)
 }
 
 function validateFacts() {
@@ -432,12 +479,16 @@ function validateFacts() {
   if (new Set(codes).size !== codes.length) return '技能不能重复，请合并或删除重复项'
   if (facts.value.graduationYear !== null && (!Number.isInteger(facts.value.graduationYear) || facts.value.graduationYear < 1900 || facts.value.graduationYear > maxGraduationYear)) return `毕业年份须为1900至${maxGraduationYear}的整数`
   if (facts.value.experienceMonths !== null && (!Number.isInteger(facts.value.experienceMonths) || facts.value.experienceMonths < 0 || facts.value.experienceMonths > 600)) return '经验月数须为0至600的整数'
+  for (const group of evidenceGroups) {
+    if (facts.value[group.key].length > 20) return `${group.title}最多保留20项`
+    if (facts.value[group.key].some(item => !item.claim.trim() || !item.quote.trim() || !item.location.trim())) return `请填写每项${group.title}的内容、原文引用和位置`
+  }
   return ''
 }
 
 async function confirmFacts() {
   const version = selectedVersion.value
-  if (!version || version.status !== 'PARSED' || confirming.value) return
+  if (!version || !canEditFacts.value || confirming.value) return
   const validation = validateFacts()
   if (validation) {
     confirmError.value = new Error(validation)
@@ -449,17 +500,41 @@ async function confirmFacts() {
     const profile = await profileApi.get()
     const payload = cloneFacts(facts.value)
     payload.skills = payload.skills.map(skill => ({ ...skill, skillCode: skill.skillCode.trim(), confirmed: true }))
-    const result = await resumeApi.confirm(version.id, profile.profileVersion, payload)
+    for (const group of evidenceGroups) payload[group.key] = payload[group.key].map(item => ({ ...item, confirmed: true }))
+    if (correctionEditing.value && !correctionReason.value.trim()) throw new Error('请填写事实纠正原因或依据')
+    const result = correctionEditing.value
+      ? await resumeApi.correct(version.id, profile.profileVersion, payload, correctionReason.value.trim())
+      : await resumeApi.confirm(version.id, profile.profileVersion, payload)
+    correctionEditing.value = false
+    correctionReason.value = ''
     profileResult.value = result
     await loadVersion(version.id)
     profileResult.value = result
     await loadResumes()
-    ElMessage.success(`事实确认成功，画像版本已更新为 ${result.profileVersion}`)
+    ElMessage.success(`事实已保存，画像版本已更新为 ${result.profileVersion}`)
   } catch (reason) {
     confirmError.value = reason
   } finally {
     confirming.value = false
   }
+}
+
+async function startCorrection() {
+  if (!selectedVersion.value || selectedVersion.value.status !== 'CONFIRMED') return
+  try {
+    const profile = await profileApi.get()
+    if (profile.activeResumeVersionId !== selectedVersion.value.id) throw new Error('只能纠正当前生效的简历版本')
+    correctionEditing.value = true
+    confirmError.value = null
+  } catch (reason) {
+    confirmError.value = reason
+  }
+}
+
+function cancelCorrection() {
+  correctionEditing.value = false
+  correctionReason.value = ''
+  facts.value = cloneFacts(selectedVersion.value?.facts)
 }
 
 async function initialize() {
@@ -604,7 +679,9 @@ onMounted(() => {
               <el-alert v-if="selectedVersion.status === 'UPLOADED'" class="inline-alert" type="info" title="文件已上传，开始解析后才能核对事实。" :closable="false" show-icon />
               <el-alert v-if="selectedVersion.status === 'PARSING'" class="inline-alert" type="warning" title="正在解析，请等待任务完成。" :closable="false" show-icon />
               <template v-if="['PARSED', 'CONFIRMED'].includes(selectedVersion.status)">
-                <el-alert v-if="selectedVersion.status === 'CONFIRMED'" class="inline-alert" type="success" title="该版本事实已确认，当前仅供查看；如需修改，请上传新版本。" :closable="false" show-icon />
+                <el-alert v-if="selectedVersion.status === 'CONFIRMED' && !correctionEditing" class="inline-alert" type="success" title="该版本事实已确认；可纠正当前生效版本中的单项事实，原解析内容会保留。" :closable="false" show-icon>
+                  <template #default><el-button size="small" type="primary" plain @click="startCorrection">纠正事实</el-button></template>
+                </el-alert>
                 <el-alert v-if="profileResult" class="inline-alert" type="success" :title="`确认成功，当前画像版本：${profileResult.profileVersion}`" :description="`生效简历版本：${profileResult.activeResumeVersionId || '—'}；更新时间：${formatDate(profileResult.updatedAt)}`" :closable="false" show-icon />
 
                 <div class="facts-form">
@@ -617,7 +694,7 @@ onMounted(() => {
 
                   <div class="skills-heading">
                     <div><h3>技能事实</h3><p class="muted">技能必须来自技能目录，可补充自述、原文引用和位置。</p></div>
-                    <el-button v-if="canEditFacts" @click="addSkill">添加技能</el-button>
+                    <div v-if="canEditFacts" class="actions"><el-button @click="addSkill">添加技能</el-button><el-button @click="customSkillVisible = true">自定义技能</el-button></div>
                   </div>
                   <el-alert v-if="skillsError" class="inline-alert" type="error" :title="`技能目录加载失败：${errorMessage(skillsError)}`" :closable="false" show-icon>
                     <template #default><el-button text type="primary" :loading="skillsLoading" @click="loadSkills">重试目录加载</el-button></template>
@@ -631,7 +708,7 @@ onMounted(() => {
                       <el-table-column label="技能" min-width="180">
                         <template #default="scope">
                           <el-select v-model="scope.row.skillCode" filterable placeholder="选择技能" :disabled="!canEditFacts">
-                            <el-option v-for="skill in skillOptions(scope.row.skillCode)" :key="skill.code" :value="skill.code" :label="skill.name" :disabled="!skill.enabled" />
+                            <el-option v-for="skill in skillOptions(scope.row.skillCode)" :key="skill.code" :value="skill.code" :label="skill.normalizationStatus === 'PENDING' ? `${skill.name}（待规范化）` : skill.name" :disabled="!skill.enabled" />
                           </el-select>
                           <small class="skill-code">{{ scope.row.skillCode || '未选择' }}</small>
                         </template>
@@ -644,16 +721,45 @@ onMounted(() => {
                     </el-table>
                   </div>
 
+                  <section v-for="group in evidenceGroups" :key="group.key" class="evidence-section">
+                    <div class="skills-heading">
+                      <div><h3>{{ group.title }}</h3><p class="muted">仅保留明确出现的经历，核对内容和原文依据；实习不会自动计入全职经验。</p></div>
+                      <el-button v-if="canEditFacts" @click="addEvidence(group.key)">添加{{ group.title }}</el-button>
+                    </div>
+                    <el-empty v-if="!facts[group.key].length" :description="`暂无${group.title}`" />
+                    <div v-for="(entry, index) in facts[group.key]" :key="`${group.key}-${index}`" class="evidence-item">
+                      <el-input v-model="entry.claim" type="textarea" :rows="2" maxlength="500" :placeholder="`${group.title}内容`" :disabled="!canEditFacts" />
+                      <el-input v-model="entry.quote" type="textarea" :rows="2" maxlength="1000" placeholder="简历原文引用" :disabled="!canEditFacts" />
+                      <div class="evidence-item__footer">
+                        <el-input v-model="entry.location" maxlength="200" placeholder="原文位置，例如 page:1;paragraph:6" :disabled="!canEditFacts" />
+                        <el-switch v-model="entry.confirmed" :disabled="!canEditFacts" active-text="已核对" />
+                        <el-button v-if="canEditFacts" text type="danger" @click="removeEvidence(group.key, index)">删除</el-button>
+                      </div>
+                    </div>
+                  </section>
+
                   <div v-if="facts.warnings.length" class="facts-warnings">
                     <strong>解析提示</strong>
                     <ul><li v-for="warning in facts.warnings" :key="warning">{{ warning }}</li></ul>
                   </div>
+                  <el-input v-if="correctionEditing" v-model="correctionReason" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="请说明纠正原因或依据，例如：原文第 2 页的实习经历被误计入全职经验" />
                   <el-alert v-if="confirmError" class="inline-alert" type="error" :title="`确认失败：${errorMessage(confirmError)}`" description="重新提交前会再次获取最新画像版本；请核对后重试。" :closable="false" show-icon />
                   <div v-if="canEditFacts" class="confirm-bar">
-                    <span class="muted">提交完整事实并更新求职画像，此操作不会改写原始文件。</span>
-                    <el-button type="primary" :loading="confirming" @click="confirmFacts">核对完成，确认事实</el-button>
+                    <span class="muted">提交后更新求职画像；原始解析和修订记录保留。</span>
+                    <div class="actions"><el-button v-if="correctionEditing" @click="cancelCorrection">取消纠正</el-button><el-button type="primary" :loading="confirming" @click="confirmFacts">{{ correctionEditing ? '保存事实纠正' : '核对完成，确认事实' }}</el-button></div>
                   </div>
                 </div>
+                <el-collapse v-if="selectedVersion.status === 'CONFIRMED'" class="facts-history">
+                  <el-collapse-item title="原解析事实与修订记录" name="history">
+                    <p class="muted">原解析事实（不会随纠正改写）</p>
+                    <pre class="pre-wrap">{{ JSON.stringify(selectedVersion.parsedFacts, null, 2) }}</pre>
+                    <div v-for="revision in factRevisions" :key="revision.revisionNo">
+                      <strong>修订 {{ revision.revisionNo }} · {{ formatDate(revision.createdAt) }}</strong>
+                      <p>{{ revision.reason }}<template v-if="revision.profileVersion"> · 画像 v{{ revision.profileVersion }}</template></p>
+                      <pre class="pre-wrap">{{ JSON.stringify(revision.facts, null, 2) }}</pre>
+                    </div>
+                  </el-collapse-item>
+                </el-collapse>
               </template>
               <el-empty v-else-if="!['FAILED', 'UPLOADED', 'PARSING'].includes(selectedVersion.status)" description="当前状态没有可展示的事实" />
             </template>
@@ -661,6 +767,13 @@ onMounted(() => {
         </section>
       </main>
     </div>
+
+    <el-dialog v-model="customSkillVisible" title="添加自定义技能" width="480px" @closed="customSkillError = null">
+      <p class="muted">填写技术或编程语言名称。该技能先仅对你的账号可见，待规范化后再合并到公共目录。</p>
+      <el-input v-model="customSkillName" maxlength="100" show-word-limit placeholder="例如：FastAPI、Rust、ISO 21434" @keyup.enter="createCustomSkill" />
+      <el-alert v-if="customSkillError" class="inline-alert" type="error" :title="errorMessage(customSkillError)" :closable="false" show-icon />
+      <template #footer><el-button @click="customSkillVisible = false">取消</el-button><el-button type="primary" :disabled="!customSkillName.trim()" :loading="customSkillPending" @click="createCustomSkill">添加到技能事实</el-button></template>
+    </el-dialog>
 
     <el-dialog v-model="uploadVisible" :title="uploadMode === 'new' ? '上传新简历' : '追加简历版本'" width="560px" @closed="resetUpload">
       <el-form label-position="top">
@@ -726,6 +839,10 @@ onMounted(() => {
 .skill-table-wrap { overflow-x: auto; }
 .skill-code { display: block; margin-top: 5px; color: $ai-text-tertiary; overflow-wrap: anywhere; }
 .facts-warnings { margin-top: 16px; padding: 13px; border-radius: 8px; background: #fff8e9; color: #805b12; }
+.evidence-section { margin-top: 24px; }
+.evidence-item { display: grid; gap: 10px; padding: 14px; margin-top: 10px; border: 1px solid #e5e7eb; border-radius: 8px; }
+.evidence-item__footer { display: flex; align-items: center; gap: 12px; }
+.evidence-item__footer .el-input { flex: 1; }
 .facts-warnings ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
 .confirm-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #e8eef7; }
 .confirm-bar > span { line-height: 1.6; }

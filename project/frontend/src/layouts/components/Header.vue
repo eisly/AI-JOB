@@ -31,7 +31,8 @@ async function logout() {
       </div>
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item @click="router.push('/profile')">个人设置</el-dropdown-item>
+          <!-- U04：入口语义与实际页面一致——该页面是求职画像（目标岗位/城市/求职类型偏好），不是账号设置 -->
+          <el-dropdown-item @click="router.push('/profile')">求职画像</el-dropdown-item>
           <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
         </el-dropdown-menu>
       </template>

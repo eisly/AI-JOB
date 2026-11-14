@@ -1,14 +1,15 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { authApi } from '@/api/auth'
-import { clearSessionToken, getDevUserId, setCsrfToken, setSessionToken } from '@/api/session'
+import { clearSessionToken, setCsrfToken, setSessionToken } from '@/api/session'
 import type { UserVO } from '@/api/types'
 
 export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserVO | null>(null)
   const accessToken = ref('')
-  const restoring = ref(false)
-  const isAuthenticated = computed(() => Boolean(accessToken.value || getDevUserId()))
+  const isAuthenticated = computed(() => Boolean(accessToken.value))
+  let csrfPromise: Promise<void> | null = null
+  let restorePromise: Promise<boolean> | null = null
 
   function applyToken(token: string, user: UserVO) {
     accessToken.value = token
@@ -27,30 +28,34 @@ export const useUserStore = defineStore('user', () => {
     return userInfo.value
   }
 
-  async function restoreCsrf() {
-    if (restoring.value) return
-    restoring.value = true
-    try {
-      const result = await authApi.csrf()
-      setCsrfToken(result.csrfToken)
-    } finally {
-      restoring.value = false
+  function restoreCsrf() {
+    if (!csrfPromise) {
+      csrfPromise = authApi.csrf()
+        .then(result => { setCsrfToken(result.csrfToken) })
+        .finally(() => { csrfPromise = null })
     }
+    return csrfPromise
   }
 
-  async function restoreSession() {
-    if (isAuthenticated.value) return true
-    try {
-      await restoreCsrf()
-      const result = await authApi.refresh()
-      applyToken(result.accessToken, result.user)
-      return true
-    } catch {
-      accessToken.value = ''
-      userInfo.value = null
-      clearSessionToken()
-      return false
+  function restoreSession(): Promise<boolean> {
+    if (isAuthenticated.value) return Promise.resolve(true)
+    if (!restorePromise) {
+      restorePromise = (async () => {
+        try {
+          await restoreCsrf()
+          const result = await authApi.refresh()
+          applyToken(result.accessToken, result.user)
+          return true
+        } catch {
+          if (!isAuthenticated.value) {
+            userInfo.value = null
+            clearSessionToken()
+          }
+          return isAuthenticated.value
+        }
+      })().finally(() => { restorePromise = null })
     }
+    return restorePromise
   }
 
   async function logout() {

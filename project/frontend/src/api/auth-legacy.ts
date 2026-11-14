@@ -33,7 +33,9 @@ export const authApi = {
     })
   },
   forgotPassword(email: string) {
-    return http.post<ApiEnvelope<boolean>>('/auth/password/forgot', { email })
+    // 邮件为同步发送：SMTP 慢时可能超过全局 15 秒超时，此处单独放宽到 45 秒，
+    // 避免把"发送慢"误报为"后端未启动"并诱导重复发送（后端另有 60 秒发送冷却兜底）
+    return http.post<ApiEnvelope<boolean>>('/auth/password/forgot', { email }, { timeout: 45000 })
   },
   resetPassword(body: ResetPasswordBody) {
     return http.post<ApiEnvelope<boolean>>('/auth/password/reset', body)

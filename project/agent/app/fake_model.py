@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -270,6 +271,16 @@ def _plan(request: LLMRequest) -> dict[str, Any]:
     return {"title": "差距专项提升计划", "summary": "根据可用证据生成的训练计划", "items": items}
 
 
+_QUESTION_ANGLES = [
+    "典型问题、处理方案与边界条件",
+    "常见故障的定位思路、修复步骤与预防措施",
+    "在高并发场景下的挑战、应对策略与权衡取舍",
+    "在工程实践中的要点、规范约定与常见误区",
+    "从零开始设计时的关键决策、备选方案与选型依据",
+    "线上事故复盘角度的根因分析、应急处理与长期改进",
+]
+
+
 def _question(request: LLMRequest) -> dict[str, Any]:
     payload = _payload(request)
     plan_item = payload.get("planItem") or {}
@@ -285,8 +296,20 @@ def _question(request: LLMRequest) -> dict[str, Any]:
         for item in payload.get("knowledgeRefs") or []
         if isinstance(item, dict)
     ][:2]
+    # T02：确定性题干变体——优先选择未在已用题干中出现过的考查角度，
+    # 避免同技能连续生成等价题干被去重校验拒绝，保证普通练习路径可持续
+    used_stems = [str(item) for item in payload.get("excludedQuestionStems") or []]
+    angle = ""
+    for candidate in _QUESTION_ANGLES:
+        if f"请结合一个可验证的场景，说明 {skill} 的{candidate}。" not in used_stems:
+            angle = candidate
+            break
+    if not angle:
+        session_id = str(payload.get("sessionId") or "")
+        digest = hashlib.sha256(f"{skill}:{session_id}".encode("utf-8")).hexdigest()
+        angle = _QUESTION_ANGLES[int(digest, 16) % len(_QUESTION_ANGLES)]
     return {
-        "stem": f"请结合一个可验证的场景，说明 {skill} 的典型问题、处理方案与边界条件。",
+        "stem": f"请结合一个可验证的场景，说明 {skill} 的{angle}。",
         "skillCodes": [skill],
         "difficulty": difficulty,
         "type": "TEXT_SCENARIO",
@@ -298,6 +321,11 @@ def _question(request: LLMRequest) -> dict[str, Any]:
     }
 
 
+def _text_bigrams(text: str) -> set[str]:
+    cleaned = "".join(str(text).split())
+    return {cleaned[i:i + 2] for i in range(len(cleaned) - 1)}
+
+
 def _evaluate_payload(request: LLMRequest) -> dict[str, Any]:
     payload = _payload(request)
     answer = str(payload.get("answer") or "")
@@ -305,6 +333,20 @@ def _evaluate_payload(request: LLMRequest) -> dict[str, Any]:
     skills = [str(item) for item in question.get("skillCodes") or []]
     length_score = min(88, 40 + len(answer.strip()) // 8)
     valid = len(answer.strip()) >= 10
+    # T03：无关回答判定（双信号）——长度足够、不含任何技能词、且与题干/参考答案
+    # 无任何相邻双字重合时才判为无关。单一技能词信号会误判"不含英文技能字样但内容相关"
+    # 的中文回答（如"布隆过滤器与空值缓存"不含 redis 但完全针对缓存穿透题）。
+    answer_lower = answer.strip().lower()
+    question_bigrams = _text_bigrams(
+        str(question.get("stem") or "") + str(question.get("referenceAnswer") or "")
+    )
+    answer_bigrams = _text_bigrams(answer)
+    unrelated = (
+        valid
+        and bool(skills)
+        and not any(skill.lower() in answer_lower for skill in skills)
+        and not (answer_bigrams & question_bigrams)
+    )
     dimensions = []
     for index, key in enumerate(("correctness", "completeness", "expression")):
         score = max(0, min(100, length_score + (3 if index == 0 else -3 if index == 1 else 0)))
@@ -313,10 +355,24 @@ def _evaluate_payload(request: LLMRequest) -> dict[str, Any]:
                 "key": key,
                 "score": score,
                 "weight": (0.5, 0.3, 0.2)[index],
-                "comment": "回答覆盖了主要要点" if valid else "回答内容不足，无法形成有效评价",
+                "comment": (
+                    "回答与题目考查技能无关，无法形成有效评价"
+                    if unrelated
+                    else "回答覆盖了主要要点" if valid else "回答内容不足，无法形成有效评价"
+                ),
             }
         )
     return {
+        "evaluation": {
+            "overallScore": None,
+            "dimensions": [],
+            "strengths": [],
+            "improvements": ["请针对题目考查的技能作答" if unrelated else "需要给出实质性回答"],
+            "referenceAnswer": str(question.get("referenceAnswer") or ""),
+            "evidenceStatus": "INVALID" if unrelated else "VALID" if valid else "INSUFFICIENT",
+        },
+        "skillScores": [],
+    } if unrelated else {
         "evaluation": {
             "overallScore": length_score if valid else None,
             "dimensions": dimensions,

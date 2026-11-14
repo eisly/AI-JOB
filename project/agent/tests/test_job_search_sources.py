@@ -176,7 +176,7 @@ async def test_web_search_keeps_relevant_results_independent_of_recruitment_stat
     urls = [f"https://careers.example.com/company/{index}" for index in range(len(cities))]
 
     def handle(request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "api.tavily.com"
+        assert request.url.host == "api.deepseek.com"
         payload = json.loads(request.content)
         assert "include_domains" not in payload
         query = payload["query"]
@@ -185,7 +185,7 @@ async def test_web_search_keeps_relevant_results_independent_of_recruitment_stat
         return httpx.Response(200, json={"results": [
             {
                 "url": url, "title": "AI 应用开发实习生",
-                "raw_content": f"示例公司 工作地点：{city} 实习 公司规模：100-499人 {jd}" + (" 当前职位已下线" if index == 4 else ""),
+                "content": f"示例公司 工作地点：{city} 实习 公司规模：100-499人 {jd}" + (" 当前职位已下线" if index == 4 else ""),
             }
             for index, (url, city) in enumerate(zip(urls, cities))
         ]})
@@ -204,7 +204,7 @@ async def test_web_search_keeps_relevant_results_independent_of_recruitment_stat
             filters=SearchFilters(cities=("330100", "310100"), candidate_types=("INTERNSHIP",),
                                   company_sizes=("SIZE_100_499",), include_unknown_size=False),
             keyword="AI 应用开发", limit=10, client=client,
-            settings=SimpleNamespace(tavily_api_key="test", job_search_detail_verification=False),
+            settings=SimpleNamespace(deepseek_api_key="test", job_search_detail_verification=False),
             extra={"llm": ExtractionLLM()},
         )
         result = await WebSearchSource().search(context)
@@ -318,7 +318,7 @@ async def test_web_search_distinguishes_no_config_and_provider_failure() -> None
     assert (await source.search(context)).status == "UNAVAILABLE"
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(429))) as client:
         context.client = client
-        context.settings = SimpleNamespace(tavily_api_key="test")
+        context.settings = SimpleNamespace(deepseek_api_key="test")
         context.extra["llm"] = object()
         result = await source.search(context)
         assert (result.status, result.http_status) == ("FAILED", 429)

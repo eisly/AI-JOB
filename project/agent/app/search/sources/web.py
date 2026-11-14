@@ -115,7 +115,7 @@ class WebSearchSource(SourceAdapter):
         settings = context.settings
         providers = resolve_providers(settings)
         if not providers:
-            return self.unavailable("Agent 未配置 TAVILY_API_KEY 或 BRAVE_SEARCH_API_KEY")
+            return self.unavailable("Agent 未配置 DEEPSEEK_API_KEY 或 BRAVE_SEARCH_API_KEY")
         if context.client is None or context.extra.get("llm") is None:
             return self.result("FAILED", message="搜索客户端未初始化", started=started)
 

@@ -34,8 +34,12 @@ public class VerificationCodeService {
     public String issue(String email) {
         String normalized = normalize(email);
         try {
-            Boolean cooling = redisTemplate.hasKey(COOLDOWN_KEY + normalized);
-            if (Boolean.TRUE.equals(cooling)) {
+            // M02：用 SETNX 原子抢占冷却标记——并发请求只有一个能通过。
+            // 原"hasKey 检查后再写入"存在查-写竞态，两个并发请求都能通过检查导致双发验证码。
+            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                    COOLDOWN_KEY + normalized, "1",
+                    Duration.ofSeconds(properties.resetCode().cooldownSeconds()));
+            if (!Boolean.TRUE.equals(acquired)) {
                 Long ttl = redisTemplate.getExpire(COOLDOWN_KEY + normalized, TimeUnit.SECONDS);
                 long retryAfter = ttl == null || ttl <= 0
                         ? properties.resetCode().cooldownSeconds() : ttl;
@@ -45,8 +49,6 @@ public class VerificationCodeService {
             String code = String.format("%06d", RANDOM.nextInt(1_000_000));
             redisTemplate.opsForValue().set(CODE_KEY + normalized, code,
                     Duration.ofSeconds(properties.resetCode().ttlSeconds()));
-            redisTemplate.opsForValue().set(COOLDOWN_KEY + normalized, "1",
-                    Duration.ofSeconds(properties.resetCode().cooldownSeconds()));
             redisTemplate.delete(ATTEMPT_KEY + normalized);
             return code;
         } catch (RedisConnectionFailureException ex) {

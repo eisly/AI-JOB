@@ -234,6 +234,10 @@ public class InterviewService {
         result.put("questionLimit", session.get("question_limit"));
         result.put("version", session.get("version"));
         result.put("pendingTaskId", session.get("pending_task_id"));
+        // U09/U11：岗位名、报告完成类型与实际有效回答数（列表查询带出，历史列表据此展示）
+        result.put("jobTitle", session.get("job_title"));
+        result.put("completionType", session.get("completion_type"));
+        result.put("answeredCount", session.get("answered_count"));
         result.put("messages", withMessages ? mapper.messages(String.valueOf(session.get("id"))).stream().map(view::map).toList() : List.of());
         result.put("createdAt", view.value(session.get("created_at")));
         return result;

@@ -369,3 +369,423 @@ curl.exe -H "X-User-Id: 11111111-1111-4111-8111-111111111111" "http://localhost:
 1. `.env` 修改后，已初始化的 MySQL 容器密码不会自动同步，仍需保证 `.env` 与容器初始化时的密码一致。
 2. `npm run build` 的 esbuild 问题仍未解决。
 3. 浏览器内级联选择器交互仍需人工确认。
+### [2026-11-13 16:32:13] 建立简历事实修订记录表
+
+**任务目标：** 已确认简历事实可纠错且保留历史版本。
+
+**执行行为：**
+
+1. 查明目前确认接口拒绝修改 CONFIRMED 版本，原解析 JSON 与已确认 JSON 分开保存。
+2. 新增 Flyway V10 修订表，记录每次事实快照、画像版本、修改原因和时间。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/src/main/resources/db/migration/V10__add_resume_fact_revisions.sql` | 新增简历事实修订记录表 | 支持纠错审计 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：读取确认流程和原表结构，新增迁移文件。
+- 结果：迁移已编写，尚未执行。
+
+**影响范围：** 下次后端启动时 Flyway 将新增数据表，不修改原解析事实。
+
+**遗留问题：** 接口、页面和测试待接入。
+
+---
+
+### [2026-11-13 16:33:27] 接入已确认简历事实纠错接口
+
+**任务目标：** 无需重新上传简历即可纠正当前生效版本，并保存修订历史。
+
+**执行行为：**
+
+1. 新增纠错和修订列表接口；只允许当前生效且已确认的简历版本，要求画像版本与纠错原因。
+2. 事务中保留首次确认事实、写入新事实和修订记录，更新画像与能力自述证据；原解析 JSON 保持不变。
+3. 版本详情增加 `parsedFacts`，便于对照原解析。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/resume/ResumeMapper.java` | 修订记录增查及已确认事实更新 SQL | 持久化纠错 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/resume/ResumeService.java` | 纠错事务、校验、历史读取与原解析输出 | 保证版本一致与可追溯 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/resume/ResumeController.java` | POST/GET corrections 接口 | 前端可操作和查询 |
+| 修改 | `project/backend/src/main/resources/db/migration/V10__add_resume_fact_revisions.sql` | 初次确认历史允许未知画像版本 | 避免伪造旧版号 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：修改后端文件。
+- 结果：接口代码已接入，构建与集成测试待执行。
+
+**影响范围：** 简历版本、画像版本、能力自述证据及新修订表。
+
+**遗留问题：** 前端入口和验证尚待完成；确认其他下游版本依赖回归。
+
+---
+
+### [2026-11-13 16:34:52] 接入简历事实纠错页面
+
+**任务目标：** 已确认简历可在页面逐项纠错、提交依据并查看修订历史。
+
+**执行行为：**
+
+1. 前端 API 增加事实纠错提交和修订历史读取类型与方法。
+2. 简历页在当前生效的已确认版本提供编辑入口、原因输入、取消和保存；展示原解析事实及历史快照。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/api/types.ts` | 增加原解析事实与修订记录类型 | 对接新接口 |
+| 修改 | `project/frontend/src/api/resumes.ts` | 增加纠错提交、历史查询 | 调用后端 |
+| 修改 | `project/frontend/src/views/resume/ResumeView.vue` | 纠错流程和历史展示 | 无需重传简历纠错 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：修改前端代码。
+- 结果：代码已接入，类型和真实交互待验证。
+
+**影响范围：** 简历详情和求职画像事实。
+
+**遗留问题：** 待执行构建、迁移与接口回归；页面历史当前以结构化 JSON 展示，后续可优化为逐字段对比。
+
+---
+
+### [2026-11-13 16:36:35] 验证简历纠错与 JD 城市逻辑
+
+**任务目标：** 检查纠错事务的关键调用和既有 JD 城市修复。
+
+**执行行为：**
+
+1. 增加纠错定向测试：当前生效版本写入原/新快照并更新画像，非生效版本被拒绝。
+2. 运行前端类型检查和 Java 定向测试。首次 Java 测试因测试代码泛型推断错误而编译失败，修正断言参数后复测通过。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/resume/ResumeServiceCorrectionTest.java` | 正常纠错与非生效版本拒绝测试 | 验证后端约束 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加测试结果 | 跟踪验证 |
+
+**执行命令与验证：**
+
+- 命令：`npm.cmd run type-check`；`mvn -o -q -Dtest=ResumeServiceCorrectionTest,JobServiceCityTest test`。
+- 结果：前端类型检查通过；Java 修正测试代码后通过。Mockito 输出动态 Agent 警告。
+- 说明：尚未运行 Flyway 迁移或真实账号纠错端到端测试。
+
+**影响范围：** 前端类型、后端纠错和 JD 地点定向验证。
+
+**遗留问题：** 需在隔离环境或现有本机开发库验证迁移和接口；技能目录覆盖、自定义技能仍待实现。
+
+---
+
+### [2026-11-13 16:37:22] 应用简历事实修订迁移并启动后端
+
+**任务目标：** 在本机开发库启用纠错历史表及新接口。
+
+**执行行为：**
+
+1. 确认 8080 属于 AI-JOB 后端后停止旧进程，执行既有启动脚本。
+2. 查看启动日志和端口：连接本机 MySQL `career_business`，Flyway 从 v9 升至 v10，8080 成功监听。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加迁移与启动结果 | 跟踪运行操作 |
+
+**执行命令与验证：**
+
+- 命令：`Get-NetTCPConnection`、`Get-CimInstance`、`Stop-Process`、既有 `start.ps1`、读取 `java.out`。
+- 结果：Flyway V10 成功应用到本机 `career_business`；Spring Boot 启动成功，8080 监听。
+
+**影响范围：** 本机开发库新增 `resume_fact_revision` 表；本机后端已运行新代码。
+
+**遗留问题：** 尚未用真实账号提交纠错与读取历史；其他模块的完整回归待执行。
+
+---
+
+### [2026-11-13 16:38:26] 复核纠错功能当前构建与记录
+
+**任务目标：** 确认本轮代码和验证记录一致。
+
+**执行行为：**
+
+1. 调整纠错保存成功提示，避免把纠错误写为首次确认。
+2. 复跑前端类型检查，核对 Surefire 报告并检查差异空白。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/views/resume/ResumeView.vue` | 保存提示统一为“事实已保存” | 区分纠错和首次确认 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加复核结果 | 跟踪验证 |
+
+**执行命令与验证：**
+
+- 命令：`npm.cmd run type-check`、读取 Surefire 报告、`git diff --check`。
+- 结果：前端类型检查退出码 0；纠错测试 2 项和 JD 地点测试 1 项均通过；差异检查无空白错误，只有行尾格式提示。
+- 说明：首次从前端目录读取后端报告使用了错误相对路径，改用项目根目录后成功读取。
+
+**影响范围：** 前端文案与验证记录。
+
+**遗留问题：** 尚未用真实账号从浏览器提交纠错；技能目录和自定义技能等仍需继续。
+
+---
+
+### [2026-11-13 16:39:15] 设计用户私有自定义技能存储
+
+**任务目标：** 允许补充目录外技术，同时防止未规范化名称进入公共技能目录。
+
+**执行行为：**
+
+1. 核对技能目录、简历确认和能力证据的外键关系。
+2. 新增 Flyway V11，为技能目录增加所有者与规范化状态；已有公共技能保持 STANDARD，用户技能标记 PENDING。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/src/main/resources/db/migration/V11__add_private_custom_skills.sql` | 增加所有者、规范化状态及约束 | 隔离用户技能 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：读取目录与外键代码，新增迁移文件。
+- 结果：迁移已编写，尚未执行。
+
+**影响范围：** 技能目录表结构。
+
+**遗留问题：** 服务层鉴权、前端入口和测试待接入。
+
+---
+
+### [2026-11-13 16:42:35] 接入用户私有技能创建与选择
+
+**任务目标：** 技能目录没有所需技术时可直接添加，并标记待规范化。
+
+**执行行为：**
+
+1. 后端技能目录查询按当前用户过滤，公共技能所有人可见，自定义技能仅所有者可见；新增创建接口，复用同名已有技能。
+2. 简历解析与个人 JD 分析使用当前用户的技能目录；事实确认、结果校验和相关成长/训练/面试/项目入口按用户校验技能所有权。
+3. 简历页增加自定义技能输入框，创建后加入当前事实草稿，选项显示待规范化标识。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/profile/ProfileMapper.java` | 用户过滤、同名查找和私有技能插入 SQL | 防止跨账号暴露 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/profile/ProfileService.java` | 用户目录、技能校验及创建逻辑 | 自定义技能待规范化 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/profile/ProfileController.java` | 新增 `POST /api/v1/skills/custom` | 提供创建入口 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/resume/ResumeService.java` | 当前用户技能目录与校验 | 简历解析与确认可用 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobService.java`、`JobResultHandler.java` | 个人 JD 分析包含私有技能 | 技能提取可用 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/learning/LearningResultHandler.java`、`interview/InterviewResultHandler.java`、`growth/GrowthService.java`、`project/ProjectService.java` | 相关结果按用户校验自定义技能 | 防止误判无效或越权 |
+| 修改 | `project/frontend/src/api/types.ts`、`profile.ts`、`views/resume/ResumeView.vue` | 创建 API、待规范化标签和页面入口 | 支持手动补充 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：修改后端和前端文件。
+- 结果：代码修改完成，编译、迁移及权限验证待执行。
+
+**影响范围：** 技能目录、简历解析/确认、个人 JD 与使用技能的业务模块。
+
+**遗留问题：** 需要验证不同用户隔离；自动别名归一化和合并后台尚未实现。
+
+---
+
+### [2026-11-13 16:44:52] 扩充公共技能并验证私有技能
+
+**任务目标：** 覆盖常见语言、安全技术，并检验自定义技能所有权。
+
+**执行行为：**
+
+1. V11 增加 Python、C/C++、JavaScript/TypeScript、Go、Rust、FastAPI、Vue、容器和网络安全等公共技能；私有技能插入改为幂等忽略重复。
+2. 学习计划按当前用户目录构造可用技能；增加单元测试，验证私有技能创建和跨用户校验拒绝。
+3. 运行前端类型检查和三组后端定向测试。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/resources/db/migration/V11__add_private_custom_skills.sql` | 加入常用语言、框架和安全技能 | 扩大基础目录 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/profile/ProfileMapper.java` | 重复插入保持幂等 | 处理并发同名创建 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/learning/LearningService.java` | 学习技能使用用户目录 | 识别私有技能 |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/profile/ProfileCustomSkillTest.java` | 私有技能创建及所有权测试 | 验证隔离 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 记录开发验证 |
+
+**执行命令与验证：**
+
+- 命令：`npm.cmd run type-check`；`mvn -o -q -Dtest=ProfileCustomSkillTest,ResumeServiceCorrectionTest,JobServiceCityTest test`。
+- 结果：前端类型检查通过；后端定向测试退出码 0，Mockito 仅输出动态 Agent 警告。
+
+**影响范围：** 技能目录、简历解析、JD 分析和学习计划。
+
+**遗留问题：** V11 待运行迁移，真实账号创建/跨账号隔离待端到端验证；自动规范化尚未实现。
+
+---
+
+### [2026-11-13 16:45:31] 应用私有技能目录迁移
+
+**任务目标：** 在本机开发库启用用户私有技能和扩充后的公共目录。
+
+**执行行为：**
+
+1. 核对后端 8080 进程后重启应用，读取 Flyway 与 Spring 启动日志。
+2. Flyway 从 V10 升至 V11，本机 MySQL `career_business` 迁移成功，8080 已监听。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加迁移和启动结果 | 跟踪运行行为 |
+
+**执行命令与验证：**
+
+- 命令：`Get-NetTCPConnection`、`Get-CimInstance`、`Stop-Process`、既有 `start.ps1`、读取 `java.out`。
+- 结果：V11 成功应用；Spring Boot 启动成功，8080 监听。
+
+**影响范围：** 本机开发数据库 `skill_catalog` 新列及公共技能数据，后端运行新代码。
+
+**遗留问题：** 尚需真实账号创建及跨账号读取验收；自动规范化/合并仍待实现。
+
+---
+
+### [2026-11-13 16:46:54] 复测用户技能对相关模块的影响
+
+**任务目标：** 检查用户目录变更未破坏训练、面试、项目和岗位结果链路。
+
+**执行行为：**
+
+1. 扩大后端定向测试范围。首轮 `LearningServiceResumePlanTest` 因旧 Mock 仍配置无参目录方法而失败；把桩更新为按用户目录后复测。
+2. 复测涵盖自定义技能、简历纠错、JD 地点、学习计划/题目、面试、项目和搜索结果测试类。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/learning/LearningServiceResumePlanTest.java` | 使用 `agentSkillCatalog("user")` 测试桩 | 对齐用户目录调用 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加失败及复测结果 | 记录验证 |
+
+**执行命令与验证：**
+
+- 命令：`mvn -o -q -Dtest=ProfileCustomSkillTest,ResumeServiceCorrectionTest,JobServiceCityTest,LearningServiceTest,LearningServiceResumePlanTest,LearningResultHandlerTest,InterviewResultHandlerTest,ProjectProgressServiceTest,JobSearchResultHandlerTest test`。
+- 结果：首轮 22 项中 1 项因旧桩失败；修正后命令退出码 0，Mockito 有动态 Agent 警告。
+
+**影响范围：** 后端相关模块定向回归。
+
+**遗留问题：** 真实账号隔离和浏览器完整操作仍待验证。
+
+---
+### [2026-11-13 17:14:39] 增加实习与获奖候选事实提取
+
+**任务目标：** 将简历中明确出现的实习与获奖经历作为可核对事实保留，而非只写入解析警告。
+
+**执行行为：**
+
+1. Agent 解析结果新增 `internships`、`awards` 两组候选事实，每项包含概述、原文引用、位置和确认状态。
+2. 更新解析提示词版本至 v3，要求提取明确经历并保留原文依据。
+3. Handler 核验模型引用属于简历原文；模型遗漏时从含相关关键词的原文行补充候选项，统一标记为未确认。
+4. 新增测试覆盖实习补取、奖项引用及伪造引用拒绝。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/schemas.py` | 新增证据事实类型及实习/奖项字段 | 让经历有结构化存储契约 |
+| 修改 | `project/agent/app/operations.py`、`project/agent/app/skills/prompts/resume_parse.md` | 解析提示词升级至 v3 | 引导模型提取并引用原文 |
+| 修改 | `project/agent/app/handlers.py` | 引用校验和原文行补取 | 减少明确经历遗漏 |
+| 修改 | `project/agent/tests/test_handlers.py`、`project/agent/tests/test_skills.py` | 新增经历引用测试及版本断言 | 验证契约和依据 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：阅读 Agent 解析契约和测试夹具后修改上述文件。
+- 结果：代码已修改；测试尚未执行。
+
+**影响范围：** 新解析任务的 JSON 契约与实习、获奖候选事实；历史简历不会自动重新解析。
+
+**遗留问题：** Java 确认接口和前端核对表单尚未接入新字段，需继续实现并测试。
+
+---
+### [2026-11-13 17:17] 验证实习和获奖解析契约
+
+**任务目标：** 确认新字段可保留真实引用并拒绝伪造引用。
+
+**执行行为：** 运行 Agent 的简历解析定向测试。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加验证与异常记录 | 跟踪实际执行情况 |
+
+**执行命令与验证：**
+
+- 命令：`D:\Anaconda\envs\ai-job\python.exe -m pytest -q tests/test_handlers.py tests/test_skills.py -k resume`。
+- 结果：宿主机执行 8 项通过；首次隔离环境执行约 90 秒无输出，已手动中断，不计为通过。
+
+**影响范围：** Agent 解析契约验证。
+
+**遗留问题：** Java 与前端尚未处理新字段；实际模型解析质量需另行抽样。
+
+---
+### [2026-11-13 17:19:14] 接通实习与获奖事实确认链路
+
+**任务目标：** 用户可以查看、补充、确认及纠正实习和获奖经历，画像与修订记录保留这些字段。
+
+**执行行为：**
+
+1. Java 解析回调强制将实习、获奖候选事实置为未确认；确认/纠错接口校验并保存内容、原文引用和位置。
+2. 新画像和清空画像的默认事实补充两组空数组；旧 JSON 在前端克隆时补空数组以兼容历史简历。
+3. 简历页面增加两组可编辑经历及证据，确认或纠错时一并提交；新增 Java 测试检查持久化入参及回调确认状态。
+4. 前端类型检查已执行。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/resume/ResumeResultHandler.java`、`ResumeService.java` | 回调状态与确认校验 | 保留可核对经历事实 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/profile/ProfileMapper.java` | 默认事实包含实习和奖项数组 | 新画像结构完整 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/resume/ResumeResultHandlerTest.java`、`ResumeServiceCorrectionTest.java` | 增加证据状态和保存测试 | 验证新字段路径 |
+| 修改 | `project/frontend/src/api/types.ts`、`src/utils/format.ts`、`src/views/resume/ResumeView.vue` | 类型、旧数据兼容和核对表单 | 用户可编辑与确认 |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加本记录 | 跟踪开发行为 |
+
+**执行命令与验证：**
+
+- 命令：`npm.cmd run type-check`。
+- 结果：前端类型检查退出码 0；Java 测试待执行。
+
+**影响范围：** 新解析结果、简历确认/纠错、用户画像 JSON 和简历页面；不自动重解析历史简历。
+
+**遗留问题：** 尚需运行 Java 测试并在真实浏览器核对有经历的简历。
+
+---
+### [2026-11-13 17:20] 验证简历经历字段的 Java 保存路径
+
+**任务目标：** 检查回调强制未确认与已确认事实保存。
+
+**执行行为：** 运行简历回调、纠错及画像技能定向测试，并读取 Surefire 报告。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/03-求职画像/paint_process.md` | 追加测试结果 | 跟踪验证 |
+
+**执行命令与验证：**
+
+- 命令：`mvn -o -q '-Djacoco.skip=true' '-DargLine=-javaagent:D:\maven\maven-rep\org\mockito\mockito-core\5.20.0\mockito-core-5.20.0.jar' '-Dtest=ResumeResultHandlerTest,ResumeServiceCorrectionTest,ProfileCustomSkillTest' test`。
+- 结果：退出码 0；Surefire 报告中简历回调 2 项、纠错 2 项均无失败或错误。
+- 说明：本机默认 Mockito 动态附加受限，显式使用已安装的 Mockito agent；Maven 启动仍打印 `Access is denied.`，但测试报告和退出码均正常。
+
+**影响范围：** Java 简历与画像定向测试。
+
+**遗留问题：** 真实解析、确认与修订端到端尚未验证。
+
+---

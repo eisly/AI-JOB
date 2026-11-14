@@ -8,7 +8,7 @@ import type { TaskStatus as TaskStatusType, TaskVO } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
-import { errorMessage, formatDate, taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import { errorMessage, formatDate, taskOutcomeLabels, taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +70,20 @@ function tagType(status: TaskStatusType): 'primary' | 'success' | 'info' | 'warn
     EXPIRED: 'warning',
   }
   return types[status]
+}
+
+/** S03/A05：业务结果标签样式——来源失败无结果为危险，部分失败为警告，正常空结果为中性 */
+function outcomeTagType(outcome: string): 'success' | 'info' | 'warning' | 'danger' {
+  switch (outcome) {
+    case 'OK':
+      return 'success'
+    case 'PARTIAL':
+      return 'warning'
+    case 'NO_RESULTS_SOURCE_FAILED':
+      return 'danger'
+    default:
+      return 'info'
+  }
 }
 
 function mergeTask(task: TaskVO) {
@@ -256,8 +270,14 @@ onBeforeUnmount(() => {
                 <el-tag :type="tagType(row.status)" size="small">{{ taskStatusLabels[row.status] || row.status }}</el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="业务结果" min-width="170">
+              <template #default="{ row }">
+                <el-tag v-if="row.result?.outcome" size="small" :type="outcomeTagType(row.result.outcome)">{{ taskOutcomeLabels[row.result.outcome] || row.result.outcome }}</el-tag>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
             <el-table-column label="阶段" min-width="150">
-              <template #default="{ row }">{{ row.stage || '—' }}</template>
+              <template #default="{ row }">{{ taskStageLabels[row.stage] || row.stage || '—' }}</template>
             </el-table-column>
             <el-table-column label="进度" width="150">
               <template #default="{ row }">
@@ -318,7 +338,8 @@ onBeforeUnmount(() => {
               <strong>{{ taskTypeLabels[selectedTask.type] || selectedTask.type }}</strong>
               <span>{{ selectedTask.id }}</span>
             </div>
-            <el-tag :type="tracker.connected.value ? 'success' : 'info'" size="small">{{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}</el-tag>
+            <el-tag v-if="isTerminalTask(selectedTask.status)" type="info" size="small">已结束</el-tag>
+            <el-tag v-else :type="tracker.connected.value ? 'success' : 'info'" size="small">{{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}</el-tag>
           </div>
           <TaskStatus :task="selectedTask" :reasoning="selectedReasoning">
             <template #actions>

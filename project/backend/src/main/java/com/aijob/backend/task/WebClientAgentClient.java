@@ -114,6 +114,19 @@ public class WebClientAgentClient implements AgentClient {
     }
 
     @Override
+    public Map<String, Object> sourceHealth() {
+        try {
+            return data(webClient.get().uri("/internal/ai/v1/jobs/source-health")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.runToken("source-health"))
+                    .header(TraceIdFilter.TRACE_ID_HEADER, traceIdOr("source-health"))
+                    .retrieve().bodyToMono(Map.class).block(Duration.ofSeconds(5)));
+        } catch (RuntimeException ex) {
+            log.warn("agent source health unavailable error={}", describe(ex));
+            throw BusinessException.dependencyUnavailable("岗位来源状态暂时无法检测");
+        }
+    }
+
+    @Override
     public Map<String, Object> cancel(String runId, String taskId) {
         long started = System.nanoTime();
         log.info("agent cancel task={} run={}", taskId, runId);

@@ -97,6 +97,20 @@ public interface ResumeMapper {
             """)
     int confirm(@Param("id") String id, @Param("factsJson") String factsJson);
 
+    @Update("UPDATE resume_version SET confirmed_facts_json=#{factsJson},updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='CONFIRMED'")
+    int correctFacts(@Param("id") String id, @Param("factsJson") String factsJson);
+
+    @Select("SELECT COALESCE(MAX(revision_no),0) FROM resume_fact_revision WHERE resume_version_id=#{versionId}")
+    int maxFactRevision(@Param("versionId") String versionId);
+
+    @Insert("INSERT INTO resume_fact_revision (id,resume_version_id,revision_no,profile_version,facts_json,reason) VALUES (#{id},#{versionId},#{revisionNo},#{profileVersion},#{factsJson},#{reason})")
+    int insertFactRevision(@Param("id") String id, @Param("versionId") String versionId,
+                           @Param("revisionNo") int revisionNo, @Param("profileVersion") Long profileVersion,
+                           @Param("factsJson") String factsJson, @Param("reason") String reason);
+
+    @Select("SELECT revision_no,profile_version,facts_json,reason,created_at FROM resume_fact_revision WHERE resume_version_id=#{versionId} ORDER BY revision_no DESC")
+    List<Map<String,Object>> factRevisions(@Param("versionId") String versionId);
+
     @Select("""
             SELECT
               (SELECT COUNT(*) FROM interview_session i JOIN resume_version rv ON rv.id=i.resume_version_id

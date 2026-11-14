@@ -752,11 +752,12 @@ onMounted(() => {
                 </div>
                 <div class="detail-progress">
                   <strong>{{ normalizedProgress(project.progress) }}%</strong>
-                  <span>服务端真实进度</span>
+                  <span>自报任务进度</span>
                 </div>
               </div>
               <el-progress :percentage="normalizedProgress(project.progress)" :stroke-width="12" />
               <p class="section-note">已完成 {{ completedTaskCount }} / {{ projectTasks.length }} 项任务 · 每周投入 {{ project.weeklyHours }} 小时 · 创建于 {{ formatDate(project.createdAt) }}</p>
+              <p class="section-note">该进度由你勾选任务自报，用于记录实施进展，不代表成果已通过验收；交付物以独立提交的记录为准。</p>
               <div class="tag-list detail-skills"><el-tag v-for="code in project.skillCodes" :key="code" effect="plain">{{ code }}</el-tag></div>
               <el-alert v-if="conflictMessage" class="inline-alert" type="warning" :title="conflictMessage" :closable="false" show-icon />
               <el-alert v-if="taskUpdateError" class="inline-alert" type="error" :title="errorMessage(taskUpdateError)" :closable="false" show-icon />

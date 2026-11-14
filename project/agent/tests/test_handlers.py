@@ -48,6 +48,7 @@ from app.schemas import (
     PlanItem,
     ReportModelOutput,
     Requirement,
+    ResumeEvidenceFact,
     ResumeFacts,
     ResumeParsePayload,
     Rubric,
@@ -172,6 +173,30 @@ def test_resume_validate_dedupes_and_strips_unmapped():
     assert result.facts.warnings == ["w"]
     assert result.unmapped_skills == ["保留"]
     assert result.text_hash == "hash"
+
+
+def test_resume_keeps_internship_and_award_quotes_for_review():
+    payload, output, prepared = _resume_case()
+    prepared["document_text"] += "\n获奖经历：2026 年获得校级一等奖学金。"
+    output.facts.awards = [ResumeEvidenceFact(
+        claim="校级一等奖学金", quote="2026 年获得校级一等奖学金",
+        location="paragraph:4", confirmed=True,
+    )]
+    result = ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
+    assert result.facts.internships[0].quote.startswith("实习经历：使用Redis")
+    assert result.facts.internships[0].confirmed is False
+    assert len(result.facts.awards) == 1
+    assert result.facts.awards[0].quote == "2026 年获得校级一等奖学金"
+    assert result.facts.awards[0].confirmed is False
+
+
+def test_resume_rejects_award_quote_outside_document():
+    payload, output, prepared = _resume_case()
+    output.facts.awards = [ResumeEvidenceFact(
+        claim="金奖", quote="不存在的金奖", location="paragraph:4",
+    )]
+    with pytest.raises(HandlerValidationError, match="awards 的 quote 不在简历原文中"):
+        ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
 
 
 def test_resume_rejects_unknown_skill_and_foreign_quote():
@@ -696,6 +721,47 @@ async def test_question_generate_path_when_all_candidates_excluded():
     assert "validating_result" in stages
 
 
+async def test_question_select_excludes_duplicate_stem_candidates():
+    """候选题 id 未被排除、但题干与已用题干等价（仅排版差异）时仍被排除，改走生成路径"""
+    from app.config import Settings
+    from app.fake_model import FakeLLM
+    from app.files import FileFetcher
+    from app.handlers import ExecutionContext
+
+    body = question_envelope(uuid4(), candidates=[question_candidate()])
+    # 与候选题干"如何处理缓存穿透？"仅差一个空格，归一化后等价
+    body["payload"]["excludedQuestionStems"] = ["如何处理缓存穿透 ？"]
+    payload = LearningQuestionPayload.model_validate(body["payload"])
+    settings = Settings(app_env="test", llm_provider="fake", callback_enabled=False)
+    llm = FakeLLM()
+
+    async def emit_stage(name, progress):
+        return None
+
+    ctx = ExecutionContext(
+        run=SimpleNamespace(operation="LEARNING_QUESTION"),
+        payload=payload,
+        settings=settings,
+        llm=llm,
+        files=FileFetcher(settings),
+        emit_stage=emit_stage,
+    )
+    result, _ = await LearningQuestionHandler().execute(ctx)
+    assert result["sourceType"] == "GENERATED"
+    assert len(llm.calls) == 1
+
+
+def test_question_generated_stem_rejects_duplicate_of_used():
+    """生成的新题干与已用题干等价时校验失败，要求换考查角度"""
+    body = question_envelope(uuid4())
+    body["payload"]["excludedQuestionStems"] = ["请说明缓存穿透的处理方式与边界条件。"]
+    payload = LearningQuestionPayload.model_validate(body["payload"])
+    handler = LearningQuestionHandler()
+    output = _question_output()
+    with pytest.raises(HandlerValidationError, match="生成题干与已用题目重复"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+
 # ---------------------------------------------------------------------------
 # Evaluation assembly
 # ---------------------------------------------------------------------------
@@ -768,6 +834,41 @@ def test_build_evaluation_unusable_answer_forces_invalid():
     assert evaluation.evidence_status == "INVALID"
     assert evaluation.overall_score is None
     assert scores == []
+    # 明确回答"不会"必须标记 UNKNOWN，Java 侧据此写入错题本待复习路径
+    assert evaluation.answer_class == "UNKNOWN"
+
+
+def test_build_evaluation_short_answer_marks_invalid_class():
+    output = _evaluation_output()
+    evaluation, scores = _build_evaluation(
+        model_output=output.evaluation,
+        rubric=fixed_rubric("v"),
+        meta={},
+        answer="x",
+        question_skills=["redis"],
+        source_id=uuid4(),
+        reference_fallback="",
+    )
+    assert evaluation.evidence_status == "INVALID"
+    # 过短/乱输入属于无效回答（INVALID），与明确"不会"（UNKNOWN）区分
+    assert evaluation.answer_class == "INVALID"
+    assert evaluation.overall_score is None
+    assert scores == []
+
+
+def test_build_evaluation_valid_answer_has_no_answer_class():
+    output = _evaluation_output()
+    evaluation, _ = _build_evaluation(
+        model_output=output.evaluation,
+        rubric=fixed_rubric("v"),
+        meta={},
+        answer="这是一个足够长的有效回答",
+        question_skills=["redis"],
+        source_id=uuid4(),
+        reference_fallback="",
+    )
+    assert evaluation.evidence_status == "VALID"
+    assert evaluation.answer_class is None
 
 
 def test_build_evaluation_insufficient_uses_reference_fallback():

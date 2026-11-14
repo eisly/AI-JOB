@@ -78,7 +78,7 @@ class LearningServiceResumePlanTest {
         profile.put("activeResumeVersionId", "version-1");
         when(profiles.get("user")).thenReturn(profile);
         when(profiles.roles()).thenReturn(Set.of("JAVA_BACKEND"));
-        when(profiles.agentSkillCatalog()).thenReturn(List.of(
+        when(profiles.agentSkillCatalog("user")).thenReturn(List.of(
                 Map.of("code", "JAVA", "name", "Java"),
                 Map.of("code", "SPRING_BOOT", "name", "Spring Boot")));
         Map<String, Object> facts = new LinkedHashMap<>();

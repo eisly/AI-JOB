@@ -92,7 +92,7 @@ public class JobResultHandler implements TaskResultHandler {
         }
         for (Object code : (List<Object>) requirements.getOrDefault("skills", List.of())) {
             try {
-                profiles.requireSkill(String.valueOf(code));
+                profiles.requireSkill(task.getUserId(), String.valueOf(code));
             } catch (BusinessException ex) {
                 throw BusinessException.aiSchema("JD 分析返回未知技能编码");
             }

@@ -15,6 +15,9 @@ export const jobApi = {
   importJd(body: { title: string; companyName: string; jdText: string; sourceUrl?: string }) {
     return submitTrackedTask('/api/v1/jobs/imports', body, '/jobs?tab=personal')
   },
+  correctFields(jobId: string, body: { expectedJobVersion: number; cityCode: string | null; skillCodes: string[]; sourceQuote: string; reason: string }) {
+    return request<JobVO>(`/api/v1/jobs/${jobId}/extracted-fields`, { method: 'PUT', body })
+  },
   favorites(query: PageQuery = {}) {
     return request<Page<JobVO>>('/api/v1/favorites', { query })
   },
