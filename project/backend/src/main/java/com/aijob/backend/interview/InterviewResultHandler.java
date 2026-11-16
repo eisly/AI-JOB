@@ -222,6 +222,11 @@ public class InterviewResultHandler implements TaskResultHandler {
         report.put("evaluation", normalized.evaluation());
         report.put("gaps", gaps);
         report.put("evidenceIds", evidenceIds);
+        report.put("skillEvidenceStatus", !evidenceIds.isEmpty() ? "AVAILABLE"
+                : validScores.isEmpty() ? "NO_VALID_ANSWER" : "NO_SKILL_SCORES");
+        report.put("skillEvidenceMessage", !evidenceIds.isEmpty() ? "仅已获得有效技能评分的回答计入成长证据。"
+                : validScores.isEmpty() ? "本次没有有效回答，不新增技能证据或有效样本。"
+                : "本次有有效总评，但没有有效的逐技能评分，因此不新增技能证据或有效样本；总分不会复制为技能分。");
         report.put("answeredQuestionCount", answered.size());
         report.put("completionType", completionType);
         mapper.insertReport(UUID.randomUUID().toString(), task.getResourceId(), task.getId(), json.stringify(report),

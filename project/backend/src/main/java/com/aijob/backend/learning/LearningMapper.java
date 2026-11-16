@@ -90,7 +90,7 @@ public interface LearningMapper {
     Map<String,Object> itemById(@Param("itemId") String itemId, @Param("userId") String userId);
 
     @Update("""
-            UPDATE learning_plan_item SET status=#{status},completed_at=CASE WHEN #{status}='COMPLETED' THEN UTC_TIMESTAMP(3) ELSE NULL END,
+            UPDATE learning_plan_item SET status=#{status},completed_at=CASE WHEN #{status}='COMPLETED' THEN COALESCE(completed_at,UTC_TIMESTAMP(3)) ELSE NULL END,
               updated_at=UTC_TIMESTAMP(3) WHERE id=#{itemId}
             """)
     int updateItemStatus(@Param("itemId") String itemId, @Param("status") String status);

@@ -819,14 +819,16 @@ def test_build_evaluation_invalid_status_and_dimension_mismatch():
         )
 
 
-def test_build_evaluation_unusable_answer_forces_invalid():
+@pytest.mark.parametrize('answer', ['不知道', '不会！', '我暂时不会这道题。',
+                                    '不会，暂时无法给出有效的分析方案。'])
+def test_build_evaluation_unusable_answer_forces_invalid(answer):
     output = _evaluation_output()
     evaluation, scores = _build_evaluation(
         model_output=output.evaluation,
         skill_score_drafts=[SkillScoreDraft(skillCode="redis", score=80, confidence=0.5)],
         rubric=fixed_rubric("v"),
         meta={},
-        answer="不知道",
+        answer=answer,
         question_skills=["redis"],
         source_id=uuid4(),
         reference_fallback="",
@@ -838,13 +840,24 @@ def test_build_evaluation_unusable_answer_forces_invalid():
     assert evaluation.answer_class == "UNKNOWN"
 
 
-def test_build_evaluation_short_answer_marks_invalid_class():
+@pytest.mark.parametrize('answer', ['我不会使用单列索引，因为需要按用户和时间排序，应建立联合索引。',
+                                    '不会发生全表扫描，因为主键查询只读取一行。'])
+def test_unknown_words_in_a_substantive_answer_do_not_override_evaluation(answer):
+    evaluation, _ = _build_evaluation(model_output=_evaluation_output().evaluation,
+        rubric=fixed_rubric('v'), meta={}, answer=answer, question_skills=[],
+        source_id=uuid4(), reference_fallback='')
+    assert evaluation.answer_class is None
+    assert evaluation.evidence_status == 'VALID'
+
+
+@pytest.mark.parametrize('answer', ['x', 'asdf', 'test'])
+def test_build_evaluation_short_answer_marks_invalid_class(answer):
     output = _evaluation_output()
     evaluation, scores = _build_evaluation(
         model_output=output.evaluation,
         rubric=fixed_rubric("v"),
         meta={},
-        answer="x",
+        answer=answer,
         question_skills=["redis"],
         source_id=uuid4(),
         reference_fallback="",

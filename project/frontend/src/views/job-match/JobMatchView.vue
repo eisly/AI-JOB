@@ -917,7 +917,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                   <el-tag size="small" :type="statusTagType(batch.status)">{{ commonStatusLabels[batch.status] || batch.status }}</el-tag>
                 </span>
                 <span class="muted">{{ formatDate(batch.createdAt) }}</span>
-                <span class="batch-card__id">{{ batch.id }}</span>
+                <span class="batch-card__id">岗位匹配记录</span>
                 <el-tag v-if="batch.isStale" size="small" type="danger">结果已过期</el-tag>
               </button>
             </div>
@@ -938,18 +938,20 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               <div class="panel__heading">
                 <div>
                   <h2>匹配批次详情</h2>
-                  <span class="muted">{{ selectedMatch.id }} · {{ formatDate(selectedMatch.createdAt) }}</span>
+                  <span class="muted">{{ formatDate(selectedMatch.createdAt) }}</span>
                 </div>
                 <el-tag :type="statusTagType(selectedMatch.status)">{{ commonStatusLabels[selectedMatch.status] || selectedMatch.status }}</el-tag>
               </div>
               <el-alert v-if="selectedMatch.isStale" class="stale-alert" title="该批次输入版本已过期" description="画像或岗位版本已变化，结果仅供历史核对，禁止基于此批次创建训练计划。请重新运行匹配。" type="error" :closable="false" show-icon />
-              <el-descriptions :column="2" border size="small" class="batch-meta">
+              <details><summary>查看匹配依据与记录编号</summary><p class="break-all">{{ selectedMatch.id }}</p><el-descriptions :column="1" border size="small" class="batch-meta">
                 <el-descriptions-item label="画像版本">v{{ selectedMatch.profileVersion }}</el-descriptions-item>
                 <el-descriptions-item label="任务ID"><span class="break-all">{{ selectedMatch.taskId }}</span></el-descriptions-item>
-              </el-descriptions>
+              </el-descriptions></details>
               <el-alert v-if="selectedMatch.status === 'GENERATING'" title="批次仍在生成，请稍后刷新详情" type="warning" :closable="false" show-icon />
               <el-alert v-else-if="selectedMatch.status === 'FAILED'" title="该匹配批次生成失败，请从任务状态核对原因并重试" type="error" :closable="false" show-icon />
-              <el-empty v-else-if="!selectedMatch.items.length" description="该批次没有匹配条目" />
+              <el-empty v-else-if="!selectedMatch.items.length" description="本次没有可用于匹配的岗位，请先搜索或导入 JD">
+                <el-button type="primary" @click="activeTab = 'search'">搜索岗位</el-button><el-button @click="activeTab = 'personal'">导入个人 JD</el-button>
+              </el-empty>
               <div v-else class="match-groups">
                 <section v-for="group in matchGroups" :key="group.status" class="match-group">
                   <div class="match-group__heading">
@@ -1073,6 +1075,17 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
           <p v-if="jobDetail.fieldEvidence?.city" class="muted">地点原文：{{ jobDetail.fieldEvidence.city }}</p>
           <p v-else-if="jobDetail.source.type === 'USER_INPUT'" class="muted">地点暂无可追溯的明确原文，请核对 JD。</p>
           <p v-if="jobDetail.fieldEvidence?.confirmedQuote" class="muted">人工确认依据：{{ jobDetail.fieldEvidence.confirmedQuote }} · {{ jobDetail.fieldEvidence.correctionReason }}</p>
+          <el-collapse v-if="jobDetail.revisions?.length" class="drawer-section">
+            <el-collapse-item title="原解析与修订历史" name="revisions">
+              <article v-for="revision in jobDetail.revisions" :key="revision.versionNo">
+                <h4>JD v{{ revision.versionNo }} · {{ formatDate(revision.createdAt) }}</h4>
+                <p>{{ revision.reason }}</p>
+                <p>城市：{{ cityLabels[revision.cityCode || ''] || revision.cityCode || '未明确' }}</p>
+                <p>技能：{{ revision.requirements?.skills.join('、') || '未提取' }}</p>
+                <p v-if="revision.sourceQuote" class="pre-wrap">原文依据：{{ revision.sourceQuote }}</p>
+              </article>
+            </el-collapse-item>
+          </el-collapse>
           <section class="drawer-section">
             <h3>岗位JD</h3>
             <div class="pre-wrap jd-full-text">{{ jobDetail.jdText }}</div>

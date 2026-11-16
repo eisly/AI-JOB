@@ -127,7 +127,7 @@ export function errorMessage(error: unknown): string {
       return '请求超时，服务可能仍在处理中，请稍候查看结果，请勿立即重复操作'
     }
     if (!error.response) {
-      return '无法连接后端服务，请确认后端已启动'
+      return '网络连接中断，请检查网络后重试；刚提交的操作可能仍在处理中，请先查看结果'
     }
   }
   return '操作失败，请稍后重试'

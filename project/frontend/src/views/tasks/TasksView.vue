@@ -8,7 +8,7 @@ import type { TaskStatus as TaskStatusType, TaskVO } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
-import { errorMessage, formatDate, taskOutcomeLabels, taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import { errorMessage, formatDate, taskErrorSummary, taskOutcomeLabels, taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -192,7 +192,7 @@ async function retryTask(task: TaskVO) {
   actionError.value = null
   try {
     const retried = await retryTrackedTask(task)
-    ElMessage.success(`已创建重试任务 ${retried.id.slice(0, 8)}`)
+    ElMessage.success('已创建重试任务，可查看实时详情')
     await loadTasks(false)
     await selectTask(retried)
   } catch (reason) {
@@ -255,13 +255,29 @@ onBeforeUnmount(() => {
       <el-alert v-if="actionError && !drawerVisible" class="list-action-error" :title="errorMessage(actionError)" type="error" show-icon @close="actionError = null" />
 
       <AsyncState :loading="listLoading" :error="listError" :empty="!tasks.length" empty-text="当前筛选条件下暂无任务" @retry="loadTasks()">
+        <div class="task-mobile-list">
+          <article v-for="task in tasks" :key="task.id" class="task-mobile-card">
+            <div class="task-mobile-card__heading"><strong>{{ taskTypeLabels[task.type] || '处理任务' }}</strong><el-tag :type="tagType(task.status)" size="small">{{ taskStatusLabels[task.status] }}</el-tag></div>
+            <p class="muted">{{ formatDate(task.createdAt) }}</p>
+            <el-tag v-if="task.result?.outcome" :type="outcomeTagType(task.result.outcome)" size="small">{{ taskOutcomeLabels[task.result.outcome] || '结果待核对' }}</el-tag>
+            <p v-if="task.error" class="task-mobile-card__error">{{ taskErrorSummary(task.error) }}</p>
+            <el-progress v-if="!isTerminalTask(task.status) && task.progress !== null" :percentage="Math.max(0, Math.min(100, task.progress))" />
+            <div class="row-actions">
+              <el-button size="small" @click="selectTask(task)">实时详情</el-button>
+              <el-button v-if="!isTerminalTask(task.status)" size="small" :loading="cancelingId === task.id" @click="cancelTask(task)">取消</el-button>
+              <el-button v-if="task.status === 'SUCCEEDED' && task.result" size="small" type="primary" @click="goToBusiness(task)">查看结果</el-button>
+              <el-button v-if="canRetryTask(task)" size="small" :loading="retryingId === task.id" @click="retryTask(task)">重试</el-button>
+              <el-button v-else-if="['FAILED', 'CANCELLED', 'EXPIRED'].includes(task.status)" size="small" @click="goToBusiness(task)">前往处理</el-button>
+            </div>
+          </article>
+        </div>
         <div class="task-table-wrap">
           <el-table :data="tasks" row-key="id" class="task-table">
             <el-table-column label="任务类型" min-width="160">
               <template #default="{ row }">
                 <div class="task-name">
                   <strong>{{ taskTypeLabels[row.type] || row.type }}</strong>
-                  <span>{{ row.id.slice(0, 8) }}</span>
+                  <span>{{ formatDate(row.createdAt) }}</span>
                 </div>
               </template>
             </el-table-column>
@@ -288,7 +304,7 @@ onBeforeUnmount(() => {
             <el-table-column label="错误" min-width="180">
               <template #default="{ row }">
                 <el-tooltip v-if="row.error" :content="row.error.message" placement="top" :show-after="300">
-                  <span class="error-text">{{ row.error.message }}</span>
+                  <span class="error-text">{{ taskErrorSummary(row.error) }}</span>
                 </el-tooltip>
                 <span v-else class="muted">—</span>
               </template>
@@ -388,6 +404,11 @@ onBeforeUnmount(() => {
 .auto-refresh { color: $ai-text-secondary; font-size: 12px; }
 .list-action-error { margin-bottom: 14px; }
 .task-table-wrap { width: 100%; overflow-x: auto; }
+.task-mobile-list { display: none; }
+.task-mobile-card { padding: 16px 0; border-bottom: 1px solid $ai-border; }
+.task-mobile-card__heading { display: flex; justify-content: space-between; gap: 8px; }
+.task-mobile-card .row-actions { margin-top: 12px; }
+.task-mobile-card__error { color: $ai-danger; overflow-wrap: anywhere; }
 .task-table { min-width: 1180px; }
 .task-name { display: grid; gap: 4px; }
 .task-name span { color: $ai-text-tertiary; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
@@ -412,6 +433,8 @@ onBeforeUnmount(() => {
   .filter-bar .el-radio-group { display: flex; flex-wrap: wrap; }
 }
 @media (max-width: 700px) {
+  .task-mobile-list { display: block; }
+  .task-table-wrap { display: none; }
   .filter-bar .el-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .filter-bar :deep(.el-radio-button__inner) { width: 100%; }
   .task-metadata > div, .input-versions dl > div { grid-template-columns: 90px minmax(0, 1fr); }

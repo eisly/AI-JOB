@@ -82,7 +82,21 @@ public class JobService {
         if (row == null) {
             throw BusinessException.notFound();
         }
-        return jobVo(row, userId);
+        Map<String, Object> detail = jobVo(row, userId);
+        detail.put("revisions", mapper.revisions(jobId, userId).stream().map(revision -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("versionNo", revision.get("version_no"));
+            result.put("cityCode", revision.get("city_code"));
+            result.put("createdAt", view.value(revision.get("created_at")));
+            result.put("requirements", revision.get("requirements_json") == null ? null
+                    : json.map(String.valueOf(revision.get("requirements_json"))));
+            Map<String, Object> meta = revision.get("analysis_meta_json") == null ? Map.of()
+                    : json.map(String.valueOf(revision.get("analysis_meta_json")));
+            result.put("reason", meta.getOrDefault("reason", "原始自动分析"));
+            result.put("sourceQuote", meta.get("sourceQuote"));
+            return result;
+        }).toList());
+        return detail;
     }
 
     @Transactional
@@ -126,7 +140,9 @@ public class JobService {
             for (String code : skills) if (levels.containsKey(code)) retained.put(code, levels.get(code));
             requirements.put("requiredSkillLevels", retained);
         }
-        if (row.get("requirements_json") != null && java.util.Objects.equals(cityCode, row.get("city_code"))
+        boolean alreadyConfirmed = row.get("analysis_meta_json") != null
+                && Boolean.TRUE.equals(json.map(String.valueOf(row.get("analysis_meta_json"))).get("confirmedByUser"));
+        if (alreadyConfirmed && row.get("requirements_json") != null && java.util.Objects.equals(cityCode, row.get("city_code"))
                 && json.canonical(requirements).equals(json.canonical(json.map(String.valueOf(row.get("requirements_json")))))) {
             throw BusinessException.validation("body", "提取字段没有变化");
         }

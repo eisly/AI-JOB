@@ -238,6 +238,7 @@ export interface JobVO {
   verifiedAt: string | null
   requirements: RequirementVO | null
   fieldEvidence?: { city?: string; confirmedQuote?: string; correctionReason?: string }
+  revisions?: { versionNo: number; cityCode: string | null; createdAt: string; requirements: RequirementVO | null; reason: string; sourceQuote: string | null }[]
   isFavorite: boolean
 }
 
@@ -478,6 +479,7 @@ export interface PlanItemVO {
   estimatedMinutes: number
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
   resourceRefs: ResourceRef[]
+  completedAt?: string | null
 }
 
 export interface PlanGithubBasisVO {
@@ -536,6 +538,7 @@ export interface QuestionVO {
   type: 'TEXT_SCENARIO' | 'TEXT_KNOWLEDGE'
   stem: string
   sourceType: 'CURATED' | 'GENERATED'
+  generationEnv?: 'PROD' | 'FAKE' | 'LEGACY' | null
   sourceTitle: string | null
   questionVersion: number
 }
@@ -682,6 +685,8 @@ export interface InterviewReportVO {
   evaluation: EvaluationVO
   gaps: GapVO[]
   evidenceIds: string[]
+  skillEvidenceStatus?: 'AVAILABLE' | 'NO_SKILL_SCORES' | 'NO_VALID_ANSWER'
+  skillEvidenceMessage?: string
   answeredQuestionCount: number
   completionType: 'NORMAL' | 'EARLY_END' | 'NO_VALID_ANSWER'
 }

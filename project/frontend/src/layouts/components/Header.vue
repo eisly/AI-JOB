@@ -41,11 +41,11 @@ async function logout() {
 </template>
 
 <style scoped lang="scss">
-.header { position:absolute; z-index:1; top:16px; right:24px; display:flex; align-items:center; gap:18px; color:#445e90; pointer-events:none; }
+.header { flex:0 0 64px; display:flex; justify-content:flex-end; align-items:center; gap:18px; padding:0 24px; color:#445e90; }
 .header__notification, .header__user { pointer-events:auto; }
 .header__notification { color:#445e90; }
 .header__user { display:flex; align-items:center; gap:10px; cursor:pointer; outline:none; }
 .header__avatar { background:#3868b2; color:#fff; }
 .header__name { max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-@media(max-width:700px){.header{right:12px}.header__name{display:none}}
+@media(max-width:700px){.header{padding:0 12px}.header__name{display:none}}
 </style>

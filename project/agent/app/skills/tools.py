@@ -26,6 +26,7 @@ def _compact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "content": str(item.get("content", ""))[:3000],
                 "questionNo": item.get("questionNo"),
                 "followUpNo": item.get("followUpNo"),
+                "skillCodes": item.get("skillCodes") or [],
             }
         )
     return result

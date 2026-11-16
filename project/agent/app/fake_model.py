@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import re
@@ -298,16 +297,19 @@ def _question(request: LLMRequest) -> dict[str, Any]:
     ][:2]
     # T02：确定性题干变体——优先选择未在已用题干中出现过的考查角度，
     # 避免同技能连续生成等价题干被去重校验拒绝，保证普通练习路径可持续
-    used_stems = [str(item) for item in payload.get("excludedQuestionStems") or []]
+    used_stems = {re.sub(r"\s+", "", str(item)).lower()
+                  for item in payload.get("excludedQuestionStems") or []}
     angle = ""
     for candidate in _QUESTION_ANGLES:
-        if f"请结合一个可验证的场景，说明 {skill} 的{candidate}。" not in used_stems:
+        stem = f"请结合一个可验证的场景，说明 {skill} 的{candidate}。"
+        if re.sub(r"\s+", "", stem).lower() not in used_stems:
             angle = candidate
             break
     if not angle:
-        session_id = str(payload.get("sessionId") or "")
-        digest = hashlib.sha256(f"{skill}:{session_id}".encode("utf-8")).hexdigest()
-        angle = _QUESTION_ANGLES[int(digest, 16) % len(_QUESTION_ANGLES)]
+        raise LLMProviderError(
+            "当前技能的模拟题已练完，请到历史训练或错题本复习，或切换真实模型生成新题。",
+            retryable=False,
+        )
     return {
         "stem": f"请结合一个可验证的场景，说明 {skill} 的{angle}。",
         "skillCodes": [skill],

@@ -128,6 +128,10 @@ public class ProfileService {
         if (name.chars().anyMatch(Character::isISOControl)) {
             throw BusinessException.validation("name", "技能名称不能包含控制字符");
         }
+        if (name.indexOf('<') >= 0 || name.indexOf('>') >= 0
+                || name.codePoints().noneMatch(Character::isLetterOrDigit)) {
+            throw BusinessException.validation("name", "请填写技术名称，不能包含标记代码或仅由符号组成");
+        }
         Map<String, Object> existing = mapper.skillByName(userId, name);
         if (existing != null) return view.map(existing);
         String code = "CUSTOM_" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);

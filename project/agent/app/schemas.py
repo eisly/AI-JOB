@@ -547,6 +547,10 @@ class TrainingHistoryInput(APIModel):
 class PlanItemSpec(APIModel):
     skill_code: str = Field(min_length=1, max_length=64)
     difficulty: Difficulty = "MEDIUM"
+    title: str | None = Field(default=None, max_length=200)
+    objective: str | None = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
+    completion_criteria: str | None = Field(default=None, max_length=2000)
 
 
 class LearningPlanPayload(APIModel):

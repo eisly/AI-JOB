@@ -9,8 +9,10 @@ import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
 import { errorMessage, formatDate } from '@/utils/format'
+import { useUserStore } from '@/stores/user'
 
-const suggestionTaskKey = 'ai-job-growth-suggestion-task'
+const suggestionTaskKey = `ai-job-growth-suggestion-task:${useUserStore().userInfo?.id || 'anon'}`
+let observedRunningTask = false
 const growth = ref<GrowthVO | null>(null)
 const growthLoading = ref(false)
 const growthError = ref<unknown>(null)
@@ -95,10 +97,14 @@ const {
   reasoningText,
   restart: restartSuggestionTask,
 } = useTask(suggestionTaskId, {
+  onTask: task => {
+    if (!isTerminalTask(task.status)) observedRunningTask = true
+  },
   onDone: async () => {
     clearStoredTask()
     await loadGrowth()
-    ElMessage.success('成长建议已根据权威摘要更新')
+    if (observedRunningTask) ElMessage.success('成长建议已更新')
+    observedRunningTask = false
   },
 })
 
@@ -325,10 +331,10 @@ onMounted(() => {
             </div>
             <dl class="skill-meta">
               <div><dt>有效样本数</dt><dd>{{ skill.sampleCount }}</dd></div>
-              <div><dt>证据状态</dt><dd>{{ skill.evidenceStatus }}</dd></div>
-              <div><dt>计算公式版本</dt><dd>{{ skill.formulaVersion }}</dd></div>
+              <div><dt>证据状态</dt><dd>{{ evidenceStatusLabels[skill.evidenceStatus] }}</dd></div>
               <div><dt>更新时间</dt><dd>{{ formatDate(skill.updatedAt) }}</dd></div>
             </dl>
+            <details><summary>评分依据详情</summary><p>计算公式版本：{{ skill.formulaVersion }}</p></details>
           </article>
         </div>
       </AsyncState>
@@ -338,7 +344,7 @@ onMounted(() => {
       <div class="panel__heading">
         <div>
           <h2>成长时间线</h2>
-          <p class="section-note">{{ usesFilteredTimeline ? '使用当前筛选证据的本页结果' : '使用成长摘要中的最近证据' }}，仅绘制真实创建时间、VALID 且非 null 的评分点。</p>
+          <p class="section-note">{{ usesFilteredTimeline ? '展示当前筛选的本页记录' : '展示最近的成长记录' }}，仅包含有有效评分的训练与面试。</p>
         </div>
         <el-button :loading="timelineLoading" @click="retryTimeline">刷新时间线</el-button>
       </div>
@@ -379,7 +385,7 @@ onMounted(() => {
       <div class="panel__heading">
         <div>
           <h2>下一步成长建议</h2>
-          <p class="section-note">建议任务使用当前摘要画像版本，完成后重新读取成长摘要，不直接修改能力分。</p>
+          <p class="section-note">根据当前求职画像与训练表现给出建议；完成新的训练后，能力评分才会更新。</p>
         </div>
         <el-button type="primary" :loading="suggestionSubmitting" :disabled="!growth || suggestionBusy" @click="generateSuggestions">生成成长建议</el-button>
       </div>
@@ -467,10 +473,10 @@ onMounted(() => {
             <div class="evidence-metrics">
               <div><span>分数</span><strong :class="{ 'null-score': evidence.score === null }">{{ displayScore(evidence.score) }}</strong></div>
               <div><span>模型自报置信度（非准确率）</span><strong>{{ formatConfidence(evidence.confidence) }}</strong></div>
-              <div><span>状态 / 量表</span><strong>{{ evidence.status }} / {{ evidence.rubricVersion || '—' }}</strong></div>
+              <div><span>状态 / 量表</span><strong>{{ evidence.status === 'VALID' ? '有效' : '已撤销' }} / {{ evidence.rubricVersion || '—' }}</strong></div>
               <div><span>创建时间</span><strong>{{ formatDate(evidence.createdAt) }}</strong></div>
             </div>
-            <small>证据 ID：{{ evidence.id }} · 来源 ID：{{ evidence.sourceId }}</small>
+            <details><summary>查看记录编号</summary><small>证据 ID：{{ evidence.id }} · 来源 ID：{{ evidence.sourceId }}</small></details>
           </article>
         </div>
         <el-pagination

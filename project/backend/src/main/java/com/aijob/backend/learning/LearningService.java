@@ -227,7 +227,7 @@ public class LearningService {
         String sessionId = UUID.randomUUID().toString();
         long profileVersion = ((Number) profiles.get(userId).get("profileVersion")).longValue();
         List<Map<String, Object>> candidates = candidates(String.valueOf(item.get("skill_code")), null);
-        Map<String, Object> payload = questionPayload(sessionId, String.valueOf(item.get("skill_code")), candidates,
+        Map<String, Object> payload = questionPayload(sessionId, item, candidates,
                 mapper.usedQuestionIds(userId), mapper.usedQuestionStems(userId), "SELECT_OR_GENERATE");
         Map<String, Object> versions = Map.of("profileVersion", profileVersion);
         return tasks.create(userId, "POST", route, key, body, "LEARNING_QUESTION", "LEARNING_SESSION", sessionId,
@@ -351,7 +351,7 @@ public class LearningService {
         int questionVersion = ((Number) question.get("question_version")).intValue();
         List<Map<String, Object>> candidates = List.of(candidate(question));
         Map<String, Object> payload = questionPayload(sessionId,
-                ((List<String>) json.convert(json.parse(String.valueOf(question.get("skill_codes_json"))), List.class)).get(0),
+                Map.of("skill_code", ((List<String>) json.convert(json.parse(String.valueOf(question.get("skill_codes_json"))), List.class)).get(0)),
                 candidates, List.of(), List.of(), "REUSE_ONLY");
         Map<String, Object> versions = Map.of("profileVersion", profileVersion, "questionVersion", questionVersion);
         return tasks.create(userId, "POST", route, key, body, "LEARNING_QUESTION", "LEARNING_SESSION", sessionId,
@@ -369,6 +369,7 @@ public class LearningService {
         if (!"READING".equals(String.valueOf(item.get("kind")))) {
             throw BusinessException.conflict("仅 READING 计划项允许手动完成", "INVALID_STATE");
         }
+        if ("COMPLETED".equals(String.valueOf(item.get("status")))) return true;
         mapper.updateItemStatus(itemId, "COMPLETED");
         mapper.completePlan(planId);
         return true;
@@ -441,6 +442,7 @@ public class LearningService {
         result.put("type", question.get("type"));
         result.put("stem", question.get("stem"));
         result.put("sourceType", question.get("source_type"));
+        result.put("generationEnv", question.get("generation_env"));
         result.put("sourceTitle", null);
         result.put("questionVersion", question.get("question_version"));
         return result;
@@ -488,9 +490,14 @@ public class LearningService {
         return result;
     }
 
-    private Map<String, Object> questionPayload(String sessionId, String skillCode, List<Map<String, Object>> candidates,
+    private Map<String, Object> questionPayload(String sessionId, Map<String, Object> item, List<Map<String, Object>> candidates,
                                                  List<String> excluded, List<String> excludedStems, String mode) {
-        return Map.of("sessionId", sessionId, "planItem", Map.of("skillCode", skillCode, "difficulty", "MEDIUM"),
+        Map<String, Object> planItem = new LinkedHashMap<>(Map.of("skillCode", item.get("skill_code"), "difficulty", "MEDIUM"));
+        Map.of("title", "title", "objective", "objective", "reason", "reason", "completion_criteria", "completionCriteria")
+                .forEach((column, field) -> {
+                    if (item.get(column) != null) planItem.put(field, item.get(column));
+                });
+        return Map.of("sessionId", sessionId, "planItem", planItem,
                 "candidateQuestions", candidates, "excludedQuestionIds", excluded,
                 "excludedQuestionStems", excludedStems,
                 "knowledgeRefs", List.of(), "mode", mode);

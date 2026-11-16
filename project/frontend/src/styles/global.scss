@@ -162,5 +162,16 @@ body {
   .responsive-grid,
   .responsive-grid--three { grid-template-columns: 1fr; }
   .panel { padding: 14px; }
-  .pagination { justify-content: center; overflow-x: auto; }
+  .pagination { justify-content: center; }
+  .pagination .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 10px;
+    white-space: normal;
+  }
+  .pagination .el-pagination__total,
+  .pagination .el-pagination__sizes,
+  .pagination .el-pagination__jump {
+    flex-shrink: 0;
+  }
 }

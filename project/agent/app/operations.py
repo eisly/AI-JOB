@@ -109,7 +109,7 @@ PROMPT_VERSIONS: dict[str, str] = {
     JOB_MATCH: "semantic-v2",
     JOB_SEARCH: "job-search-v1",
     LEARNING_PLAN: "learning-plan-v3",
-    LEARNING_QUESTION: "learning-question-v2",
+    LEARNING_QUESTION: "learning-question-v3",
     LEARNING_EVALUATE: "answer-evaluate-v3",
     INTERVIEW_TURN: "interview-turn-v5",
     INTERVIEW_REPORT: "interview-report-v2",

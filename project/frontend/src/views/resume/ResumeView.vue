@@ -711,6 +711,7 @@ onMounted(() => {
                             <el-option v-for="skill in skillOptions(scope.row.skillCode)" :key="skill.code" :value="skill.code" :label="skill.normalizationStatus === 'PENDING' ? `${skill.name}（待规范化）` : skill.name" :disabled="!skill.enabled" />
                           </el-select>
                           <small class="skill-code">{{ scope.row.skillCode || '未选择' }}</small>
+                          <small v-if="skillCatalog.find(skill => skill.code === scope.row.skillCode)?.normalizationStatus === 'PENDING'" class="skill-code">待规范化 · 仅本人可见</small>
                         </template>
                       </el-table-column>
                       <el-table-column label="能力自述" min-width="190"><template #default="scope"><el-input v-model="scope.row.claim" type="textarea" :rows="2" maxlength="500" :disabled="!canEditFacts" /></template></el-table-column>
@@ -723,7 +724,7 @@ onMounted(() => {
 
                   <section v-for="group in evidenceGroups" :key="group.key" class="evidence-section">
                     <div class="skills-heading">
-                      <div><h3>{{ group.title }}</h3><p class="muted">仅保留明确出现的经历，核对内容和原文依据；实习不会自动计入全职经验。</p></div>
+                      <div><h3>{{ group.title }}</h3><p class="muted">仅保留简历中明确出现的内容，核对原文依据。<template v-if="group.key === 'internships'">实习不会自动计入全职经验。</template></p></div>
                       <el-button v-if="canEditFacts" @click="addEvidence(group.key)">添加{{ group.title }}</el-button>
                     </div>
                     <el-empty v-if="!facts[group.key].length" :description="`暂无${group.title}`" />
@@ -769,7 +770,7 @@ onMounted(() => {
     </div>
 
     <el-dialog v-model="customSkillVisible" title="添加自定义技能" width="480px" @closed="customSkillError = null">
-      <p class="muted">填写技术或编程语言名称。该技能先仅对你的账号可见，待规范化后再合并到公共目录。</p>
+      <p class="muted">填写技术或编程语言名称。该技能仅对你的账号可见，标记为待规范化。</p>
       <el-input v-model="customSkillName" maxlength="100" show-word-limit placeholder="例如：FastAPI、Rust、ISO 21434" @keyup.enter="createCustomSkill" />
       <el-alert v-if="customSkillError" class="inline-alert" type="error" :title="errorMessage(customSkillError)" :closable="false" show-icon />
       <template #footer><el-button @click="customSkillVisible = false">取消</el-button><el-button type="primary" :disabled="!customSkillName.trim()" :loading="customSkillPending" @click="createCustomSkill">添加到技能事实</el-button></template>

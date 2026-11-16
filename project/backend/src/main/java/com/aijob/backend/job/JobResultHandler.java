@@ -73,6 +73,16 @@ public class JobResultHandler implements TaskResultHandler {
     @Override
     public void prepareRetry(AiTask original, String newTaskId) {
         if ("JD_ANALYZE".equals(original.getOperation())) {
+            Map<String, Object> job = mapper.lockJob(original.getResourceId(), original.getUserId());
+            if (job == null) throw BusinessException.notFound();
+            Object version = json.map(original.getInputVersionsJson()).get("jobVersion");
+            if (!(version instanceof Number expected)
+                    || expected.intValue() != ((Number) job.get("job_version")).intValue()) {
+                throw BusinessException.conflict("JD 已修订，原任务输入版本已失效；请使用当前版本重新匹配", "STALE_INPUT");
+            }
+            if (!"FAILED".equals(String.valueOf(job.get("status")))) {
+                throw BusinessException.conflict("当前 JD 状态不允许重试旧分析，请刷新后查看结果", "INVALID_STATE");
+            }
             mapper.updateJobStatus(original.getResourceId(), "ANALYZING");
         } else {
             mapper.updateBatch(original.getResourceId(), "GENERATING", newTaskId);

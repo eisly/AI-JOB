@@ -23,6 +23,7 @@ LearningAnswerVO,
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
+import { stemSegments } from '@/utils/training-content'
 import { commonStatusLabels, displayScore, errorMessage, formatDate, roleLabels } from '@/utils/format'
 
 type TrainingTab = 'plans' | 'mistakes'
@@ -75,13 +76,13 @@ function questionTypeLabel(type: string) {
   return ({ TEXT_SCENARIO: '场景题', TEXT_KNOWLEDGE: '知识题' } as Record<string, string>)[type] || type
 }
 
-/** U02：题干中的 ``` 围栏代码分段渲染为代码块（等宽、可复制、横向滚动），普通文本保持 pre-wrap */
-function stemSegments(stem: string): Array<{ type: 'text' | 'code'; content: string }> {
-  const parts = stem.split(/```(?:[a-zA-Z0-9+-]*)\n?/)
-  if (parts.length <= 1) return [{ type: 'text', content: stem }]
-  return parts
-    .filter(part => part !== '')
-    .map((part, index) => ({ type: index % 2 === 1 ? 'code' as const : 'text' as const, content: part.replace(/\n$/, '') }))
+async function copyCode(content: string) {
+  try {
+    await navigator.clipboard.writeText(content)
+    ElMessage.success('代码已复制')
+  } catch {
+    ElMessage.warning('复制未成功，请选中代码后手动复制')
+  }
 }
 
 function evidenceLabel(status: string) {
@@ -868,6 +869,7 @@ onMounted(async () => {
                     <p v-if="item.kind === 'READING'" class="muted reading-self-check-note">
                       {{ item.status === 'COMPLETED' ? '阅读完成为自评记录（完成时间已保存），不代表系统已验证掌握该技能；建议结合答题训练检验效果。' : '请先阅读上方授权资料，确认理解后自评完成；该记录为自评性质，不会计入技能评分证据。' }}
                     </p>
+                    <p v-if="item.kind === 'READING' && item.completedAt" class="muted">自评完成时间：{{ formatDate(item.completedAt) }}</p>
                   </div>
                 </article>
               </div>
@@ -914,12 +916,15 @@ onMounted(async () => {
                 </div>
                 <h3>题目</h3>
                 <template v-for="(segment, index) in stemSegments(session.question.stem)" :key="index">
-                  <pre v-if="segment.type === 'code'" class="question-code-block"><code>{{ segment.content }}</code></pre>
+                  <div v-if="segment.type === 'code'" class="question-code">
+                    <div class="question-code__toolbar"><span>{{ segment.language || '代码' }}</span><el-button size="small" :aria-label="`复制第 ${index + 1} 段代码`" @click="copyCode(segment.content)">复制代码</el-button></div>
+                    <pre class="question-code-block" tabindex="0" aria-label="题目代码，可横向滚动"><code>{{ segment.content }}</code></pre>
+                  </div>
                   <p v-else class="pre-wrap question-stem">{{ segment.content }}</p>
                 </template>
                 <div class="question-source">
                   <span>题目版本 v{{ session.question.questionVersion }}</span>
-                  <span>{{ session.question.sourceType === 'CURATED' ? '审核题库' : 'AI生成并完成结构校验' }}</span>
+                  <span>{{ session.question.generationEnv === 'FAKE' ? '模拟练习题（非真实模型）' : session.question.generationEnv === 'LEGACY' ? '历史题目（来源待核验）' : session.question.sourceType === 'CURATED' ? '审核题库' : 'AI 生成题（不代表人工审核）' }}</span>
                   <span v-if="session.question.sourceTitle">来源：{{ session.question.sourceTitle }}</span>
                 </div>
               </div>
@@ -930,7 +935,7 @@ onMounted(async () => {
                   <span :class="{ 'limit-warning': answerContent.length >= 10000 }">{{ answerContent.length }} / 10000</span>
                 </div>
                 <p class="muted answer-scope-note">本训练仅评估文字方案：如题目要求编写代码、接口或测试，请将代码作为文本粘贴在回答中，系统评估设计思路与代码逻辑，不会实际运行代码。</p>
-                <el-input ref="answerInputRef" v-model="answerContent" type="textarea" :rows="9" maxlength="10000" show-word-limit resize="vertical" placeholder="请输入完整分析与解决方案，草稿会按会话自动保存在当前浏览器" :disabled="session.status !== 'ACTIVE' || evaluationTaskActive || answerSubmitted" />
+                <el-input ref="answerInputRef" v-model="answerContent" aria-label="我的回答" type="textarea" :rows="9" maxlength="10000" show-word-limit resize="vertical" placeholder="请输入完整分析与解决方案，草稿会按会话自动保存在当前浏览器" :disabled="session.status !== 'ACTIVE' || evaluationTaskActive || answerSubmitted" />
                 <div class="draft-status">
                   <span v-if="answerSubmitted">回答已提交；失败重试会继续使用相同内容</span>
                   <span v-else-if="draftSaveFailed" class="error-text">浏览器草稿保存失败，请勿在提交前关闭页面</span>
@@ -1179,10 +1184,13 @@ onMounted(async () => {
 .plan-list-panel { min-width: 0; }
 .plan-detail-panel { min-width: 0; }
 .break-all { word-break: break-all; }
-.plan-card { display: grid; gap: 10px; width: 100%; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: #fff; cursor: pointer; }
+.plan-card { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; width: 100%; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: #fff; cursor: pointer; overflow-wrap: anywhere; }
+.plan-card :deep(.el-tag) { max-width: 100%; height: auto; min-height: 20px; white-space: normal; }
+.plan-card :deep(.el-tag__content) { overflow-wrap: anywhere; }
 .plan-card:hover, .plan-card--active { border-color: $ai-primary; background: $ai-primary-light; }
 .plan-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.plan-card__heading strong { color: #101d4b; line-height: 1.5; }
+.plan-card__heading strong { min-width: 0; color: #101d4b; line-height: 1.5; }
+.plan-card__heading > .el-tag { flex-shrink: 0; }
 .plan-card__progress { color: $ai-text-secondary; font-size: 12px; text-align: right; }
 .plan-items { display: grid; gap: 12px; margin-top: 16px; }
 .plan-item { display: flex; gap: 12px; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; }
@@ -1205,6 +1213,8 @@ onMounted(async () => {
 .question-stem { margin: 0; color: #101d4b; font-size: 17px; font-weight: 500; }
 .question-code-block { margin: 10px 0; padding: 12px 14px; border: 1px solid #dbe7fa; border-radius: 8px; background: #f4f7fd; overflow-x: auto; }
 .question-code-block code { font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 13px; line-height: 1.6; color: #1f3576; white-space: pre; }
+.question-code { min-width: 0; margin-top: 12px; }
+.question-code__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .question-source { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; color: $ai-text-secondary; font-size: 12px; }
 .answer-editor { margin-top: 18px; }
 .answer-editor__heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }

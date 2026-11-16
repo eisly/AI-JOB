@@ -30,6 +30,10 @@ const route = useRoute()
 const router = useRouter()
 const resumeRecords = ref<ResumeVO[]>([])
 const resumeVersions = ref<ResumeVersionVO[]>([])
+function diagnosisTitle(versionId: string) {
+  const version = resumeVersions.value.find(item => item.id === versionId)
+  return version ? `${versionLabel(version)} · 诊断` : '简历诊断（历史版本）'
+}
 const resumeOptionsLoading = ref(false)
 const resumeOptionsError = ref<unknown>(null)
 const resumeOptionsWarning = ref('')
@@ -665,8 +669,8 @@ onMounted(() => {
         <AsyncState :loading="diagnosisHistoryLoading" :error="diagnosisHistoryError" :empty="!diagnoses.length" empty-text="暂无历史诊断" @retry="loadDiagnoses">
           <div class="history-list">
             <button v-for="item in diagnoses" :key="item.id" type="button" class="history-item" :class="{ 'history-item--active': item.id === selectedDiagnosisId }" @click="loadDiagnosis(item.id)">
-              <span><strong>{{ item.resumeVersionId }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
-              <small>{{ formatDate(item.createdAt) }} · {{ item.id }}</small>
+              <span><strong>{{ diagnosisTitle(item.resumeVersionId) }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
+              <small>{{ formatDate(item.createdAt) }}</small>
             </button>
           </div>
           <el-pagination v-if="diagnosisTotal > diagnosisSize" class="pagination" layout="prev, pager, next" small :total="diagnosisTotal" :current-page="diagnosisPage" :page-size="diagnosisSize" @current-change="diagnosisPage = $event; loadDiagnoses()" />
@@ -679,7 +683,7 @@ onMounted(() => {
           <div class="history-list">
             <button v-for="item in optimizations" :key="item.id" type="button" class="history-item" :class="{ 'history-item--active': item.id === selectedOptimizationId }" @click="loadOptimization(item.id)">
               <span><strong>{{ item.title }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
-              <small>{{ formatDate(item.createdAt) }} · {{ item.id }}</small>
+              <small>{{ formatDate(item.createdAt) }}</small>
             </button>
           </div>
           <el-pagination v-if="optimizationTotal > optimizationSize" class="pagination" layout="prev, pager, next" small :total="optimizationTotal" :current-page="optimizationPage" :page-size="optimizationSize" @current-change="optimizationPage = $event; loadOptimizations()" />
@@ -695,7 +699,7 @@ onMounted(() => {
       <AsyncState :loading="diagnosisDetailLoading" :error="diagnosisDetailError" :empty="!currentDiagnosis" empty-text="选择历史诊断或发起新诊断" @retry="loadDiagnosis(selectedDiagnosisId)">
         <template v-if="currentDiagnosis">
           <div class="detail-summary">
-            <div><strong>{{ currentDiagnosis.id }}</strong><p class="muted">简历版本：{{ currentDiagnosis.resumeVersionId }} · {{ formatDate(currentDiagnosis.createdAt) }}</p></div>
+            <div><strong>{{ diagnosisTitle(currentDiagnosis.resumeVersionId) }}</strong><p class="muted">{{ formatDate(currentDiagnosis.createdAt) }}</p><details><summary>诊断记录编号</summary>{{ currentDiagnosis.id }} · 简历版本 {{ currentDiagnosis.resumeVersionId }}</details></div>
             <el-tag :type="statusTagType(currentDiagnosis.status)">{{ statusLabel(currentDiagnosis.status) }}</el-tag>
           </div>
           <div v-if="currentDiagnosis.items.length" class="diagnosis-items">
@@ -714,7 +718,7 @@ onMounted(() => {
 
     <section class="panel optimization-detail">
       <div class="panel__heading">
-        <div><h2>优化稿核对与预览</h2><p v-if="currentOptimization" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ currentOptimization.id }}</p></div>
+        <div><h2>优化稿核对与预览</h2><p v-if="currentOptimization" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ formatDate(currentOptimization.createdAt) }}</p><details v-if="currentOptimization"><summary>优化稿记录编号</summary>{{ currentOptimization.id }}</details></div>
         <div class="actions">
           <el-button v-if="currentOptimization" :loading="optimizationDetailLoading" @click="refreshCurrentOptimization">刷新详情</el-button>
           <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">导出 PDF</el-button>

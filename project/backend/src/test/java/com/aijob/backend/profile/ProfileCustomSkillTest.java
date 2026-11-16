@@ -17,6 +17,16 @@ import tools.jackson.databind.json.JsonMapper;
 
 class ProfileCustomSkillTest {
     @Test
+    void rejectsMarkupAndPunctuationOnlyNames() {
+        ProfileMapper mapper = mock(ProfileMapper.class);
+        JsonService json = new JsonService(JsonMapper.builder().build());
+        ProfileService service = new ProfileService(mapper, json, new ApiView(json));
+        for (String name : java.util.List.of("<script>alert(1)</script>", "!!!", "Java\nScript")) {
+            assertThrows(BusinessException.class, () -> service.createCustomSkill("alice", Map.of("name", name)));
+        }
+        verify(mapper, never()).insertCustomSkill(anyString(), anyString(), anyString());
+    }
+    @Test
     void createsPrivatePendingSkillAndChecksOwner() {
         ProfileMapper mapper = mock(ProfileMapper.class);
         JsonService json = new JsonService(JsonMapper.builder().build());

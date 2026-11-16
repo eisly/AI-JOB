@@ -565,6 +565,7 @@ onMounted(async () => {
 
     <AsyncState :loading="searchLoading" :error="searchError" :empty="!search" empty-text="尚未发起 AI 搜索" empty-description="设置条件并提交后，这里会显示搜索进度、来源状态和排序结果。" @retry="loadSearch()">
       <template v-if="search">
+        <p class="section-note">本次搜索时间：{{ formatDate(search.createdAt) }}；结果为本次检索快照，并非实时状态。单次搜索内可能复用查询和详情缓存，重新搜索会重新采集。</p>
         <el-alert v-if="sourceFailed" class="inline-alert" type="error" title="检索服务不可用，请查看来源诊断后重试。" :closable="false" show-icon />
         <el-alert v-else-if="webUnavailable" class="inline-alert" type="warning" title="全网搜索能力受限，页面展示本次仍可用的结果。" :closable="false" show-icon />
         <el-alert v-else-if="sourceIncomplete" class="inline-alert" type="warning" title="部分来源未完成检索，已找到的相关岗位仍会展示。" :closable="false" show-icon />
@@ -760,7 +761,7 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="scss">
-.job-search-page { display: grid; gap: 16px; min-width: 0; padding-bottom: 24px; }
+.job-search-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; padding-bottom: 24px; }
 .job-search-page > .panel { margin-bottom: 0; }
 .section-note { margin: 6px 0 0; color: $ai-text-secondary; line-height: 1.6; }
 .inline-alert { margin: 0 0 14px; }
@@ -806,9 +807,14 @@ onMounted(async () => {
   .filter-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 700px) {
+  .panel__heading { flex-wrap: wrap; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid :deep(.el-form-item) { display: block; }
+  .form-grid :deep(.el-switch) { flex-wrap: wrap; height: auto; row-gap: 6px; }
   .form-grid :deep(.el-form-item__label) { justify-content: flex-start; }
-  .summary-grid, .filter-grid { grid-template-columns: 1fr; }
+  .summary-grid, .filter-grid { grid-template-columns: minmax(0, 1fr); }
+  .job-facts { overflow-x: auto; }
+  .search-card__actions :deep(.el-button) { margin-left: 0; max-width: 100%; height: auto; min-height: 32px; white-space: normal; }
   .search-card__heading { flex-direction: column; }
   .search-score { align-items: flex-start; }
 }

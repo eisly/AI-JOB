@@ -54,6 +54,7 @@ export async function submitTrackedTask(path: string, body: unknown, businessPat
 }
 
 export function canRetryTrackedTask(task: TaskVO) {
+  if (task.error?.code === 'STALE_INPUT') return false
   return task.status === 'FAILED' || task.status === 'EXPIRED'
     || (task.status === 'CANCELLED' && ['INTERVIEW_TURN', 'LEARNING_EVALUATE'].includes(task.type))
 }

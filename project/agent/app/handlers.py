@@ -94,7 +94,7 @@ FIXED_RUBRIC_WEIGHTS: dict[str, float] = {
     "completeness": 0.3,
     "expression": 0.2,
 }
-UNUSABLE_ANSWERS = {"不知道", "不清楚", "不会", "无", "没有", "不知道。", "不会。", "asdf", "test"}
+UNUSABLE_ANSWERS = {"不知道", "不清楚", "不会", "无", "没有"}
 
 
 def utcnow_iso() -> str:
@@ -808,7 +808,8 @@ class LearningQuestionHandler(BaseHandler):
             for item in payload.candidate_questions
             if str(item.id) not in excluded and norm_text(item.stem) not in used_stems
         ]
-        if available:
+        # A shared skill tag alone does not prove relevance to a specific plan goal.
+        if available and not payload.plan_item.objective:
             result = self._from_candidate(available[0], provider=str(getattr(ctx.llm, "name", "")))
             return result.model_dump(by_alias=True, mode="json"), self._meta(True, ctx)
 
@@ -877,10 +878,15 @@ def _build_evaluation(
     # 回答分类：明确回答"不会"（UNKNOWN）与无效回答（INVALID，过短/乱输入）分开标记。
     # 两者都不伪造分数，但"不会"在 Java 侧会进入错题本待复习路径。
     answer_class: str | None = None
-    if answer.strip().lower() in UNUSABLE_ANSWERS:
+    admission = re.sub(r"[\s，。！？,.!?]", "", answer).lower()
+    explicitly_unknown = admission in UNUSABLE_ANSWERS or re.fullmatch(
+        r"(?:我)?(?:暂时|目前|还)?(?:不会|不知道|不清楚|不懂)(?:这(?:道)?题)?"
+        r"(?:暂时无法给出(?:有效的)?(?:分析方案|答案|解答))?", admission
+    ) is not None
+    if explicitly_unknown:
         status = "INVALID"
         answer_class = "UNKNOWN"
-    elif len(answer.strip()) < 2:
+    elif len(answer.strip()) < 2 or admission in {"asdf", "test"}:
         status = "INVALID"
         answer_class = "INVALID"
 

@@ -654,6 +654,7 @@ onMounted(async () => {
               </div>
             </div>
             <el-alert v-if="report.completionType === 'NO_VALID_ANSWER'" class="report-notice" title="本次没有有效回答，因此不生成有效评分，也不新增能力证据。" type="info" :closable="false" show-icon />
+            <el-alert v-else-if="!report.evidenceIds.length" class="report-notice" :title="report.skillEvidenceMessage || '本次有有效总评，但没有有效的逐技能评分，因此不新增技能证据或有效样本；总分不会复制为技能分。'" type="info" :closable="false" show-icon />
 
             <div class="report-section">
               <h3>能力维度</h3>
@@ -723,7 +724,7 @@ onMounted(async () => {
               <el-tag size="small" :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'primary'">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
               <el-tag v-if="item.completionType === 'EARLY_END'" size="small" type="warning">提前结束</el-tag>
               <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER'" size="small" type="info">无有效回答</el-tag>
-              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} / {{ item.questionLimit }} 个主问题</span>
+              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} 次（含追问） · 计划 {{ item.questionLimit }} 个主问题</span>
               <time class="muted">{{ formatDate(item.createdAt) }}</time>
             </button>
             <div class="history-item__actions">

@@ -96,12 +96,12 @@ async function handleRegister() {
     <div class="login__form-side">
       <div class="login__card">
         <h2 class="login__title">登录</h2>
-        <p class="login__subtitle">访问令牌仅保存在当前页面内存中。</p>
+        <p class="login__subtitle">登录后继续管理简历、训练和求职进度。</p>
         <el-alert v-if="sessionNotice" :title="sessionNotice" type="warning" show-icon :closable="true" class="login__error" />
         <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" class="login__error" />
         <el-form ref="formRef" :model="form" :rules="rules" size="large" class="login__form" @submit.prevent="handleLogin">
-          <el-form-item prop="email"><el-input v-model="form.email" placeholder="请输入邮箱地址" :prefix-icon="Message" autocomplete="email" /></el-form-item>
-          <el-form-item prop="password"><el-input v-model="form.password" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password autocomplete="current-password" @keyup.enter="handleLogin" /></el-form-item>
+          <el-form-item prop="email"><el-input v-model="form.email" aria-label="邮箱" placeholder="请输入邮箱地址" :prefix-icon="Message" autocomplete="email" /></el-form-item>
+          <el-form-item prop="password"><el-input v-model="form.password" aria-label="密码" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password autocomplete="current-password" @keyup.enter="handleLogin" /></el-form-item>
           <el-button type="primary" native-type="submit" class="login__submit" :loading="loading">登录</el-button>
         </el-form>
         <router-link to="/forgot-password">忘记密码？</router-link>

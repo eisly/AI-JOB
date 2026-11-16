@@ -14,6 +14,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.apache.fontbox.ttf.TrueTypeCollection;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -33,8 +34,9 @@ public class ResumeExportService {
     }
 
     public byte[] pdf(String title, List<Map<String, Object>> sections) {
-        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            PDType0Font font = loadFont(document);
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream output = new ByteArrayOutputStream();
+             LoadedFont loaded = loadFont(document)) {
+            PDType0Font font = loaded.font();
             List<String> lines = new ArrayList<>();
             lines.addAll(wrap(title, font, 18, 495));
             lines.add("");
@@ -67,12 +69,8 @@ public class ResumeExportService {
             document.save(output);
             return output.toByteArray();
         } catch (IOException ex) {
-            // E02：错误说明必须可操作——指明根因（缺中文字体）、给出配置恢复方法，并提示 DOCX 替代路径
             throw BusinessException.dependencyUnavailable(
-                    "PDF 导出失败：服务器缺少可用的中文字体文件（已尝试配置路径与系统字体目录）。"
-                            + "恢复方法：在服务端配置 app.files.pdf-font-path 指向中文字体文件"
-                            + "（如微软雅黑 msyh.ttc 或思源黑体），或安装系统字体后重试；"
-                            + "恢复后无需重新采纳优化稿即可导出。当前可改用 DOCX 导出，内容一致且不依赖服务器字体。");
+                    "PDF 文件生成失败，请稍后重试或联系管理员检查导出服务；可先下载 DOCX，无需重新采纳优化稿。");
         }
     }
 
@@ -93,7 +91,7 @@ public class ResumeExportService {
         }
     }
 
-    private PDType0Font loadFont(PDDocument document) throws IOException {
+    private LoadedFont loadFont(PDDocument document) {
         List<String> paths = new ArrayList<>();
         if (configuredFontPath != null && !configuredFontPath.isBlank()) {
             paths.add(configuredFontPath);
@@ -108,21 +106,47 @@ public class ResumeExportService {
         paths.add("C:\\Windows\\Fonts\\simhei.ttf");
         paths.add("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc");
         paths.add("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc");
-        IOException last = null;
+        paths.add("/Library/Fonts/Arial Unicode.ttf");
+        paths.add("/System/Library/Fonts/Supplemental/Arial Unicode.ttf");
+        paths.add("/System/Library/Fonts/Supplemental/Songti.ttc");
         for (String path : paths) {
             if (!Files.isRegularFile(Path.of(path))) {
                 continue;
             }
             try {
-                return PDType0Font.load(document, new File(path));
+                if (path.toLowerCase(java.util.Locale.ROOT).endsWith(".ttc")) {
+                    TrueTypeCollection collection = new TrueTypeCollection(new File(path));
+                    try {
+                        PDType0Font[] selected = new PDType0Font[1];
+                        collection.processAllFonts(font -> {
+                            if (selected[0] == null && font.getUnicodeCmapLookup().getGlyphId('中') != 0) {
+                                selected[0] = PDType0Font.load(document, font, true);
+                            }
+                        });
+                        if (selected[0] != null) return new LoadedFont(selected[0], collection);
+                        collection.close();
+                    } catch (IOException | RuntimeException ex) {
+                        collection.close();
+                        throw ex;
+                    }
+                } else {
+                    return new LoadedFont(PDType0Font.load(document, new File(path)), null);
+                }
             } catch (IOException ex) {
-                last = ex;
+                // Try the next installed font when a configured file is unreadable.
             }
         }
-        if (last != null) {
-            throw last;
+        throw BusinessException.dependencyUnavailable(
+                "PDF 导出暂不可用：没有可读取的中文字体。请管理员配置 app.files.pdf-font-path 为中文 TTF/TTC 字体后重试；"
+                        + "可先下载 DOCX，无需重新采纳优化稿。");
+    }
+
+    private record LoadedFont(PDType0Font font, TrueTypeCollection collection) implements AutoCloseable {
+        @Override
+        public void close() throws IOException {
+            // Subsetting during document.save still needs the collection's stream.
+            if (collection != null) collection.close();
         }
-        throw new IOException("No Chinese PDF font available");
     }
 
     private List<String> wrap(String text, PDType0Font font, int size, float width) throws IOException {

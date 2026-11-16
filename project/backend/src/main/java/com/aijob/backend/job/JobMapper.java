@@ -46,6 +46,14 @@ public interface JobMapper {
     @Select("SELECT " + COLUMNS + " FROM job j JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version JOIN job_source s ON s.id=j.source_id WHERE j.id=#{jobId} AND (j.visibility='PUBLIC' OR j.owner_user_id=#{userId})")
     Map<String,Object> job(@Param("jobId") String jobId, @Param("userId") String userId);
 
+    @Select("""
+            SELECT v.version_no,v.city_code,v.requirements_json,v.analysis_meta_json,v.created_at
+            FROM job_version v JOIN job j ON j.id=v.job_id
+            WHERE j.id=#{jobId} AND j.visibility='PRIVATE' AND j.owner_user_id=#{userId}
+            ORDER BY v.version_no
+            """)
+    List<Map<String,Object>> revisions(@Param("jobId") String jobId, @Param("userId") String userId);
+
     @Select("SELECT " + COLUMNS + " FROM job j JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version JOIN job_source s ON s.id=j.source_id WHERE j.id=#{jobId} AND (j.visibility='PUBLIC' OR j.owner_user_id=#{userId}) FOR UPDATE")
     Map<String,Object> lockJob(@Param("jobId") String jobId, @Param("userId") String userId);
 

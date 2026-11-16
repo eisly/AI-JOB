@@ -683,7 +683,7 @@ onMounted(load)
 
 @media (max-width: 1100px) {
   .profile-page__grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -694,10 +694,38 @@ onMounted(load)
 
   .panel {
     padding: 18px;
+    min-width: 0;
+  }
+
+  .preferences-form :deep(.el-form-item) {
+    display: block;
+  }
+
+  .preferences-form :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    width: auto !important;
+  }
+
+  .preferences-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+    min-width: 0;
+  }
+
+  .salary-range {
+    flex-wrap: wrap;
   }
 
   .salary-range__input {
-    width: 100px;
+    width: 96px;
+    min-width: 0;
+  }
+
+  .preferences-form__actions {
+    flex-wrap: wrap;
+  }
+
+  .preferences-form__actions :deep(.el-button + .el-button) {
+    margin-left: 0;
   }
 }
 </style>

@@ -136,6 +136,13 @@ export const taskOutcomeLabels: Record<string, string> = {
   NO_RESULTS_SOURCE_FAILED: '来源失败，无可用结果',
 }
 
+export function taskErrorSummary(error: { code: string; message: string }) {
+  if (/PROMPT_VERSIONS|\.md.*version|Agent 内部/.test(error.message) || error.code === 'INTERNAL_ERROR') {
+    return '服务处理异常，请稍后重试；若仍失败，请联系维护人员。'
+  }
+  return error.message
+}
+
 export const searchWarningLabels: Record<string, string> = {
   MISSING_SALARY: '薪资未提供',
   MISSING_EDUCATION: '学历要求未提供',

@@ -6,7 +6,7 @@
       </el-form-item>
       <el-button class="submit-button" type="primary" :loading="submitting" native-type="submit">发送验证码</el-button>
       <p class="field-hint">
-        开发环境可在 Mailpit（http://localhost:8025）查看邮件。
+        请检查收件箱和垃圾邮件；发送后请稍候，避免重复请求。
       </p>
       <p class="form-footer">
         想起密码了?

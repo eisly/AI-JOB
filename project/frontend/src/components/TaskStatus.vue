@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { TaskStatus, TaskVO } from '@/api/types'
-import { taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import { taskErrorSummary, taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
 import ModelReasoning from '@/components/ModelReasoning.vue'
 
 const props = defineProps<{ task: TaskVO | null; compact?: boolean; reasoning?: string }>()
@@ -35,9 +35,17 @@ const tagType = computed(() => {
       <el-tag :type="tagType" size="small">{{ taskStatusLabels[task.status] || task.status }}</el-tag>
     </div>
     <div class="task-status__stage">{{ (task.stage && taskStageLabels[task.stage]) || task.stage || '等待状态更新' }}</div>
+    <div v-if="task.retryOfTaskId" class="task-status__stage">
+      本次重试基于原任务的输入快照。
+      <router-link :to="{ path: '/tasks', query: { taskId: task.retryOfTaskId } }">查看原任务</router-link>
+    </div>
     <el-progress v-if="task.progress !== null" :percentage="Math.max(0, Math.min(100, task.progress))" :status="task.status === 'FAILED' ? 'exception' : task.status === 'SUCCEEDED' ? 'success' : undefined" />
     <div v-else-if="!compact" class="task-status__unknown">进度暂无法估算</div>
-    <el-alert v-if="task.error" :title="task.error.message" :description="errorDescription" type="error" :closable="false" show-icon />
+    <el-alert v-if="task.error" :title="taskErrorSummary(task.error)" :description="errorDescription" type="error" :closable="false" show-icon />
+    <details v-if="task.error && taskErrorSummary(task.error) !== task.error.message">
+      <summary>查看错误诊断</summary>
+      <p class="pre-wrap">{{ task.error.code }}：{{ task.error.message }}</p>
+    </details>
     <ModelReasoning v-if="reasoning" :text="reasoning" />
     <div v-if="$slots.actions" class="task-status__actions"><slot name="actions" /></div>
   </div>
