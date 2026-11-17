@@ -81,6 +81,39 @@ class Settings(BaseSettings):
     llm_trust_env: bool = False
     llm_provider_max_retries: int = 1
 
+    # 语音能力（首版逐题整段录音）：密钥只允许存在于 Agent 进程环境变量
+    speech_provider: Literal["auto", "fake", "qwen"] = "auto"
+    speech_api_key: str | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("AI_BAILIAN_API_KEY", "SPEECH_API_KEY"),
+    )
+    speech_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com",
+        validation_alias=AliasChoices("AI_BAILIAN_BASE_URL", "SPEECH_BASE_URL"),
+    )
+    speech_asr_model: str = Field(
+        default="paraformer-v2",
+        validation_alias=AliasChoices("SPEECH_ASR_MODEL", "AGENT_SPEECH_ASR_MODEL"),
+    )
+    speech_tts_model: str = Field(
+        default="cosyvoice-v1",
+        validation_alias=AliasChoices("SPEECH_TTS_MODEL", "AGENT_SPEECH_TTS_MODEL"),
+    )
+    speech_tts_voice: str = Field(
+        default="longxiaochun",
+        validation_alias=AliasChoices("SPEECH_TTS_VOICE", "AGENT_SPEECH_TTS_VOICE"),
+    )
+    speech_timeout_seconds: float = Field(default=8.0, gt=0)
+    speech_tts_timeout_seconds: float = Field(default=6.0, gt=0)
+    speech_max_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
+    speech_min_audio_ms: int = Field(default=2000, gt=0)
+    speech_max_audio_ms: int = Field(default=180_000, gt=0)
+    speech_max_tts_chars: int = Field(default=500, gt=0)
+    speech_concurrency: int = Field(default=4, gt=0)
+    speech_scope: str = "ai:speech"
+    speech_vad_silence_ms: int = 400
+
     reasoning_display_enabled: bool = True
     reasoning_max_chars: int = 4000
 
@@ -192,6 +225,12 @@ class Settings(BaseSettings):
             return self.deepseek_model
         return "fake-llm"
 
+    @property
+    def effective_speech_provider(self) -> str:
+        if self.speech_provider != "auto":
+            return self.speech_provider
+        return "qwen" if self.speech_api_key else "fake"
+
     def validate_runtime_security(self) -> None:
         if self.app_env != "prod":
             return
@@ -201,3 +240,5 @@ class Settings(BaseSettings):
             raise RuntimeError("AGENT_JWT_SECRET must be a strong secret in prod")
         if self.effective_llm_provider == "deepseek" and not self.deepseek_api_key:
             raise RuntimeError("DEEPSEEK_API_KEY is required when the deepseek provider is used")
+        if self.effective_speech_provider == "fake":
+            raise RuntimeError("AGENT_SPEECH_PROVIDER=fake is forbidden in prod; configure AI_BAILIAN_API_KEY")

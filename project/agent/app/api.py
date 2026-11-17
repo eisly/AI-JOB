@@ -38,6 +38,8 @@ from .operations import (
 from .runner import RunService
 from .schemas import AIRequestEnvelope, AIRunVO
 from .security import Principal, verify_internal_token
+from .speech.router import build_speech_router
+from .speech.service import SpeechService
 from .storage import RunRecord, RunRepository, build_repository, utcnow
 
 logger = logging.getLogger("agent.api")
@@ -209,6 +211,17 @@ def create_app(
             raise unauthorized("缺少内部服务 Bearer 凭证")
         token = authorization.split(" ", 1)[1].strip()
         return verify_internal_token(token, settings, settings.run_scope)
+
+    async def speech_principal_dependency(
+        request: Request,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+    ) -> Principal:
+        if settings.auth_mode == "disabled":
+            return Principal(subject="auth-disabled", scopes={settings.speech_scope}, task_ids=set())
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise unauthorized("缺少内部服务 Bearer 凭证")
+        token = authorization.split(" ", 1)[1].strip()
+        return verify_internal_token(token, settings, settings.speech_scope)
 
     async def submit(
         request: Request,
@@ -533,5 +546,7 @@ def create_app(
                 "Connection": "keep-alive",
             },
         )
+
+    app.include_router(build_speech_router(settings, SpeechService(settings), speech_principal_dependency))
 
     return app

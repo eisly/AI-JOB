@@ -33,6 +33,11 @@ public class InternalJwtService {
         return token(agentSecret, "career-business", "career-ai-agent", "ai:run", taskId, 300);
     }
 
+    /** 语音同步接口专用：scope=ai:speech，TTL 60 秒，只允许访问本次 requestId。 */
+    public String speechToken(String requestId) {
+        return token(agentSecret, "career-business", "career-ai-agent", "ai:speech", requestId, 60);
+    }
+
     public void verifyCallback(String authorization, String taskId) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
             throw BusinessException.unauthenticated();

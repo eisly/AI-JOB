@@ -22,6 +22,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import jakarta.validation.ConstraintViolation;
@@ -155,6 +156,15 @@ public class GlobalExceptionHandler {
         CommonError body = CommonError.of(40401, "资源不存在", "RESOURCE_NOT_FOUND", false, null);
         body.setTraceId(traceId());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    /** 413：上传文件超出 multipart 限制（默认 10MB），不得兜底成 500 */
+    @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
+    public ResponseEntity<CommonError> handleMultipart(MultipartException ex) {
+        log.warn("upload too large error=UPLOAD_TOO_LARGE type={}", ex.getClass().getSimpleName());
+        CommonError body = CommonError.of(41301, "上传文件过大", "PAYLOAD_TOO_LARGE", false, null);
+        body.setTraceId(traceId());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(body);
     }
 
     /** 兜底：仅提供 traceId，不回传堆栈 */
