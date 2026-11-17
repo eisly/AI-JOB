@@ -27,10 +27,41 @@ public class LearningController {
 
     private final CurrentUserResolver users;
     private final LearningService learning;
+    private final PracticeService practice;
 
-    public LearningController(CurrentUserResolver users, LearningService learning) {
+    public LearningController(CurrentUserResolver users, LearningService learning, PracticeService practice) {
         this.users = users;
         this.learning = learning;
+        this.practice = practice;
+    }
+
+    // ===== 整组训练（一次预生成一组题目）=====
+
+    @PostMapping("/practice-sets")
+    public ResponseEntity<CommonResult<Object>> createPracticeSet(@RequestHeader("Idempotency-Key") String key,
+                                                                  @RequestBody Map<String, Object> body,
+                                                                  HttpServletRequest request) {
+        return practice.create(users.resolveCurrentUserId(), request.getRequestURI(),
+                Data.idempotencyKey(key), body);
+    }
+
+    @GetMapping("/practice-sets/{setId}")
+    public CommonResult<Map<String, Object>> practiceSet(@PathVariable String setId) {
+        return Responses.ok(practice.detail(users.resolveCurrentUserId(), Data.uuid(setId, "setId")));
+    }
+
+    @PostMapping("/practice-sets/{setId}/submission")
+    public ResponseEntity<CommonResult<Object>> submitPracticeSet(@PathVariable String setId,
+                                                                  @RequestHeader("Idempotency-Key") String key,
+                                                                  @RequestBody Map<String, Object> body,
+                                                                  HttpServletRequest request) {
+        return practice.submit(users.resolveCurrentUserId(), Data.uuid(setId, "setId"),
+                request.getRequestURI(), Data.idempotencyKey(key), body);
+    }
+
+    @GetMapping("/practice-sets/{setId}/result")
+    public CommonResult<Map<String, Object>> practiceSetResult(@PathVariable String setId) {
+        return Responses.ok(practice.result(users.resolveCurrentUserId(), Data.uuid(setId, "setId")));
     }
 
     @PostMapping("/plans")
@@ -105,6 +136,13 @@ public class LearningController {
         String id = Data.uuid(mistakeId, "mistakeId");
         return learning.retryMistake(users.resolveCurrentUserId(), id, request.getRequestURI(), Data.idempotencyKey(key),
                 body == null ? Map.of() : body);
+    }
+
+    /** 错题重练：复用原题创建单题练习集，返回可直接打开独立答题页的练习集。 */
+    @PostMapping("/mistakes/{mistakeId}/retry-practice")
+    public CommonResult<Map<String, Object>> retryPractice(@PathVariable String mistakeId) {
+        return Responses.ok(practice.retryMistakeAsSet(users.resolveCurrentUserId(),
+                Data.uuid(mistakeId, "mistakeId")));
     }
 
     @PutMapping("/plans/{planId}/items/{itemId}/completion")

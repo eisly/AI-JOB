@@ -24,6 +24,8 @@ from .operations import (
     JOB_SEARCH,
     LEARNING_EVALUATE,
     LEARNING_PLAN,
+    LEARNING_PRACTICE_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
     LEARNING_QUESTION,
     PROJECT_PLAN,
     PROJECT_RECOMMEND,
@@ -64,9 +66,16 @@ from .schemas import (
     JDParsePayload,
     JobMatchPayload,
     JobSearchPayload,
+    AIPracticeEvaluateResult,
+    AIPracticeQuestion,
+    AIPracticeQuestionSet,
     LearningEvaluatePayload,
     LearningPlanPayload,
+    LearningPracticeEvaluatePayload,
+    LearningPracticeQuestionsPayload,
     LearningQuestionPayload,
+    PracticeEvaluateModelOutput,
+    PracticeEvaluationItem,
     MatchItemModelOutput,
     MatchModelOutput,
     ParseModelOutput,
@@ -979,6 +988,146 @@ class LearningEvaluateHandler(BaseHandler):
         return AIEvaluateResult(evaluation=evaluation, skill_scores=skill_scores)
 
 
+class LearningPracticeQuestionsHandler(BaseHandler):
+    """一次生成一组题目：按配置混合选择题、填空题与主观题。"""
+
+    operation = LEARNING_PRACTICE_QUESTIONS
+    payload_model = LearningPracticeQuestionsPayload
+    output_model = AIPracticeQuestionSet
+    prompt_version = PROMPT_VERSIONS[LEARNING_PRACTICE_QUESTIONS]
+
+    def validate_business(
+        self,
+        ctx: ExecutionContext,
+        output: AIPracticeQuestionSet,
+        prepared: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> AIPracticeQuestionSet:
+        payload: LearningPracticeQuestionsPayload = ctx.payload  # type: ignore[assignment]
+        config = payload.config
+        planned = payload.plan_item.skill_code
+        questions = output.questions
+
+        if len(questions) != config.total_questions:
+            raise HandlerValidationError(
+                f"题目数量必须为 {config.total_questions}，实际 {len(questions)}"
+            )
+        expected = {
+            "CHOICE": config.type_distribution.choice,
+            "FILL": config.type_distribution.fill,
+            "SUBJECTIVE": config.type_distribution.subjective,
+        }
+        actual = {
+            "CHOICE": sum(1 for item in questions if item.type == "CHOICE"),
+            "FILL": sum(1 for item in questions if item.type == "FILL"),
+            "SUBJECTIVE": sum(1 for item in questions if item.type == "SUBJECTIVE"),
+        }
+        if actual != expected:
+            raise HandlerValidationError(
+                "题型分布不符合配置要求：" + "，".join(
+                    f"{key} 需 {expected[key]} 道，实际 {actual[key]} 道" for key in expected
+                )
+            )
+
+        used_stems = {
+            norm_text(str(item)) for item in payload.excluded_question_stems if str(item).strip()
+        }
+        for index, question in enumerate(questions, start=1):
+            if planned not in question.skill_codes:
+                raise HandlerValidationError(
+                    f"第 {index} 题 skillCodes 必须包含 planItem.skillCode: {planned}"
+                )
+            check_fixed_rubric(question.rubric)
+            if not question.reference_answer.strip():
+                raise HandlerValidationError(f"第 {index} 题缺少参考答案")
+            if question.citations and not payload.knowledge_refs:
+                raise HandlerValidationError(f"第 {index} 题包含未授权引用")
+            normalized = norm_text(question.stem)
+            if normalized in used_stems:
+                raise HandlerValidationError(f"第 {index} 题题干与已用题目重复，请更换考查角度")
+            used_stems.add(normalized)
+
+            if question.type == "CHOICE":
+                keys = [option.key.upper() for option in question.options]
+                if len(keys) < 2 or len(set(keys)) != len(keys):
+                    raise HandlerValidationError(f"第 {index} 题选项必须至少 2 个且 key 不重复")
+                if len(question.answer_key) != 1:
+                    raise HandlerValidationError(f"第 {index} 题选择题必须且只能有 1 个正确答案")
+                if question.answer_key[0].upper() not in keys:
+                    raise HandlerValidationError(f"第 {index} 题正确答案不在选项中")
+                if question.blank_count:
+                    raise HandlerValidationError(f"第 {index} 题选择题不得设置空位数")
+            elif question.type == "FILL":
+                if question.blank_count < 1:
+                    raise HandlerValidationError(f"第 {index} 题填空题必须设置 blankCount")
+                if len(question.answer_key) != question.blank_count:
+                    raise HandlerValidationError(
+                        f"第 {index} 题填空题标准答案数量必须等于空位数 {question.blank_count}"
+                    )
+                if question.options:
+                    raise HandlerValidationError(f"第 {index} 题填空题不得包含选项")
+                if not all(str(item).strip() for item in question.answer_key):
+                    raise HandlerValidationError(f"第 {index} 题填空题标准答案不能为空")
+            else:
+                if question.options or question.answer_key or question.blank_count:
+                    raise HandlerValidationError(f"第 {index} 题主观题不得包含选项/答案键/空位")
+
+        return AIPracticeQuestionSet(questions=questions)
+
+
+class LearningPracticeEvaluateHandler(BaseHandler):
+    """整组交卷：逐题评估主观题作答，并汇总整组反馈报告。"""
+
+    operation = LEARNING_PRACTICE_EVALUATE
+    payload_model = LearningPracticeEvaluatePayload
+    output_model = PracticeEvaluateModelOutput
+    prompt_version = PROMPT_VERSIONS[LEARNING_PRACTICE_EVALUATE]
+
+    def validate_business(
+        self,
+        ctx: ExecutionContext,
+        output: PracticeEvaluateModelOutput,
+        prepared: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> AIPracticeEvaluateResult:
+        payload: LearningPracticeEvaluatePayload = ctx.payload  # type: ignore[assignment]
+        by_id = {str(item.answer_id): item for item in payload.answers}
+        seen: set[str] = set()
+        results: list[PracticeEvaluationItem] = []
+        for item in output.evaluations:
+            key = str(item.answer_id)
+            if key not in by_id:
+                raise HandlerValidationError(f"评估结果包含未知 answerId: {key}")
+            if key in seen:
+                raise HandlerValidationError(f"answerId 重复评估: {key}")
+            seen.add(key)
+            answer = by_id[key]
+            evaluation, _ = _build_evaluation(
+                model_output=item.evaluation,
+                skill_score_drafts=item.skill_scores,
+                rubric=answer.rubric,
+                meta=meta,
+                answer=answer.answer,
+                question_skills=answer.skill_codes,
+                source_id=answer.answer_id,
+                reference_fallback=answer.reference_answer,
+            )
+            results.append(
+                PracticeEvaluationItem(
+                    answer_id=answer.answer_id,
+                    evaluation=evaluation,
+                    skill_scores=item.skill_scores,
+                )
+            )
+        missing = [key for key in by_id if key not in seen]
+        if missing:
+            raise HandlerValidationError(f"缺少以下作答的评估结果: {', '.join(missing[:5])}")
+        return AIPracticeEvaluateResult(
+            evaluations=results,
+            report=output.report,
+        )
+
+
 class InterviewTurnHandler(BaseHandler):
     operation = INTERVIEW_TURN
     payload_model = InterviewTurnPayload
@@ -1360,6 +1509,8 @@ HANDLERS: dict[str, BaseHandler] = {
     LEARNING_PLAN: LearningPlanHandler(),
     LEARNING_QUESTION: LearningQuestionHandler(),
     LEARNING_EVALUATE: LearningEvaluateHandler(),
+    LEARNING_PRACTICE_QUESTIONS: LearningPracticeQuestionsHandler(),
+    LEARNING_PRACTICE_EVALUATE: LearningPracticeEvaluateHandler(),
     INTERVIEW_TURN: InterviewTurnHandler(),
     INTERVIEW_REPORT: InterviewReportHandler(),
     GROWTH_ANALYZE: GrowthAnalyzeHandler(),

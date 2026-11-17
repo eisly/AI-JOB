@@ -22,6 +22,7 @@ import com.aijob.backend.common.JsonService;
 import com.aijob.backend.common.PageResult;
 import com.aijob.backend.job.JobMapper;
 import com.aijob.backend.job.JobService;
+import com.aijob.backend.profile.JobRoleCatalog;
 import com.aijob.backend.profile.ProfileService;
 import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.AiTask;
@@ -34,17 +35,81 @@ public class LearningService {
     private static final Set<String> PLAN_SOURCES = Set.of("MATCH", "RESUME");
     private static final Set<String> RESUME_READY = Set.of("PARSED", "CONFIRMED");
     private static final int MAX_RESUME_TEXT = 8000;
-    private static final Map<String, List<String>> DIRECTION_SKILL_KEYWORDS = Map.of(
-            "JAVA_BACKEND", List.of("java", "spring", "mysql", "redis", "jvm", "mybatis", "kafka", "system",
-                    "algorithm", "linux", "network", "sql"),
-            "FRONTEND", List.of("javascript", "typescript", "vue", "react", "css", "html", "vite", "node",
-                    "browser", "network", "algorithm"),
-            "ALGORITHM", List.of("python", "c++", "algorithm", "math", "machine", "deep", "pytorch",
-                    "tensorflow", "sql", "statistics"),
-            "TEST", List.of("java", "python", "test", "junit", "pytest", "selenium", "docker", "ci", "linux",
-                    "network"),
-            "DATA", List.of("sql", "python", "spark", "hive", "flink", "data", "machine", "statistics",
-                    "hadoop", "kafka"));
+    private static final Map<String, List<String>> DIRECTION_SKILL_KEYWORDS = Map.ofEntries(
+            Map.entry("JAVA_BACKEND", List.of("java", "spring", "mysql", "redis", "jvm", "mybatis", "kafka",
+                    "system", "algorithm", "linux", "network", "sql")),
+            Map.entry("PYTHON_BACKEND", List.of("python", "django", "flask", "fastapi", "mysql", "redis",
+                    "postgres", "kafka", "docker", "linux", "sql")),
+            Map.entry("GO_BACKEND", List.of("go", "golang", "grpc", "mysql", "redis", "kafka", "docker",
+                    "kubernetes", "linux", "sql")),
+            Map.entry("CPP_DEVELOPER", List.of("c++", "cpp", "c", "linux", "algorithm", "network", "stl")),
+            Map.entry("NODEJS_BACKEND", List.of("node", "nodejs", "javascript", "typescript", "mysql", "redis",
+                    "docker", "sql")),
+            Map.entry("FULL_STACK", List.of("javascript", "typescript", "vue", "react", "java", "python", "node",
+                    "mysql", "redis", "sql")),
+            Map.entry("MICROSERVICE_DEVELOPER", List.of("java", "spring", "microservice", "docker", "kubernetes",
+                    "kafka", "redis", "sql")),
+            Map.entry("AI_APPLICATION_DEVELOPER", List.of("python", "llm", "ai", "prompt", "rag", "embedding",
+                    "vector", "langchain", "sql", "docker")),
+            Map.entry("AI_AGENT_DEVELOPER", List.of("python", "agent", "llm", "langchain", "function",
+                    "prompt", "rag", "docker", "sql")),
+            Map.entry("LLM_APPLICATION_DEVELOPER", List.of("python", "llm", "transformer", "prompt", "rag",
+                    "embedding", "vector", "pytorch", "sql")),
+            Map.entry("RAG_APPLICATION_DEVELOPER", List.of("python", "rag", "embedding", "vector", "llm",
+                    "retrieval", "prompt", "sql")),
+            Map.entry("LLM_ENGINEER", List.of("python", "llm", "transformer", "pytorch", "deep", "machine",
+                    "algorithm", "math")),
+            Map.entry("AI_PLATFORM_DEVELOPER", List.of("python", "java", "docker", "kubernetes", "llm",
+                    "platform", "redis", "kafka")),
+            Map.entry("PROMPT_ENGINEER", List.of("prompt", "llm", "python", "ai", "rag", "evaluation")),
+            Map.entry("AI_ALGORITHM_ENGINEER", List.of("python", "algorithm", "machine", "deep", "pytorch",
+                    "tensorflow", "math", "statistics")),
+            Map.entry("FRONTEND", List.of("javascript", "typescript", "vue", "react", "css", "html", "vite",
+                    "node", "browser", "network", "algorithm")),
+            Map.entry("REACT_DEVELOPER", List.of("react", "javascript", "typescript", "css", "html", "node",
+                    "frontend")),
+            Map.entry("VUE_DEVELOPER", List.of("vue", "javascript", "typescript", "css", "html", "node",
+                    "frontend")),
+            Map.entry("ANDROID_DEVELOPER", List.of("android", "java", "kotlin", "gradle", "ui", "network",
+                    "sql")),
+            Map.entry("IOS_DEVELOPER", List.of("ios", "swift", "objective", "xcode", "ui", "network")),
+            Map.entry("FLUTTER_DEVELOPER", List.of("flutter", "dart", "ui", "android", "ios", "network")),
+            Map.entry("ALGORITHM", List.of("python", "c++", "algorithm", "math", "machine", "deep", "pytorch",
+                    "tensorflow", "sql", "statistics")),
+            Map.entry("MACHINE_LEARNING_ENGINEER", List.of("python", "machine", "deep", "pytorch", "tensorflow",
+                    "algorithm", "math", "statistics")),
+            Map.entry("DEEP_LEARNING_ENGINEER", List.of("python", "deep", "pytorch", "tensorflow", "neural",
+                    "algorithm", "math")),
+            Map.entry("NLP_ALGORITHM_ENGINEER", List.of("python", "nlp", "transformer", "machine", "deep",
+                    "algorithm", "pytorch")),
+            Map.entry("COMPUTER_VISION_ENGINEER", List.of("python", "cv", "vision", "opencv", "deep",
+                    "pytorch", "algorithm")),
+            Map.entry("RECOMMENDATION_ALGORITHM", List.of("python", "recommendation", "machine", "deep",
+                    "algorithm", "sql", "spark")),
+            Map.entry("DATA", List.of("sql", "python", "spark", "hive", "flink", "data", "machine", "statistics",
+                    "hadoop", "kafka")),
+            Map.entry("DATA_ANALYST", List.of("sql", "python", "excel", "statistics", "data", "visualization")),
+            Map.entry("DATA_ENGINEER", List.of("sql", "python", "spark", "hive", "flink", "kafka", "hadoop",
+                    "data")),
+            Map.entry("TEST", List.of("java", "python", "test", "junit", "pytest", "selenium", "docker", "ci",
+                    "linux", "network")),
+            Map.entry("TEST_DEVELOPMENT_ENGINEER", List.of("java", "python", "test", "junit", "pytest",
+                    "selenium", "docker", "ci", "linux")),
+            Map.entry("AUTOMATION_TEST_ENGINEER", List.of("python", "test", "selenium", "pytest", "docker",
+                    "ci", "linux")),
+            Map.entry("DEVOPS_ENGINEER", List.of("docker", "kubernetes", "ci", "linux", "network", "cloud",
+                    "git", "shell")),
+            Map.entry("SRE_ENGINEER", List.of("linux", "network", "docker", "kubernetes", "cloud", "shell",
+                    "monitoring")),
+            Map.entry("CLOUD_ENGINEER", List.of("cloud", "docker", "kubernetes", "linux", "network", "shell")),
+            Map.entry("SECURITY_ENGINEER", List.of("security", "network", "linux", "cryptography", "web",
+                    "docker")),
+            Map.entry("EMBEDDED_ENGINEER", List.of("c", "c++", "linux", "embedded", "rtos", "hardware")),
+            Map.entry("DATABASE_DEVELOPER", List.of("sql", "mysql", "postgres", "redis", "database", "linux")),
+            Map.entry("GAME_DEVELOPER", List.of("c++", "c#", "unity", "unreal", "algorithm", "math")),
+            Map.entry("BLOCKCHAIN_DEVELOPER", List.of("blockchain", "solidity", "web3", "c++", "go", "network")),
+            Map.entry("TECHNICAL_PRODUCT_MANAGER", List.of("product", "sql", "data", "analytics", "agile")),
+            Map.entry("SOLUTION_ENGINEER", List.of("solution", "java", "python", "docker", "cloud", "sql")));
 
     private final LearningMapper mapper;
     private final JobMapper jobs;
@@ -119,7 +184,7 @@ public class LearningService {
         String requestedDirection = Data.text(body, "targetDirection", false, 32);
         String targetDirection = isBlank(requestedDirection)
                 ? textOrNull(profile.get("targetRole")) : requestedDirection;
-        if (targetDirection == null || !profiles.roles().contains(targetDirection)) {
+        if (!JobRoleCatalog.supports(targetDirection)) {
             throw BusinessException.validation("targetDirection", "目标求职方向不在支持范围内");
         }
         ResumeContext resume = resolveResume(userId, Data.uuid(body, "resumeVersionId", false), profile);
@@ -441,6 +506,12 @@ public class LearningService {
         result.put("difficulty", question.get("difficulty"));
         result.put("type", question.get("type"));
         result.put("stem", question.get("stem"));
+        // 客观题复习需要展示选项与空位数（不含标准答案，避免错题本泄题）
+        result.put("options", question.get("options_json") == null ? List.of()
+                : json.convert(json.parse(String.valueOf(question.get("options_json"))), Object.class));
+        result.put("blankCount", question.get("blank_count") == null ? 0
+                : ((Number) question.get("blank_count")).intValue());
+        result.put("score", question.get("score") == null ? 10 : ((Number) question.get("score")).intValue());
         result.put("sourceType", question.get("source_type"));
         result.put("generationEnv", question.get("generation_env"));
         result.put("sourceTitle", null);

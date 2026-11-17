@@ -1,0 +1,59 @@
+{
+  "tool": "内置 image_gen",
+  "type": "ui-mockup",
+  "status": "设计提案，尚未实现",
+  "revisions": [
+    {
+      "id": 4,
+      "prompt": "Edit this AI-JOB UI mockup. Preserve ALL layout, colors, icons, navigation, JD preview, data source state and every other text. Change ONLY the large empty-state title currently 检索源暂不可用 to 本次未获得可用岗位结果. Change its subtitle to 部分来源不可用，可重试或导入个人JD继续匹配。 This clarifies that partial sources work but no usable jobs were obtained. Maintain crisp readable Simplified Chinese. Do not alter any other part."
+    },
+    {
+      "id": 5,
+      "prompt": "Edit this AI-JOB UI mockup. Preserve EVERY layout element, text, colors, font, geometry and existing content except required-field indicators on right editor panel. Remove red asterisks before 城市, 学历, 薪资, 面试日期. Keep red required asterisks for 公司, 岗位, 状态 only. Do not add new required fields, don't move any element, don't change company names or dates, and keep 设计提案 badge. This is a targeted UI correctness fix, no redesign."
+    }
+  ],
+  "outputs": [
+    {
+      "id": 1,
+      "file": "01-求职画像与城市选择.png"
+    },
+    {
+      "id": 2,
+      "file": "02-账户设置与会话恢复.png"
+    },
+    {
+      "id": 3,
+      "file": "03-专项训练工作区.png"
+    },
+    {
+      "id": 4,
+      "file": "04-岗位搜索与JD纠错.png"
+    },
+    {
+      "id": 5,
+      "file": "05-投递进度列表与表单.png"
+    }
+  ],
+  "prompts": [
+    {
+      "id": 1,
+      "prompt": "Use case: ui-mockup. Generate ONE high fidelity desktop product UI proposal for the existing Chinese career preparation web app AI-JOB. Canvas landscape 1600x1000, flat front-on screenshot, no device frame, crisp readable Simplified Chinese, realistic implementable Vue/Element Plus style. Palette white cards on #F5F7FB, primary #2563EB, navy #182B50, subtle gray borders, 12px radius, thin consistent line icons. Left sidebar about 200px, brand AI-JOB and simple coherent blue mark; nav: 求职工作台, 求职画像 (selected), 简历中心, 岗位推荐, 专项训练, 项目实战, 模拟面试, 成长中心, 投递进度. Topbar minimal with 通知 and 体验用户 (fictional). Small badge 设计提案 in corner. Main title 求职画像, subtitle 清晰的目标，让每一步准备更有方向. Two-column main: larger left 求职偏好 card, smaller right 已确认简历信息, 学历 硕士, 毕业年份 2028, 专业 计算机技术, 来源 简历 v1. Left form 目标岗位 网络安全工程师, 求职类型 实习, 期望城市 with TWO fully visible selected chips 广州 × and 深圳 ×, no +1. Show city dropdown OPEN below input: search field 搜索城市或拼音, selected section 已选 2 个 with 广州 ✓ and 深圳 ✓, separate 可选城市 section 上海 北京 杭州 成都. Do not duplicate selected cities in optional list. below form expected salary 8 — 15 K/月; footer 保存求职偏好 primary button and 返回工作台 secondary. Green small toast above footer 保存成功，可返回工作台继续准备. Card bottom recent update and 画像 v5. Clean precise spacing, practical UI only. All copy exactly Simplified Chinese, no personal email, no credentials. This is a proposed redesign, not evidence of a running app. Save output as an image file and provide its local file path."
+    },
+    {
+      "id": 2,
+      "prompt": "Use case: ui-mockup. Generate ONE high fidelity 1600x1000 landscape desktop page UI proposal for Chinese career preparation web app AI-JOB, flat screenshot no device frame. Cohesive Vue/Element Plus aesthetics: white cards on #F5F7FB, #2563EB blue buttons, #182B50 navy titles, subtle gray borders, 12px corner radius, thin line icons. Left 200px sidebar brand AI-JOB and nav 求职工作台, 求职画像, 简历中心, 岗位推荐, 专项训练, 项目实战, 模拟面试, 成长中心, 投递进度. Topbar minimal notifications and fictional 体验用户, no personal email. Tiny 设计提案 badge. All text readable Simplified Chinese, ample spacing, no gibberish, no tiny over-dense paragraphs. No personal data, no token IDs. This is a proposed UI design, not a running software screenshot. Save image file and report local path.\nPage: 账户与安全. Sidebar bottom has a selected 账户设置 entry; separate from 求职画像. Content header 账户与安全, subtitle 管理个人资料与登录会话. Tabs 基本资料 (selected), 账号安全, 登录设备. Two-column content: main card 基本资料 with circular blue generic avatar, 修改头像 disabled-ish; editable 昵称 input 体验用户, 邮箱 field demo@example.com with masked UI not real, gray 已验证 badge and 更换邮箱 button; hint 更换邮箱需验证新邮箱. Save button 保存资料. A right card 登录状态 shows green 已安全登录, 本机浏览器 · 最近活动 刚刚, and info banner 刷新页面将自动恢复登录状态. A second lower card 账号安全 with 密码 status 已设置 and 修改密码 button; 登录设备 row 当前设备 · Windows 浏览器; 查看设备; a subdued line 退出当前账号 button. Do not show a raw password. Footnote 更换邮箱、修改密码需重新验证身份. Include small neutral inline banner 会话已恢复，继续上次操作 with 返回投递进度 button, not alarming. Crisp, calm professional UI. No claims this mockup fixes authentication itself."
+    },
+    {
+      "id": 3,
+      "prompt": "Use case: ui-mockup. Generate ONE high fidelity 1600x1000 landscape desktop page UI proposal for Chinese career preparation web app AI-JOB, flat screenshot no device frame. Cohesive Vue/Element Plus aesthetics: white cards on #F5F7FB, #2563EB blue buttons, #182B50 navy titles, subtle gray borders, 12px corner radius, thin line icons. Left 200px sidebar brand AI-JOB and nav 求职工作台, 求职画像, 简历中心, 岗位推荐, 专项训练, 项目实战, 模拟面试, 成长中心, 投递进度. Topbar minimal notifications and fictional 体验用户, no personal email. Tiny 设计提案 badge. All text readable Simplified Chinese, ample spacing, no gibberish, no tiny over-dense paragraphs. No personal data, no token IDs. This is a proposed UI design, not a running software screenshot. Save image file and report local path.\nPage 专项训练, selected sidebar 专项训练. Main header 专项训练, subtitle 围绕目标岗位，完成一次有反馈的练习. Top small context pills 当前方向 网络安全工程师, 画像 v5, 简历 v1. Amber compact banner 训练计划基于旧画像 v4 with primary 更新计划 and secondary 保留旧计划, explanation 目标方向已更新，建议同步训练内容. Below split workspace: 280px left card 我的训练计划 with compact progress 3/11 and accordion rows 网络安全基础, 后端安全实践 (active), 数据库安全, 阅读资料. Left item highlighted Spring Boot 权限边界. Wide right card 当前答题会话, badge 第 1 / 5 题 and 进行中. A clearly visible question 如何防止跨用户访问投递记录？ followed by a small well formatted monospaced Java code block (3 lines: if (!record.userId().equals(currentUserId)) { / throw new ForbiddenException(); / }) and 复制代码 button. Answer text area always visible, placeholder 从身份认证、归属校验、测试验证三个方面回答, 0/2000. Primary 提交回答, secondary 保存草稿. Bottom separate reading resource card 权限控制实践指南, 阅读目标：理解认证与授权的边界, 预计 10 分钟, 打开资料 outlined button, 我已阅读（自评） checkbox unchecked. Add compact toast 已定位到当前题目. Show all major actions within viewport, not page-bottom hidden. Code fences must not render literal triple backticks."
+    },
+    {
+      "id": 4,
+      "prompt": "Use case: ui-mockup. Generate ONE high fidelity 1600x1000 landscape desktop page UI proposal for Chinese career preparation web app AI-JOB, flat screenshot no device frame. Cohesive Vue/Element Plus aesthetics: white cards on #F5F7FB, #2563EB blue buttons, #182B50 navy titles, subtle gray borders, 12px corner radius, thin line icons. Left 200px sidebar brand AI-JOB and nav 求职工作台, 求职画像, 简历中心, 岗位推荐, 专项训练, 项目实战, 模拟面试, 成长中心, 投递进度. Topbar minimal notifications and fictional 体验用户, no personal email. Tiny 设计提案 badge. All text readable Simplified Chinese, ample spacing, no gibberish, no tiny over-dense paragraphs. No personal data, no token IDs. This is a proposed UI design, not a running software screenshot. Save image file and report local path.\nPage 岗位推荐与匹配, selected sidebar 岗位推荐. Title 岗位推荐, subtitle 看清来源状态，找到真正适合你的岗位. Three tabs 岗位搜索 (active), 个人JD, 匹配结果. Search card query 网络安全工程师, city chips 广州 深圳, type 实习, blue 搜索岗位. A compact source health card above results: 来源状态, amber 部分可用, 官方招聘源 2个可用, AI全网搜索 暂未配置; explanation 部分来源不可用，当前结果可能不完整; buttons 查看来源诊断 and 导入个人JD. Below illustrate empty state specifically 检索源暂不可用 with line 本次未获得可匹配的岗位，请调整来源或导入JD and two actions 重试搜索 / 导入JD. Right narrower card demonstrates imported JD extraction preview: 个人JD预览, 车联网安全工程师, 示例企业, 城市 广州 with light-blue source quote 证据：工作地点：广州; skills chips Spring Boot, FastAPI, Vue, 车联网安全; 每个字段有原文依据; button 核对提取结果. No fake real job availability stats. No raw provider keys in end user main UI. Clear separation of service unavailable from genuinely no job matches. No confetti or illustrations, professional simple line icon empty state."
+    },
+    {
+      "id": 5,
+      "prompt": "Use case: ui-mockup. Generate ONE high fidelity 1600x1000 landscape desktop page UI proposal for Chinese career preparation web app AI-JOB, flat screenshot no device frame. Cohesive Vue/Element Plus aesthetics: white cards on #F5F7FB, #2563EB blue buttons, #182B50 navy titles, subtle gray borders, 12px corner radius, thin line icons. Left 200px sidebar brand AI-JOB and nav 求职工作台, 求职画像, 简历中心, 岗位推荐, 专项训练, 项目实战, 模拟面试, 成长中心, 投递进度. Topbar minimal notifications and fictional 体验用户, no personal email. Tiny 设计提案 badge. All text readable Simplified Chinese, ample spacing, no gibberish, no tiny over-dense paragraphs. No personal data, no token IDs. This is a proposed UI design, not a running software screenshot. Save image file and report local path.\nPage 投递进度, selected sidebar 投递进度. Title 投递进度, subtitle 记录每一次行动，安排下一次跟进. Top five summary cards 总记录 12, 待投递 4, 已投递 5, 面试中 2, 已结束 1, small note 统计卡显示全部记录. Below filter toolbar 状态 全部状态 dropdown, 搜索公司或岗位 search, 清除筛选, blue 新增记录. Main left paginated table with columns 公司 / 岗位 / 状态 / 计划投递 / 最近更新 / 操作. Two fictional rows 示例科技 安全工程师 面试中 2026-11-13 11月13日 09:30 详情 编辑; 云端实验室 后端开发 已投递 2026-11-12 11月12日 20:10. Show total12 and 1 2 pagination. RIGHT side panel 编辑投递记录 about 430px, clean card not dark overlay so both visible. Fields 公司 示例科技, 岗位 安全工程师, 城市 with searchable dropdown 广州 (not raw code), 学历 本科及以上, 薪资 8–15K, 状态 面试中, 面试日期 2026-11-18, 备注 text area. Footer 取消 and 保存修改. Small source row 来源 手动记录, 下一次跟进 11月16日. Bottom small UI state example inset 筛选无结果: 当前没有已结束的记录 + 清除筛选 (explicitly marked 空态示例 separate from table, not contradictory actual data). Local time shown without UTC or milliseconds. No technical version IDs. Practical frontend implementable design, table and editor not overlapping text."
+    }
+  ]
+}

@@ -243,6 +243,122 @@ public interface LearningMapper {
             """)
     Double averageEvaluationScore(@Param("userId") String userId);
 
+    // ===== 整组训练（GROUP 会话 / 批量出题与交卷）=====
+
+    @Insert("""
+            INSERT INTO learning_session (id,user_id,plan_id,plan_item_id,session_kind,config_json,total_questions,status)
+            VALUES (#{id},#{userId},#{planId},#{planItemId},'GROUP',#{configJson},#{totalQuestions},'PREPARING')
+            """)
+    int insertGroupSession(@Param("id") String id, @Param("userId") String userId, @Param("planId") String planId,
+                           @Param("planItemId") String planItemId, @Param("configJson") String configJson,
+                           @Param("totalQuestions") int totalQuestions);
+
+    @Insert("""
+            INSERT INTO learning_session_question (id,session_id,question_id,question_version,seq,score)
+            VALUES (#{id},#{sessionId},#{questionId},#{questionVersion},#{seq},#{score})
+            """)
+    int insertSessionQuestion(@Param("id") String id, @Param("sessionId") String sessionId,
+                              @Param("questionId") String questionId, @Param("questionVersion") int questionVersion,
+                              @Param("seq") int seq, @Param("score") int score);
+
+    @Select("""
+            SELECT sq.seq AS seq, sq.score AS session_score,
+                   q.id AS id, q.stem AS stem, q.type AS type, q.options_json AS options_json,
+                   q.answer_key_json AS answer_key_json, q.blank_count AS blank_count,
+                   q.skill_codes_json AS skill_codes_json, q.difficulty AS difficulty,
+                   q.reference_answer AS reference_answer, q.rubric_json AS rubric_json,
+                   q.question_version AS question_version, q.source_type AS source_type,
+                   q.citations_json AS citations_json, q.generation_env AS generation_env
+            FROM learning_session_question sq
+            JOIN question q ON q.id=sq.question_id
+            WHERE sq.session_id=#{sessionId} ORDER BY sq.seq
+            """)
+    List<Map<String,Object>> sessionQuestions(@Param("sessionId") String sessionId);
+
+    /** 全部题目落库后把 GROUP 会话置为 ACTIVE；题目数量不匹配时影响行数为 0。 */
+    @Update("""
+            UPDATE learning_session SET status='ACTIVE',version=version+1,updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status='PREPARING'
+              AND (SELECT COUNT(*) FROM learning_session_question WHERE session_id=#{id})=#{totalQuestions}
+            """)
+    int groupQuestionsReady(@Param("id") String id, @Param("totalQuestions") int totalQuestions);
+
+    @Insert("""
+            INSERT INTO question (id,root_question_id,question_version,stem,options_json,answer_key_json,blank_count,
+              score,type,skill_codes_json,difficulty,source_type,reference_answer,rubric_json,citations_json,
+              generated_task_id,created_by,generation_env)
+            VALUES (#{id},#{id},1,#{stem},#{optionsJson,jdbcType=VARCHAR},#{answerKeyJson,jdbcType=VARCHAR},
+              #{blankCount},#{score},#{type},#{skillCodesJson},#{difficulty},'GENERATED',#{referenceAnswer},
+              #{rubricJson},#{citationsJson},#{taskId},#{userId},#{generationEnv})
+            """)
+    int insertGeneratedPracticeQuestion(@Param("id") String id, @Param("stem") String stem,
+                                        @Param("optionsJson") String optionsJson,
+                                        @Param("answerKeyJson") String answerKeyJson,
+                                        @Param("blankCount") int blankCount, @Param("score") int score,
+                                        @Param("type") String type, @Param("skillCodesJson") String skillCodesJson,
+                                        @Param("difficulty") String difficulty,
+                                        @Param("referenceAnswer") String referenceAnswer,
+                                        @Param("rubricJson") String rubricJson,
+                                        @Param("citationsJson") String citationsJson,
+                                        @Param("taskId") String taskId, @Param("userId") String userId,
+                                        @Param("generationEnv") String generationEnv);
+
+    @Insert("""
+            INSERT INTO learning_answer (id,session_id,question_id,question_version,seq,user_id,content,answer_json,
+              content_hash,task_id,status)
+            VALUES (#{id},#{sessionId},#{questionId},#{questionVersion},#{seq},#{userId},#{content},
+              #{answerJson,jdbcType=VARCHAR},UNHEX(#{contentHash}),#{taskId},'EVALUATING')
+            """)
+    int insertPracticeAnswer(@Param("id") String id, @Param("sessionId") String sessionId,
+                             @Param("questionId") String questionId, @Param("questionVersion") int questionVersion,
+                             @Param("seq") int seq, @Param("userId") String userId, @Param("content") String content,
+                             @Param("answerJson") String answerJson, @Param("contentHash") String contentHash,
+                             @Param("taskId") String taskId);
+
+    @Select("SELECT * FROM learning_answer WHERE session_id=#{sessionId} ORDER BY seq")
+    List<Map<String,Object>> sessionAnswers(@Param("sessionId") String sessionId);
+
+    @Update("""
+            UPDATE learning_answer SET objective_correct=#{correct},score=#{score},status='EVALUATED',
+              evaluated_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='EVALUATING'
+            """)
+    int objectiveEvaluated(@Param("id") String id, @Param("correct") boolean correct,
+                           @Param("score") java.math.BigDecimal score);
+
+    @Update("""
+            UPDATE learning_answer SET status='EVALUATED',evaluation_json=#{evaluationJson},score=#{score},
+              evaluated_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='EVALUATING'
+            """)
+    int practiceAnswerEvaluated(@Param("id") String id, @Param("evaluationJson") String evaluationJson,
+                                @Param("score") java.math.BigDecimal score);
+
+    @Update("""
+            UPDATE learning_session SET status='EVALUATING',evaluation_task_id=#{taskId},duration_seconds=#{duration},
+              submitted_at=UTC_TIMESTAMP(3),last_answer_id=#{lastAnswerId},version=version+1,updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status='ACTIVE'
+            """)
+    int practiceSubmitted(@Param("id") String id, @Param("taskId") String taskId, @Param("duration") int duration,
+                          @Param("lastAnswerId") String lastAnswerId);
+
+    @Update("""
+            UPDATE learning_session SET status='COMPLETED',result_json=#{resultJson},version=version+1,
+              updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='EVALUATING'
+            """)
+    int practiceCompleted(@Param("id") String id, @Param("resultJson") String resultJson);
+
+    @Select("""
+            SELECT question_id FROM learning_session_question sq
+            JOIN learning_session s ON s.id=sq.session_id WHERE s.user_id=#{userId}
+            """)
+    List<String> usedSessionQuestionIds(@Param("userId") String userId);
+
+    @Select("""
+            SELECT q.stem FROM learning_session_question sq
+            JOIN learning_session s ON s.id=sq.session_id
+            JOIN question q ON q.id=sq.question_id WHERE s.user_id=#{userId}
+            """)
+    List<String> usedSessionQuestionStems(@Param("userId") String userId);
+
     @Select("SELECT COUNT(*) FROM user_mistake WHERE user_id=#{userId} AND resolved=0")
     int openMistakeCount(@Param("userId") String userId);
 

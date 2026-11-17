@@ -648,6 +648,131 @@ class LearningEvaluatePayload(APIModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# 批量出题（一次生成一组题目）与整组评估
+# ---------------------------------------------------------------------------
+
+PracticeQuestionType = Literal["CHOICE", "FILL", "SUBJECTIVE"]
+
+
+class PracticeTypeDistribution(APIModel):
+    choice: int = Field(default=0, ge=0, le=20)
+    fill: int = Field(default=0, ge=0, le=20)
+    subjective: int = Field(default=0, ge=0, le=20)
+
+
+class PracticeConfig(APIModel):
+    total_questions: int = Field(ge=1, le=20)
+    type_distribution: PracticeTypeDistribution
+    difficulty: Literal["EASY", "MEDIUM", "HARD", "MIXED"] = "MEDIUM"
+    direction: str = Field(default="", max_length=32)
+
+    @model_validator(mode="after")
+    def _distribution_matches_total(self) -> "PracticeConfig":
+        dist = self.type_distribution
+        if dist.choice + dist.fill + dist.subjective != self.total_questions:
+            raise ValueError("题型分布之和必须等于题目总数")
+        return self
+
+
+class PracticeOption(APIModel):
+    key: str = Field(min_length=1, max_length=2)
+    content: str = Field(min_length=1, max_length=500)
+
+
+class AIPracticeQuestion(APIModel):
+    stem: str = Field(min_length=10, max_length=3000)
+    type: PracticeQuestionType
+    skill_codes: list[str] = Field(min_length=1, max_length=10)
+    difficulty: Difficulty = "MEDIUM"
+    options: list[PracticeOption] = Field(default_factory=list, max_length=8)
+    answer_key: list[str] = Field(default_factory=list, max_length=10)
+    blank_count: int = Field(default=0, ge=0, le=10)
+    score: int = Field(default=10, ge=1, le=100)
+    reference_answer: str = Field(min_length=1, max_length=5000)
+    rubric: Rubric
+    citations: list[Citation] = Field(default_factory=list, max_length=10)
+
+
+class AIPracticeQuestionSet(APIModel):
+    questions: list[AIPracticeQuestion] = Field(min_length=1, max_length=20)
+
+
+class LearningPracticeQuestionsPayload(APIModel):
+    """一次生成一组题目的输入。"""
+
+    session_id: UUID
+    plan_item: PlanItemSpec
+    config: PracticeConfig
+    # 复用旧题库时提供的单选候选（按 objective 相关性筛选），批量生成允许为空
+    candidate_questions: list[QuestionCandidate] = Field(default_factory=list, max_length=50)
+    excluded_question_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    excluded_question_stems: list[str] = Field(default_factory=list, max_length=100)
+    knowledge_refs: list[Citation] = Field(default_factory=list, max_length=50)
+
+
+class PracticeSubjectiveAnswer(APIModel):
+    answer_id: UUID
+    question_id: UUID
+    question_version: int = Field(ge=1)
+    stem: str = Field(min_length=1, max_length=3000)
+    skill_codes: list[str] = Field(min_length=1, max_length=10)
+    reference_answer: str = Field(min_length=1, max_length=5000)
+    rubric: Rubric
+    answer: str = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode="after")
+    def _fixed_rubric(self) -> "PracticeSubjectiveAnswer":
+        expected = {"correctness": 0.5, "completeness": 0.3, "expression": 0.2}
+        keys = [item.key for item in self.rubric.dimensions]
+        if len(keys) != 3 or set(keys) != set(expected):
+            raise ValueError("rubric 必须包含 correctness/completeness/expression")
+        for item in self.rubric.dimensions:
+            if abs(item.weight - expected[item.key]) > 1e-6:
+                raise ValueError(f"rubric.{item.key} 权重必须为 {expected[item.key]}")
+        return self
+
+
+class LearningPracticeEvaluatePayload(APIModel):
+    """整组交卷：仅主观题需要 LLM 评估，客观题由 Java 自动判分。
+
+    全客观题训练组会传入空 answers，此时只需返回空 evaluations 与整组报告。
+    """
+
+    session_id: UUID
+    answers: list[PracticeSubjectiveAnswer] = Field(default_factory=list, max_length=20)
+
+
+class PracticeEvaluationItem(APIModel):
+    answer_id: UUID
+    evaluation: EvaluationVO
+    skill_scores: list[SkillScoreDraft] = Field(default_factory=list, max_length=20)
+
+
+class PracticeReport(APIModel):
+    summary: str = Field(default="", max_length=2000)
+    strengths: list[str] = Field(default_factory=list, max_length=10)
+    improvements: list[str] = Field(default_factory=list, max_length=10)
+
+
+class PracticeEvaluationModelItem(APIModel):
+    """模型输出：仅评分内容，rubric/model/prompt 版本由服务端补齐。"""
+
+    answer_id: UUID
+    evaluation: EvaluationModelOutput
+    skill_scores: list[SkillScoreDraft] = Field(default_factory=list, max_length=20)
+
+
+class PracticeEvaluateModelOutput(APIModel):
+    evaluations: list[PracticeEvaluationModelItem] = Field(default_factory=list, max_length=20)
+    report: PracticeReport = Field(default_factory=PracticeReport)
+
+
+class AIPracticeEvaluateResult(APIModel):
+    evaluations: list[PracticeEvaluationItem] = Field(default_factory=list, max_length=20)
+    report: PracticeReport = Field(default_factory=PracticeReport)
+
+
 class GrowthSkillInput(APIModel):
     skill_code: str = Field(min_length=1, max_length=64)
     score: float | None = Field(default=None, ge=0, le=100)

@@ -18,7 +18,6 @@ import com.aijob.backend.common.JsonService;
 @Service
 public class ProfileService {
 
-    private static final Set<String> ROLES = Set.of("JAVA_BACKEND", "FRONTEND", "ALGORITHM", "TEST", "DATA");
     private static final Set<String> CANDIDATES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
 
     private final ProfileMapper mapper;
@@ -55,6 +54,9 @@ public class ProfileService {
         }
         String role = Data.text(body, "targetRole", true, 32);
         String candidate = Data.text(body, "candidateType", true, 32);
+        if (!JobRoleCatalog.supports(role)) {
+            throw BusinessException.validation("targetRole", "目标求职方向不在支持范围内");
+        }
         if (!CANDIDATES.contains(candidate)) {
             throw BusinessException.validation("body", "岗位方向或求职类型非法");
         }
@@ -80,7 +82,7 @@ public class ProfileService {
     }
 
     public Set<String> roles() {
-        return ROLES;
+        return JobRoleCatalog.values();
     }
 
     public List<Map<String, Object>> skillCatalog() {

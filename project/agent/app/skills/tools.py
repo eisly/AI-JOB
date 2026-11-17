@@ -125,6 +125,29 @@ def build_model_input(
             "question": payload.get("question") or {},
             "answer": payload.get("answer"),
         }
+    if operation == "LEARNING_PRACTICE_QUESTIONS":
+        return {
+            "planItem": payload.get("planItem") or {},
+            "config": payload.get("config") or {},
+            "knowledgeRefs": payload.get("knowledgeRefs") or [],
+            "excludedQuestionStems": [
+                str(item)[:200] for item in payload.get("excludedQuestionStems") or []
+            ][-30:],
+        }
+    if operation == "LEARNING_PRACTICE_EVALUATE":
+        answers = []
+        for item in payload.get("answers") or []:
+            answers.append(
+                {
+                    "answerId": item.get("answerId"),
+                    "stem": item.get("stem"),
+                    "skillCodes": item.get("skillCodes") or [],
+                    "referenceAnswer": item.get("referenceAnswer"),
+                    "rubric": item.get("rubric") or {},
+                    "answer": str(item.get("answer") or "")[:10000],
+                }
+            )
+        return {"answers": answers}
     if operation == "GROWTH_ANALYZE":
         return {
             "profileVersion": payload.get("profileVersion"),

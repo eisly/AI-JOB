@@ -28,11 +28,12 @@ class LearningResultHandlerTest {
     private final JsonService json = new JsonService(JsonMapper.builder().build());
     private final LearningMapper mapper = mock(LearningMapper.class);
     private final LearningService learning = mock(LearningService.class);
+    private final PracticeService practice = mock(PracticeService.class);
     private final EvaluationService evaluations = mock(EvaluationService.class);
     private final AbilityService ability = mock(AbilityService.class);
     private final ProfileService profiles = mock(ProfileService.class);
 
-    private final LearningResultHandler handler = new LearningResultHandler(mapper, learning, evaluations,
+    private final LearningResultHandler handler = new LearningResultHandler(mapper, learning, practice, evaluations,
             ability, profiles, json);
 
     @Test

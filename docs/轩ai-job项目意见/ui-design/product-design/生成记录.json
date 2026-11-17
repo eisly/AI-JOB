@@ -1,0 +1,34 @@
+{
+  "workflow": "Product Design / get-context → ideate",
+  "date": "2026-11-13",
+  "surface": "AI-JOB 专项训练",
+  "status": "已选择方案1作为报告主推，尚未实现",
+  "selectedOption": 1,
+  "selectedName": "专注答题模式",
+  "selectedAt": "2026-11-13",
+  "references": [
+    "../../screenshots/10-题目代码未格式化与答题区.jpg",
+    "../03-专项训练工作区.png"
+  ],
+  "designTokensSource": "AI-JOB/project/frontend/src/styles/variables.scss",
+  "displayOrder": [
+    {
+      "option": 1,
+      "name": "专注答题模式",
+      "file": "01-专注答题模式.png",
+      "prompt": "Create realistic, production-quality UI designs with clear hierarchy, strong typography and purposeful spacing. Product Design visual exploration for AI-JOB 专项训练, Chinese student career preparation desktop web app. Direction name 专注答题模式. Target exactly 1440x1024, flat app screenshot, no browser/device frames. Current date anchor 2026-11-13, no arbitrary dates. Reference image 1 actual raw-code question screenshot, reference 2 prior training mockup; attach both for brand/context, but explore a distinct single-task layout. Brand #2563EB, page #F8FAFC, white surface, text #111827/#6B7280, borders #E5E7EB, 6/8/12px radii, 14–16px body Chinese. Use whitespace and grouping, simple row dividers, minimal shadow. No cards inside cards, no promotional illustrations, no feature-inventory dashboard.\nLayout deliberately DIFFERENT from plan-rail workspace: a compact top bar with 返回训练计划 on left, AI-JOB / 专项训练 breadcrumb, 体验用户 on right, 设计提案 label. Do not show permanent full global sidebar. Center width ~1050px for ONE readable question/answer flow. Title 权限边界与接口安全, progress 第1/5题. One amber slim inline notification 当前计划基于画像v4，当前画像v5, 更新计划 text link. Current target 网络安全工程师 in small context line. Topic 如何防止跨用户访问投递记录？ brief clear instruction and short formatted Java permission guard code, 复制 code action. Then expansive answer textbox with placeholder 从身份认证、归属校验和测试验证三个方面回答. Footer anchored row draft state 草稿未保存, subdued 保存草稿 and single blue 提交回答; no other primary CTA. Supporting reading shown as a closed right-edge drawer tab 参考资料 which is subtly open in a narrow ~260px panel, containing a concise source 阅读目标：理解认证与授权的边界, 打开资料 button and unchecked 我已阅读（自评）. No plan list clutter, no scores, no metrics. Everything critical fits without scrolling to find the answer. Adequate keyboard-focus outlines on active input, labels not placeholders alone. Fictional data only, no credentials. This is a static proposed redesign and not real application evidence. Strong Simplified Chinese text accuracy."
+    },
+    {
+      "option": 2,
+      "name": "分步学习引导",
+      "file": "02-分步学习引导.png",
+      "prompt": "Create realistic, production-quality UI designs with clear hierarchy, strong typography, intentional spacing. Product Design visual exploration for AI-JOB 专项训练 Chinese student career preparation desktop web app. Direction name 分步学习引导. Target exactly 1440x1024. Reference image 1 is actual product question screenshot; reference 2 is existing proposed workspace; preserve brand and visual identity while making a DISTINCT guided step journey. Current date 2026-11-13, all visible dates derive from it. White on #F8FAFC, primary blue #2563EB, text #111827/#6B7280, border #E5E7EB, radii 6/8/12px. Calm Vue/Element Plus aesthetic, 14–16px readable Chinese, line icons, generous whitespace, minimal shadow, avoid nested cards and metrics. Flat front-on full desktop app no device frame.\nKeep minimal 220px global sidebar (brand AI-JOB, 求职工作台, 求职画像, 专项训练 selected, 成长中心, 投递进度). Header 专项训练, small 设计提案 label. Main top context 当前方向 网络安全工程师 · 画像v5. A visible but compact amber message 计划基于旧画像v4 · 建议更新, small 更新计划 link. Then a four-step horizontal progress indicator 准备 → 阅读 → 作答 → 复盘, current 作答 active. This screen shows ONE current step in center, not simultaneous plan-list sidebar and full cards. Label 学习任务：接口归属校验, 第1/5题. Question 如何防止跨用户访问投递记录？ with a short 3-line syntax-highlighted Java permission guard, copy link. Answer area labeled 我的回答 and instructional placeholder. Main blue action 提交并进入复盘, quiet 上一步 and 保存退出. Under the stepper a light completed-reading context line 已完成阅读：权限控制实践指南 · 自评确认 with 回看资料 link, no false validation claim. A slim top-right 计划目录 dropdown rather than permanent plan rail. Footer a discreet helper hint 提交后先展示评价，再继续下一题. No badges per element, no user scores, no fake scientific confidence. Field labels explicit; steps convey state via text and number as well as color. Align all content to stable grid. Fictional sample only, no real personal information. This is a design proposal, not a running app screenshot."
+    },
+    {
+      "option": 3,
+      "name": "并排训练工作区",
+      "file": "03-并排训练工作区.png",
+      "prompt": "Create realistic, production-quality UI designs with clear hierarchy, strong typography and purposeful spacing. This is a Product Design visual exploration for AI-JOB 专项训练, a Chinese student career-preparation desktop web app. Target dimensions exactly 1440x1024, flat front-on app content no browser frame. Reference image 1 is the real product question surface, image 2 is prior proposed design; use both as grounding, not a pixel clone. Preserve source brand #2563EB, #F8FAFC background, #FFFFFF surfaces, #111827 text, #6B7280 secondary text, #E5E7EB borders, 6/8/12px radius; product body 14–16px, clear Chinese typography. Simple line icons, restrained shadows; use space/grouping/dividers before cards, avoid nested card forests and overpacked feature inventories. Current date anchor 2026-11-13; any displayed dates must derive from it. Fictional 体验用户 only, no personal data. Small 设计提案 badge. Primary outcome: immediately see and answer the current question; reading is supporting content. Preserve critical states: current target 网络安全工程师, current profile v5 versus old training plan v4 (clear warning with 更新计划), current question visible above fold, syntax-highlighted code not raw Markdown fences, answer input and primary 提交回答, reading action separate 打开资料 from self-declaration 我已阅读（自评）. Only one dominant blue primary action; secondary actions subdued. No promotional imagery. No implementation code output, image only.\nDirection name 并排训练工作区. Structure is plan rail + active question workspace: compact global 220px left sidebar, main area starts with training title and compact old-plan warning, below 250px plan list on left with grouped plain rows (not individual cards), and wide question+answer on right. Question 如何防止跨用户访问投递记录？ with short correctly formatted Java permission guard example, large answer area. Reading resource collapsed bottom supporting row. Progress 3/11 displayed in plan rail; avoid multiple top-level KPI cards. Plan row active with strong left bar and text label not color alone. Keep full input and submit above bottom edge. Blue Submit and secondary save draft. Prior mock's duplicate cards should be reduced. Make this a polished, practical, task-oriented desktop product screen, readable and no clipped controls."
+    }
+  ]
+}

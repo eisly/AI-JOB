@@ -591,6 +591,140 @@ export interface MistakeVO {
   cause?: 'UNKNOWN' | 'WRONG_ANSWER' | null
 }
 
+// ===== 专项训练 V2：一次生成一组题目（练习集）契约 =====
+// 说明：以下结构为改版后前端与后端的预留字段约定。
+// 后端按此契约实现 /api/v1/learning/practice-sets 系列接口前，
+// 前端会自动降级为旧版"单题会话"（TEXT_SCENARIO/TEXT_KNOWLEDGE 映射为 SUBJECTIVE）。
+
+/** 新版题型：选择题 / 填空题 / 主观题 */
+export type PracticeQuestionType = 'CHOICE' | 'FILL' | 'SUBJECTIVE'
+
+/** 旧版题型 → 新版题型映射（降级兼容用） */
+export type LegacyQuestionType = 'TEXT_SCENARIO' | 'TEXT_KNOWLEDGE'
+
+export interface PracticeOptionVO {
+  /** 选项标识，如 A / B / C / D */
+  key: string
+  content: string
+}
+
+export interface PracticeQuestionVO {
+  id: string
+  /** 题目在本组中的序号（1 开始） */
+  index: number
+  type: PracticeQuestionType
+  skillCodes: string[]
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD'
+  stem: string
+  /** 选择题选项；填空/主观题为空数组 */
+  options: PracticeOptionVO[]
+  /** 填空题空位数量（默认 1） */
+  blankCount: number
+  /** 建议作答时长（分钟） */
+  estimatedMinutes: number
+  /** 分值 */
+  score: number
+  questionVersion: number
+  sourceType?: 'CURATED' | 'GENERATED'
+  sourceTitle?: string | null
+}
+
+export interface PracticeTypeDistributionVO {
+  /** 选择题数量 */
+  choice: number
+  /** 填空题数量 */
+  fill: number
+  /** 主观题数量 */
+  subjective: number
+}
+
+/** 用户自定义出题配置（生成练习集的入参，也是练习集快照） */
+export interface PracticeConfigVO {
+  /** 题目总数：5 / 10 / 15 / 20 */
+  totalQuestions: number
+  /** 题型分布 */
+  typeDistribution: PracticeTypeDistributionVO
+  /** 难度：EASY/MEDIUM/HARD/MIXED */
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'MIXED'
+  /** 训练方向，如 JAVA_BACKEND / MYSQL / ALGORITHM */
+  direction: string
+  planId?: string
+  planItemId?: string
+}
+
+export type PracticeSetStatus =
+  | 'GENERATING' | 'READY' | 'IN_PROGRESS'
+  | 'SUBMITTED' | 'EVALUATING' | 'EVALUATED' | 'FAILED'
+
+/** 一组预生成的题目（练习集） */
+export interface PracticeSetVO {
+  id: string
+  planId: string | null
+  planItemId: string | null
+  title: string
+  status: PracticeSetStatus
+  config: PracticeConfigVO | null
+  questions: PracticeQuestionVO[]
+  /** 本组预计总时长（分钟） */
+  totalMinutes: number
+  /** 乐观锁版本号 */
+  version: number
+  generatedAt?: string
+}
+
+/** 单题作答载荷 */
+export interface PracticeAnswerPayload {
+  questionId: string
+  type: PracticeQuestionType
+  /** 选择题所选选项 key */
+  choiceKey?: string
+  /** 填空题各空答案（按下标对应） */
+  blanks?: string[]
+  /** 主观题回答内容 */
+  content?: string
+}
+
+/** 交卷载荷 */
+export interface PracticeSubmissionVO {
+  answers: PracticeAnswerPayload[]
+  /** 实际用时（秒） */
+  durationSeconds: number
+  /** 乐观锁版本号 */
+  expectedVersion: number
+}
+
+/** 单题评估结果 */
+export interface PracticeQuestionResultVO {
+  questionId: string
+  /** 客观题判定对错；主观题为 null（走 evaluation） */
+  correct: boolean | null
+  /** 得分（主观题为 0-100，客观题对=满分/错=0） */
+  score: number | null
+  /** 客观题正确答案 */
+  correctKeys?: string[]
+  /** 简要点评 */
+  comment?: string
+  /** 主观题完整评估（复用旧评估结构） */
+  evaluation?: EvaluationVO | null
+}
+
+/** 整组训练评估结果（训练反馈报告） */
+export interface PracticeSetResultVO {
+  id: string
+  status: 'EVALUATED'
+  /** 综合得分 */
+  overallScore: number | null
+  /** 客观题正确数 */
+  objectiveCorrectCount: number
+  /** 客观题总数 */
+  objectiveTotalCount: number
+  /** 报告摘要 */
+  summary: string
+  strengths: string[]
+  improvements: string[]
+  questionResults: PracticeQuestionResultVO[]
+}
+
 export interface ProjectRecommendationItem {
   id: string
   title: string

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <rect width="1440" height="900" fill="#F5F7FB"/>
+  <text x="64" y="72" font-family="Microsoft YaHei, Arial" font-size="30" font-weight="700" fill="#102A56">建议改版：让求职闭环的状态、下一步和异常都可理解</text>
+  <text x="64" y="112" font-family="Microsoft YaHei, Arial" font-size="17" fill="#60708B">信息架构示意，不是最终视觉稿；重点是清晰呈现“当前版本、数据来源、下一步动作”。</text>
+  <rect x="64" y="154" width="1312" height="94" rx="16" fill="#FFFFFF" stroke="#D8E2F3"/>
+  <circle cx="112" cy="201" r="22" fill="#246BFD"/><text x="104" y="208" font-family="Arial" font-size="20" fill="#FFF">1</text>
+  <text x="152" y="192" font-family="Microsoft YaHei, Arial" font-size="19" font-weight="700" fill="#1E3357">当前方向：网络安全工程师 · 实习 · 广州、深圳</text>
+  <text x="152" y="221" font-family="Microsoft YaHei, Arial" font-size="15" fill="#64748B">画像 v5  ·  简历 v1  ·  训练计划基于画像 v4（已过期）</text>
+  <rect x="1117" y="179" width="210" height="43" rx="8" fill="#EAF1FF"/><text x="1154" y="207" font-family="Microsoft YaHei, Arial" font-size="15" fill="#246BFD">更新训练计划</text>
+  <line x1="720" y1="248" x2="720" y2="786" stroke="#B7C8E5" stroke-width="2" stroke-dasharray="6 8"/>
+  <rect x="64" y="286" width="610" height="210" rx="16" fill="#FFFFFF" stroke="#D8E2F3"/>
+  <text x="96" y="334" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#1E3357">岗位搜索与匹配</text>
+  <rect x="96" y="358" width="248" height="34" rx="17" fill="#FFF4E5"/><text x="112" y="381" font-family="Microsoft YaHei, Arial" font-size="14" fill="#B7660D">搜索服务：部分不可用</text>
+  <text x="96" y="425" font-family="Microsoft YaHei, Arial" font-size="16" fill="#42526E">官方源 2 个可用 · AI 搜索未配置 · 本次无匹配结果</text>
+  <rect x="96" y="444" width="162" height="36" rx="8" fill="#246BFD"/><text x="125" y="468" font-family="Microsoft YaHei, Arial" font-size="15" fill="#FFF">查看诊断并重试</text>
+  <rect x="278" y="444" width="154" height="36" rx="8" fill="#FFF" stroke="#AFC5EF"/><text x="303" y="468" font-family="Microsoft YaHei, Arial" font-size="15" fill="#246BFD">导入个人 JD</text>
+  <rect x="766" y="286" width="610" height="210" rx="16" fill="#FFFFFF" stroke="#D8E2F3"/>
+  <text x="798" y="334" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#1E3357">专项训练</text>
+  <rect x="798" y="358" width="292" height="34" rx="17" fill="#FFF4E5"/><text x="815" y="381" font-family="Microsoft YaHei, Arial" font-size="14" fill="#B7660D">旧计划：测试工程师 · 建议更新</text>
+  <text x="798" y="425" font-family="Microsoft YaHei, Arial" font-size="16" fill="#42526E">下一项：Spring Boot 分层架构与接口测试</text>
+  <rect x="798" y="444" width="148" height="36" rx="8" fill="#246BFD"/><text x="838" y="468" font-family="Microsoft YaHei, Arial" font-size="15" fill="#FFF">继续训练</text>
+  <text x="964" y="468" font-family="Microsoft YaHei, Arial" font-size="14" fill="#64748B">点击后自动定位到题目</text>
+  <rect x="64" y="538" width="1312" height="248" rx="16" fill="#FFFFFF" stroke="#D8E2F3"/>
+  <text x="96" y="586" font-family="Microsoft YaHei, Arial" font-size="21" font-weight="700" fill="#1E3357">关键岗位卡片：结构化字段必须可追溯、可纠错</text>
+  <rect x="96" y="616" width="870" height="126" rx="10" fill="#F8FAFE"/>
+  <text x="120" y="652" font-family="Microsoft YaHei, Arial" font-size="18" font-weight="700" fill="#1E3357">车联网安全工程师 · 小鹏集团</text>
+  <text x="120" y="684" font-family="Microsoft YaHei, Arial" font-size="15" fill="#42526E">城市：广州　证据：JD 第 1 行「工作地点：广州」</text>
+  <text x="120" y="715" font-family="Microsoft YaHei, Arial" font-size="15" fill="#42526E">技能：Spring Boot · FastAPI · Vue · 车联网安全 · ISO 21434</text>
+  <rect x="999" y="628" width="158" height="40" rx="8" fill="#EAF1FF"/><text x="1035" y="654" font-family="Microsoft YaHei, Arial" font-size="15" fill="#246BFD">纠正提取结果</text>
+  <rect x="999" y="686" width="218" height="34" rx="17" fill="#ECFDF3"/><text x="1025" y="708" font-family="Microsoft YaHei, Arial" font-size="14" fill="#208347">修正后进入人工确认</text>
+  <text x="64" y="852" font-family="Microsoft YaHei, Arial" font-size="14" fill="#74839B">设计原则：状态透明 · 版本可见 · 失败可恢复 · AI 提取可人工校正</text>
+</svg>

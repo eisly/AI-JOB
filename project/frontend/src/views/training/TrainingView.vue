@@ -1,40 +1,39 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Edit, Plus, Refresh, Right } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { CircleCheck, Edit, Plus, Refresh, Right } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { learningApi } from '@/api/learning'
+import { isEndpointMissing, practiceApi } from '@/api/training'
 import { jobApi } from '@/api/jobs'
 import { profileApi } from '@/api/profile'
 import { resumeApi } from '@/api/resumes'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
 import { ApiError } from '@/api/request'
 import type {
-LearningAnswerVO,
+  LearningAnswerVO,
   LearningPlanVO,
-  LearningSessionVO,
   MatchSummaryVO,
   MistakeVO,
   Page,
   PlanItemVO,
+  PracticeConfigVO,
+  PracticeTypeDistributionVO,
   ProfileVO,
   TaskVO,
 } from '@/api/types'
 import { useTask } from '@/composables/useTask'
+import { getJobRoleLabel, JOB_ROLE_LIST } from '@/config/jobRoles'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
-import { stemSegments } from '@/utils/training-content'
-import { commonStatusLabels, displayScore, errorMessage, formatDate, roleLabels } from '@/utils/format'
+import { commonStatusLabels, displayScore, errorMessage, formatDate } from '@/utils/format'
 
 type TrainingTab = 'plans' | 'mistakes'
-type TaskContext = 'plans' | 'mistakes'
-type AnswerBody = { content: string; expectedVersion: number }
 
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref<TrainingTab>(route.query.tab === 'mistakes' ? 'mistakes' : 'plans')
 const currentProfile = ref<ProfileVO | null>(null)
-const draftPrefix = 'ai-job-training-draft-v1'
 
 function emptyPage<T>(size = 6): Page<T> {
   return { total: 0, records: [], current: 1, size }
@@ -76,41 +75,8 @@ function questionTypeLabel(type: string) {
   return ({ TEXT_SCENARIO: '场景题', TEXT_KNOWLEDGE: '知识题' } as Record<string, string>)[type] || type
 }
 
-async function copyCode(content: string) {
-  try {
-    await navigator.clipboard.writeText(content)
-    ElMessage.success('代码已复制')
-  } catch {
-    ElMessage.warning('复制未成功，请选中代码后手动复制')
-  }
-}
-
 function evidenceLabel(status: string) {
   return ({ VALID: '有效评价', INSUFFICIENT: '证据不足', INVALID: '无效回答' } as Record<string, string>)[status] || status
-}
-
-function dimensionLabel(key: string) {
-  return ({ correctness: '正确性', completeness: '完整性', expression: '表达' } as Record<string, string>)[key] || key
-}
-
-function draftKey(sessionId: string) {
-  return `${draftPrefix}:${sessionId}`
-}
-
-function readDraft(sessionId: string) {
-  try {
-    return localStorage.getItem(draftKey(sessionId)) || ''
-  } catch {
-    return ''
-  }
-}
-
-function clearDraft(sessionId: string) {
-  try {
-    localStorage.removeItem(draftKey(sessionId))
-  } catch {
-    return
-  }
 }
 
 const plans = ref<Page<LearningPlanVO>>(emptyPage())
@@ -142,12 +108,6 @@ async function loadPlan(planId: string, syncRoute = false, clearCurrentSession =
   planDetailError.value = null
   if (clearCurrentSession) {
     selectedPlan.value = null
-    session.value = null
-    answer.value = null
-    sessionTaskId.value = null
-    evaluationTaskId.value = null
-    answerContent.value = ''
-    answerSubmitted.value = false
   }
   try {
     const plan = await learningApi.getPlan(planId)
@@ -193,6 +153,7 @@ function planOutdatedReasons(plan: LearningPlanVO) {
 
 async function refreshCurrentProfile() {
   currentProfile.value = await profileApi.get().catch(() => null)
+  if (currentProfile.value?.targetRole) practiceConfig.value.direction = currentProfile.value.targetRole
 }
 
 const itemActionPending = ref<string[]>([])
@@ -214,106 +175,7 @@ async function completeReading(item: PlanItemVO) {
   }
 }
 
-const session = ref<LearningSessionVO | null>(null)
-const sessionRequestId = ref('')
-const sessionLoading = ref(false)
-const sessionError = ref<unknown>(null)
-const sessionStartingItemId = ref<string | null>(null)
-const sessionActionError = ref<unknown>(null)
-const sessionTaskId = ref<string | null>(null)
-const sessionTaskContext = ref<TaskContext>('plans')
-const sessionRetrying = ref(false)
-const sessionTracker = useTask(sessionTaskId, { onDone: handleSessionDone })
-const sessionTask = sessionTracker.task
-const sessionTrackingError = sessionTracker.error
-const sessionTaskActive = computed(() => taskIsActive(sessionTask.value))
-
-const answer = ref<LearningAnswerVO | null>(null)
-const answerRequestId = ref('')
-const answerLoading = ref(false)
-const answerError = ref<unknown>(null)
-const answerContent = ref('')
-const answerSubmitting = ref(false)
-const answerRetrying = ref(false)
-const answerSubmitted = ref(false)
-const answerConflict = ref(false)
-const answerActionError = ref<unknown>(null)
-const evaluationTaskId = ref<string | null>(null)
-const lastAnswerBody = ref<AnswerBody | null>(null)
-const draftSaveFailed = ref(false)
-const evaluationTracker = useTask(evaluationTaskId, { onDone: handleEvaluationDone })
-const evaluationTask = evaluationTracker.task
-const evaluationTrackingError = evaluationTracker.error
-const evaluationTaskActive = computed(() => taskIsActive(evaluationTask.value) || answerSubmitting.value)
-
-watch(answerContent, content => {
-  if (!session.value || answerSubmitted.value) return
-  try {
-    localStorage.setItem(draftKey(session.value.id), content)
-    draftSaveFailed.value = false
-  } catch {
-    draftSaveFailed.value = true
-  }
-})
-
-async function loadSession(sessionId: string, options: { preserveContent?: boolean; loadLastAnswer?: boolean; syncRoute?: boolean } = {}) {
-  if (!sessionId) return
-  sessionRequestId.value = sessionId
-  sessionLoading.value = true
-  sessionError.value = null
-  try {
-    const value = await learningApi.getSession(sessionId)
-    session.value = value
-    answerConflict.value = false
-    draftSaveFailed.value = false
-    if (!options.preserveContent) {
-      answerContent.value = readDraft(sessionId)
-      answerSubmitted.value = false
-      lastAnswerBody.value = null
-    }
-    if (options.syncRoute !== false) setQuery({ tab: 'plans', planId: value.planId, sessionId, answerId: value.lastAnswerId || undefined })
-    await loadPlan(value.planId)
-    if (options.loadLastAnswer !== false && value.lastAnswerId) {
-      await loadAnswer(value.lastAnswerId, { loadSession: false, syncRoute: options.syncRoute !== false })
-    } else if (!value.lastAnswerId && !options.preserveContent) {
-      answer.value = null
-      evaluationTaskId.value = null
-      answerSubmitted.value = false
-    }
-  } catch (reason) {
-    sessionError.value = reason
-  } finally {
-    sessionLoading.value = false
-  }
-}
-
-async function handleSessionDone(task: TaskVO) {
-  const sessionId = task.result?.resourceId || task.resourceId
-  if (!sessionId) {
-    sessionActionError.value = new Error('任务完成但未返回训练会话ID')
-    return
-  }
-  activeTab.value = 'plans'
-  await loadSession(sessionId)
-  if (!sessionError.value) {
-    await loadPlans()
-    ElMessage.success('训练题已准备完成，已读取权威会话')
-    focusSessionPanel()
-  }
-}
-
-/** U01：题目就绪后滚动到可视区并聚焦答题框，避免用户误以为"开始答题"按钮无效 */
-const sessionPanelRef = ref<HTMLElement>()
-const answerInputRef = ref<{ focus: () => void }>()
-
-function focusSessionPanel() {
-  void nextTick(() => {
-    sessionPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    if (session.value?.status === 'ACTIVE' && !answerSubmitted.value && !evaluationTaskActive.value) {
-      window.setTimeout(() => answerInputRef.value?.focus(), 300)
-    }
-  })
-}
+const practiceActionError = ref<unknown>(null)
 
 function conflictSessionId(reason: unknown) {
   if (!(reason instanceof ApiError) || reason.status !== 409) return ''
@@ -321,141 +183,119 @@ function conflictSessionId(reason: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
-async function startPractice(item: PlanItemVO) {
-  if (!selectedPlan.value || item.kind !== 'PRACTICE') return
-  const planId = selectedPlan.value.id
-  sessionStartingItemId.value = item.id
-  sessionTaskContext.value = 'plans'
-  sessionTaskId.value = null
-  sessionActionError.value = null
-  try {
-    sessionTaskId.value = (await learningApi.startSession(planId, item.id)).id
-  } catch (reason) {
-    const existingSessionId = conflictSessionId(reason)
-    if (existingSessionId) {
-      ElMessage.info('已存在活动训练会话，正在打开该会话')
-      await loadSession(existingSessionId)
-      focusSessionPanel()
-    } else {
-      sessionActionError.value = reason
-    }
-  } finally {
-    sessionStartingItemId.value = null
+async function openPracticeSet(setId: string, allowLegacy = false) {
+  await router.push({ name: 'training-practice', params: { setId }, query: allowLegacy ? { legacy: '1' } : {} })
+}
+
+async function openPreparePage(taskId: string) {
+  await router.push({ name: 'training-prepare', params: { taskId } })
+}
+
+const practiceConfig = ref({
+  totalQuestions: 10,
+  typeDistribution: { choice: 4, fill: 3, subjective: 3 } as PracticeTypeDistributionVO,
+  difficulty: 'MEDIUM' as PracticeConfigVO['difficulty'],
+  direction: 'JAVA_BACKEND',
+})
+const difficultyOptions: { value: PracticeConfigVO['difficulty']; label: string }[] = [
+  { value: 'EASY', label: '入门' },
+  { value: 'MEDIUM', label: '进阶' },
+  { value: 'HARD', label: '挑战' },
+  { value: 'MIXED', label: '混合' },
+]
+const typeDistributionOptions: { key: keyof PracticeTypeDistributionVO; label: string; desc: string }[] = [
+  { key: 'choice', label: '选择题', desc: '基本概念 · 知识辨析' },
+  { key: 'fill', label: '填空题', desc: '关键词 · 语法 / 术语' },
+  { key: 'subjective', label: '主观题', desc: '场景 / 项目 / 设计 / 代码' },
+]
+const configuredTotal = computed(() => {
+  const dist = practiceConfig.value.typeDistribution
+  return dist.choice + dist.fill + dist.subjective
+})
+const configValid = computed(() => configuredTotal.value === practiceConfig.value.totalQuestions && configuredTotal.value > 0)
+
+watch(() => practiceConfig.value.totalQuestions, total => normalizeDistribution(total))
+
+function normalizeDistribution(total: number) {
+  const dist = practiceConfig.value.typeDistribution
+  const current = dist.choice + dist.fill + dist.subjective
+  if (!current || current === total) return
+  const keys: (keyof PracticeTypeDistributionVO)[] = ['choice', 'fill', 'subjective']
+  const next: PracticeTypeDistributionVO = { choice: 0, fill: 0, subjective: 0 }
+  let allocated = 0
+  keys.forEach((key, index) => {
+    const value = index === keys.length - 1
+      ? total - allocated
+      : Math.min(dist[key], Math.max(0, total - allocated))
+    next[key] = value
+    allocated += value
+  })
+  practiceConfig.value.typeDistribution = next
+}
+
+function buildPracticeConfig(planId?: string, planItemId?: string): PracticeConfigVO {
+  return {
+    totalQuestions: practiceConfig.value.totalQuestions,
+    typeDistribution: { ...practiceConfig.value.typeDistribution },
+    difficulty: practiceConfig.value.difficulty,
+    direction: practiceConfig.value.direction,
+    planId,
+    planItemId,
   }
 }
 
-async function retrySessionTask() {
-  sessionRetrying.value = true
-  sessionActionError.value = null
+const groupGeneratingItemId = ref<string | null>(null)
+const groupTaskError = ref<unknown>(null)
+
+async function startGroupPractice(item: PlanItemVO) {
+  if (!selectedPlan.value || item.kind !== 'PRACTICE') return
+  if (!configValid.value) {
+    ElMessage.warning('题型分布之和需要等于每组题目数，请先在右侧完成配置')
+    return
+  }
+  const planId = selectedPlan.value.id
+  groupTaskError.value = null
+  practiceActionError.value = null
+  groupGeneratingItemId.value = item.id
   try {
-    if (sessionTask.value) sessionTaskId.value = (await retryTrackedTask(sessionTask.value)).id
+    // 点击即进入主框架内的"题目生成/答题"页面，不在主页内嵌答题
+    const task = await practiceApi.generateSet(buildPracticeConfig(planId, item.id))
+    await openPreparePage(task.id)
   } catch (reason) {
-    sessionActionError.value = reason
+    if (isEndpointMissing(reason)) {
+      groupTaskError.value = new Error('整组出题接口暂不可用，请检查后端服务是否已更新并重启。当前配置尚未生成题目。')
+    } else {
+      const existingSessionId = conflictSessionId(reason)
+      if (existingSessionId) {
+        try {
+          await ElMessageBox.confirm('该训练单元已有进行中的练习，当前配置尚未生成题目。可先继续已有练习，完成后再生成新题组。', '已有进行中的练习', {
+            confirmButtonText: '继续已有练习',
+            cancelButtonText: '返回',
+            type: 'info',
+          })
+          await openPracticeSet(existingSessionId, true)
+        } catch {
+          // 用户选择返回时保留当前配置
+        }
+      } else {
+        groupTaskError.value = reason
+      }
+    }
   } finally {
-    sessionRetrying.value = false
+    groupGeneratingItemId.value = null
   }
 }
+
+// ===== 主页统计（顶部概览条） =====
+const heroPlan = computed(() => selectedPlan.value || plans.value.records[0] || null)
+const heroPlanProgress = computed(() => heroPlan.value ? planProgress(heroPlan.value) : { completed: 0, total: 0, percentage: 0 })
+const pendingPracticeItems = computed(() => heroPlan.value?.items.filter(item => item.kind === 'PRACTICE' && item.status !== 'COMPLETED') || [])
+const pendingPracticeMinutes = computed(() => pendingPracticeItems.value.reduce((sum, item) => sum + item.estimatedMinutes, 0))
+const totalCompletedUnits = computed(() => plans.value.records.reduce((sum, plan) => sum + plan.items.filter(item => item.status === 'COMPLETED').length, 0))
 
 function goInterview(item: PlanItemVO) {
   void router.push({ path: '/interview', query: { planItemId: item.id } })
 }
-
-async function loadAnswer(answerId: string, options: { loadSession?: boolean; syncRoute?: boolean; preserveContent?: boolean } = {}) {
-  if (!answerId) return
-  answerRequestId.value = answerId
-  answerLoading.value = true
-  answerError.value = null
-  try {
-    const value = await learningApi.getAnswer(answerId)
-    answer.value = value
-    if (!options.preserveContent) answerContent.value = value.content
-    answerSubmitted.value = true
-    answerActionError.value = null
-    if (value.status === 'EVALUATING' || value.status === 'FAILED') evaluationTaskId.value = value.taskId
-    if (options.loadSession !== false) await loadSession(value.sessionId, { preserveContent: true, loadLastAnswer: false, syncRoute: false })
-    if (options.syncRoute !== false) setQuery({ tab: 'plans', planId: session.value?.planId || selectedPlan.value?.id, sessionId: value.sessionId, answerId })
-    if (value.status === 'EVALUATED') clearDraft(value.sessionId)
-  } catch (reason) {
-    answerError.value = reason
-  } finally {
-    answerLoading.value = false
-  }
-}
-
-async function handleEvaluationDone(task: TaskVO) {
-  const answerId = task.result?.resourceId || task.resourceId
-  if (!answerId) {
-    answerActionError.value = new Error('评价任务完成但未返回回答ID')
-    return
-  }
-  await loadAnswer(answerId, { preserveContent: true })
-  if (!answerError.value) {
-    if (session.value) {
-      clearDraft(session.value.id)
-      await loadSession(session.value.id, { preserveContent: true, loadLastAnswer: false })
-    }
-    await Promise.all([loadPlans(), loadMistakes()])
-    ElMessage.success('回答评价已完成并读取完整结果')
-  }
-}
-
-async function submitAnswer() {
-  if (!session.value || session.value.status !== 'ACTIVE' || !session.value.question) return
-  if (!answerContent.value.trim()) {
-    ElMessage.warning('请先填写回答')
-    return
-  }
-  if (answerContent.value.length > 10000) {
-    ElMessage.warning('回答不能超过10000个字符')
-    return
-  }
-  const body: AnswerBody = { content: answerContent.value, expectedVersion: session.value.version }
-  lastAnswerBody.value = body
-  answerSubmitting.value = true
-  answerActionError.value = null
-  answerConflict.value = false
-  try {
-    evaluationTaskId.value = (await learningApi.submitAnswer(session.value.id, body)).id
-    answerSubmitted.value = true
-  } catch (reason) {
-    if (reason instanceof ApiError && reason.status === 409) {
-      await loadSession(session.value.id, { preserveContent: true, loadLastAnswer: false })
-      if (sessionError.value) {
-        answerActionError.value = sessionError.value
-      } else {
-        answerConflict.value = true
-        ElMessage.warning('会话版本已刷新，请核对题目和原回答后再次点击提交；答案未被自动更改')
-      }
-    } else {
-      answerActionError.value = reason
-    }
-  } finally {
-    answerSubmitting.value = false
-  }
-}
-
-async function retryEvaluation() {
-  if (!session.value) return
-  answerRetrying.value = true
-  answerActionError.value = null
-  try {
-    if (evaluationTask.value) {
-      evaluationTaskId.value = (await retryTrackedTask(evaluationTask.value)).id
-    } else {
-      const body = lastAnswerBody.value || { content: answer.value?.content ?? answerContent.value, expectedVersion: session.value.version }
-      lastAnswerBody.value = body
-      answerContent.value = body.content
-      evaluationTaskId.value = (await learningApi.submitAnswer(session.value.id, body)).id
-    }
-    answerSubmitted.value = true
-  } catch (reason) {
-    answerActionError.value = reason
-  } finally {
-    answerRetrying.value = false
-  }
-}
-
-const canSubmitAnswer = computed(() => !!session.value && session.value.status === 'ACTIVE' && !!session.value.question && !answerSubmitted.value && !evaluationTaskActive.value && !!answerContent.value.trim() && answerContent.value.length <= 10000)
 
 const mistakes = ref<Page<MistakeVO>>(emptyPage())
 const mistakesLoading = ref(false)
@@ -513,19 +353,19 @@ async function openMistake(mistake: MistakeVO) {
 
 async function retryMistake(mistake: MistakeVO) {
   retryingMistakeId.value = mistake.id
-  sessionTaskContext.value = 'mistakes'
-  sessionTaskId.value = null
-  sessionActionError.value = null
+  practiceActionError.value = null
   try {
-    sessionTaskId.value = (await learningApi.retryMistake(mistake.id)).id
+    // 错题重练走"单题练习集"：复用原题、保留原题型，在主框架内的答题页完成
+    const set = await learningApi.retryMistakePractice(mistake.id)
+    await openPracticeSet(set.id)
+    ElMessage.success('已按原题创建单题练习组，正在打开答题页面')
   } catch (reason) {
     const existingSessionId = conflictSessionId(reason)
     if (existingSessionId) {
-      activeTab.value = 'plans'
-      ElMessage.info('已存在活动训练会话，正在打开该会话')
-      await loadSession(existingSessionId)
+      ElMessage.info('当前计划项已有活动训练，正在打开该训练')
+      await openPracticeSet(existingSessionId, true)
     } else {
-      sessionActionError.value = reason
+      practiceActionError.value = reason
     }
   } finally {
     retryingMistakeId.value = null
@@ -542,7 +382,7 @@ function planSourceLabel(plan: LearningPlanVO) {
 
 function planDirectionLabel(plan: LearningPlanVO) {
   const direction = plan.targetDirection
-  if (direction) return roleLabels[direction] || direction
+  if (direction) return getJobRoleLabel(direction)
   return plan.matchSummary?.title || '未设置方向'
 }
 
@@ -579,7 +419,7 @@ const planForm = ref({
   matchItemId: '',
 })
 const matchOptions = ref<MatchSummaryVO[]>([])
-const directionOptions = Object.entries(roleLabels).map(([value, label]) => ({ value, label }))
+const directionOptions = JOB_ROLE_LIST.map(({ value, label }) => ({ value, label }))
 const planTaskId = ref<string | null>(null)
 const planTracker = useTask(planTaskId, { onDone: handlePlanDone })
 const planTask = planTracker.task
@@ -708,16 +548,14 @@ onMounted(async () => {
   loadActiveTab()
   const planId = queryValue(route.query.planId)
   const sessionId = queryValue(route.query.sessionId)
-  const answerId = queryValue(route.query.answerId)
   const planItemId = queryValue(route.query.planItemId)
+  if (sessionId) {
+    // 旧链接（主页内嵌答题）统一跳转到主框架内的答题页面
+    await router.replace({ name: 'training-practice', params: { setId: sessionId }, query: { legacy: '1' } })
+    return
+  }
   if (planId) await loadPlan(planId)
   else if (planItemId) await openPlanItem(planItemId)
-  if (sessionId) {
-    await loadSession(sessionId, { loadLastAnswer: !answerId, syncRoute: false })
-    if (answerId) await loadAnswer(answerId, { loadSession: false, syncRoute: false })
-  } else if (answerId) {
-    await loadAnswer(answerId, { syncRoute: false })
-  }
 })
 </script>
 
@@ -725,14 +563,51 @@ onMounted(async () => {
   <div class="page training-page">
     <header class="page-header">
       <div>
-        <h1><el-icon><Edit /></el-icon> 专项训练</h1>
-        <p>上传并解析简历后即可生成专项训练计划，也可结合岗位匹配结果补充训练重点。</p>
+        <h1><el-icon><Edit /></el-icon> 专项训练 <span class="page-header__en">TRAINING CENTER</span></h1>
+        <p>一次预生成整组题目，按题目列表连续完成训练，让每次练习有明确目标。</p>
       </div>
       <div class="actions page-header__actions">
-        <el-button type="primary" :icon="Plus" @click="openPlanDialog">生成训练计划</el-button>
+        <el-button type="primary" :icon="Plus" @click="openPlanDialog">新建训练计划</el-button>
         <el-button :icon="Refresh" @click="loadActiveTab">刷新当前列表</el-button>
       </div>
     </header>
+
+    <template v-if="activeTab === 'plans'">
+      <section v-if="heroPlan" class="hero-banner">
+        <div class="hero-banner__text">
+          <span class="hero-banner__eyebrow">MY LEARNING PATH · {{ commonStatusLabels[heroPlan.status] || heroPlan.status }}</span>
+          <h2>{{ heroPlan.title }}</h2>
+          <p>{{ heroPlan.basis?.summary || `${planDirectionLabel(heroPlan)} · 共 ${heroPlan.items.length} 个训练项` }}</p>
+          <div class="hero-banner__tags">
+            <span class="hero-tag">{{ planDirectionLabel(heroPlan) }}</span>
+            <span class="hero-tag">{{ heroPlan.dailyMinutes }} 分钟 / 天 · 周期 {{ heroPlan.days }} 天</span>
+          </div>
+        </div>
+        <div class="hero-banner__progress">
+          <strong>{{ heroPlanProgress.percentage }}%</strong>
+          <span>本次完成进度</span>
+          <el-progress type="circle" :percentage="heroPlanProgress.percentage" :width="72" :stroke-width="8" />
+        </div>
+      </section>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <span class="stat-card__label">今日练题</span>
+          <strong>{{ pendingPracticeItems.length * practiceConfig.totalQuestions }}</strong>
+          <span class="stat-card__unit">道题</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-card__label">预计训练时长</span>
+          <strong>{{ pendingPracticeMinutes }}</strong>
+          <span class="stat-card__unit">分钟</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-card__label">累计完成</span>
+          <strong>{{ totalCompletedUnits }}</strong>
+          <span class="stat-card__unit">个训练单元</span>
+        </div>
+      </div>
+    </template>
 
     <el-tabs v-model="activeTab" class="training-tabs">
       <el-tab-pane label="训练计划" name="plans" />
@@ -740,7 +615,7 @@ onMounted(async () => {
     </el-tabs>
 
     <template v-if="activeTab === 'plans'">
-      <div class="training-layout">
+      <div class="training-layout" :class="{ 'training-layout--home': !selectedPlan }">
         <section class="panel plan-list-panel">
           <div class="panel__heading">
             <h2>我的训练计划</h2>
@@ -776,7 +651,7 @@ onMounted(async () => {
           </div>
         </section>
 
-        <section class="panel plan-detail-panel">
+        <section v-if="selectedPlan || planDetailLoading || planDetailError" class="panel plan-detail-panel">
           <AsyncState :loading="planDetailLoading" :error="planDetailError" :empty="!selectedPlan" empty-text="请选择训练计划查看计划项" @retry="loadPlan(planDetailRequestId)">
             <template v-if="selectedPlan">
               <div class="panel__heading">
@@ -799,7 +674,7 @@ onMounted(async () => {
                     简历 v{{ selectedPlan.basis?.resumeVersionNo || '-' }}
                     <template v-if="selectedPlan.basis?.resumeVersionId"> · {{ selectedPlan.basis.resumeVersionId }}</template>
                   </span>
-                  <span>目标方向：{{ selectedPlan.targetDirection ? roleLabels[selectedPlan.targetDirection] || selectedPlan.targetDirection : '未设置' }}</span>
+                  <span>目标方向：{{ selectedPlan.targetDirection ? getJobRoleLabel(selectedPlan.targetDirection) : '未设置' }}</span>
                   <span>生成时间：{{ formatDate(selectedPlan.generatedAt) }}</span>
                 </div>
                 <div class="plan-basis__row">
@@ -861,11 +736,16 @@ onMounted(async () => {
                       </blockquote>
                     </div>
                     <el-alert v-if="itemActionErrors[item.id]" :title="errorMessage(itemActionErrors[item.id])" type="error" :closable="false" show-icon />
-                    <div class="actions">
+                    <div class="actions plan-item__actions">
                       <el-button v-if="item.kind === 'READING'" type="primary" :disabled="item.status === 'COMPLETED'" :loading="itemActionPending.includes(item.id)" @click="completeReading(item)">{{ item.status === 'COMPLETED' ? '已自评完成阅读' : itemActionErrors[item.id] ? '重试自评完成' : '我已阅读（自评）' }}</el-button>
-                      <el-button v-else-if="item.kind === 'PRACTICE'" type="primary" :disabled="sessionTaskActive" :loading="sessionStartingItemId === item.id" @click="startPractice(item)">{{ item.status === 'COMPLETED' ? '再次练习' : '开始答题' }}</el-button>
+                      <el-button v-else-if="item.kind === 'PRACTICE'" type="primary" :disabled="groupGeneratingItemId !== null" :loading="groupGeneratingItemId === item.id" @click="startGroupPractice(item)">
+                        {{ item.status === 'COMPLETED' ? '再次生成并练习本组' : '生成并开始本组练习' }}（{{ practiceConfig.totalQuestions }} 道题）
+                      </el-button>
                       <el-button v-else type="success" plain @click="goInterview(item)">进入模拟面试 <el-icon><Right /></el-icon></el-button>
                     </div>
+                    <p v-if="item.kind === 'PRACTICE'" class="muted practice-jump-note">
+                      按右侧「自定义出题」配置预生成本组题目，完成后进入答题页面，可随时返回训练中心。
+                    </p>
                     <p v-if="item.kind === 'READING'" class="muted reading-self-check-note">
                       {{ item.status === 'COMPLETED' ? '阅读完成为自评记录（完成时间已保存），不代表系统已验证掌握该技能；建议结合答题训练检验效果。' : '请先阅读上方授权资料，确认理解后自评完成；该记录为自评性质，不会计入技能评分证据。' }}
                     </p>
@@ -876,148 +756,56 @@ onMounted(async () => {
             </template>
           </AsyncState>
         </section>
-      </div>
 
-      <section v-if="sessionActionError || sessionTask" class="panel">
-        <div class="panel__heading"><h2>训练题准备任务</h2></div>
-        <el-alert v-if="sessionActionError" :title="errorMessage(sessionActionError)" type="error" :closable="false" show-icon />
-        <TaskStatus v-if="sessionTask" :task="sessionTask" :reasoning="sessionTracker.reasoningText.value">
-          <template #actions>
-            <el-button v-if="canRetryTrackedTask(sessionTask)" size="small" type="primary" :loading="sessionRetrying" @click="retrySessionTask">按原参数重试</el-button>
-          </template>
-        </TaskStatus>
-        <div v-if="sessionTrackingError" class="tracking-error">
-          <span>{{ errorMessage(sessionTrackingError) }}</span>
-          <el-button size="small" @click="sessionTracker.restart">恢复任务跟踪</el-button>
-        </div>
-      </section>
-
-      <section v-if="session || sessionLoading || sessionError || route.query.sessionId" ref="sessionPanelRef" class="panel session-panel">
-        <div class="panel__heading">
-          <div>
-            <h2>当前答题会话</h2>
-            <span v-if="session" class="muted break-all">{{ session.id }} · 版本 {{ session.version }}</span>
+        <section class="panel config-panel">
+          <div class="panel__heading">
+            <div>
+              <h2>自定义出题</h2>
+              <p class="muted">在开始训练前，预生成整组题目与题型，做完一组再生成下一组。</p>
+            </div>
           </div>
-          <div class="actions">
-            <el-tag v-if="session" :type="statusTagType(session.status)">{{ commonStatusLabels[session.status] || session.status }}</el-tag>
-            <el-button v-if="session" size="small" :icon="Refresh" @click="loadSession(session.id, { preserveContent: true })">刷新会话</el-button>
-          </div>
-        </div>
-        <AsyncState :loading="sessionLoading" :error="sessionError" :empty="!session" empty-text="尚未选择训练会话" @retry="loadSession(sessionRequestId, { preserveContent: true })">
-          <template v-if="session">
-            <el-alert v-if="session.status === 'PREPARING'" title="训练题仍在准备，请稍后刷新会话" type="warning" :closable="false" show-icon />
-            <el-alert v-else-if="session.status === 'FAILED'" title="训练题准备失败，请通过计划项重新发起或重试原任务" type="error" :closable="false" show-icon />
-            <template v-else-if="session.question">
-              <div class="question-card">
-                <div class="question-card__meta">
-                  <el-tag type="primary" effect="plain">{{ difficultyLabel(session.question.difficulty) }}</el-tag>
-                  <el-tag effect="plain">{{ questionTypeLabel(session.question.type) }}</el-tag>
-                  <el-tag v-for="skill in session.question.skillCodes" :key="skill" type="info">{{ skill }}</el-tag>
-                </div>
-                <h3>题目</h3>
-                <template v-for="(segment, index) in stemSegments(session.question.stem)" :key="index">
-                  <div v-if="segment.type === 'code'" class="question-code">
-                    <div class="question-code__toolbar"><span>{{ segment.language || '代码' }}</span><el-button size="small" :aria-label="`复制第 ${index + 1} 段代码`" @click="copyCode(segment.content)">复制代码</el-button></div>
-                    <pre class="question-code-block" tabindex="0" aria-label="题目代码，可横向滚动"><code>{{ segment.content }}</code></pre>
-                  </div>
-                  <p v-else class="pre-wrap question-stem">{{ segment.content }}</p>
-                </template>
-                <div class="question-source">
-                  <span>题目版本 v{{ session.question.questionVersion }}</span>
-                  <span>{{ session.question.generationEnv === 'FAKE' ? '模拟练习题（非真实模型）' : session.question.generationEnv === 'LEGACY' ? '历史题目（来源待核验）' : session.question.sourceType === 'CURATED' ? '审核题库' : 'AI 生成题（不代表人工审核）' }}</span>
-                  <span v-if="session.question.sourceTitle">来源：{{ session.question.sourceTitle }}</span>
-                </div>
-              </div>
-
-              <div class="answer-editor">
-                <div class="answer-editor__heading">
-                  <h3>我的回答</h3>
-                  <span :class="{ 'limit-warning': answerContent.length >= 10000 }">{{ answerContent.length }} / 10000</span>
-                </div>
-                <p class="muted answer-scope-note">本训练仅评估文字方案：如题目要求编写代码、接口或测试，请将代码作为文本粘贴在回答中，系统评估设计思路与代码逻辑，不会实际运行代码。</p>
-                <el-input ref="answerInputRef" v-model="answerContent" aria-label="我的回答" type="textarea" :rows="9" maxlength="10000" show-word-limit resize="vertical" placeholder="请输入完整分析与解决方案，草稿会按会话自动保存在当前浏览器" :disabled="session.status !== 'ACTIVE' || evaluationTaskActive || answerSubmitted" />
-                <div class="draft-status">
-                  <span v-if="answerSubmitted">回答已提交；失败重试会继续使用相同内容</span>
-                  <span v-else-if="draftSaveFailed" class="error-text">浏览器草稿保存失败，请勿在提交前关闭页面</span>
-                  <span v-else>输入自动保存为当前会话草稿</span>
-                </div>
-                <el-alert v-if="answerConflict" title="会话版本已更新" description="请再次核对题目与未更改的回答，确认后重新点击提交评价。系统没有自动重交或修改答案。" type="warning" :closable="false" show-icon />
-                <el-alert v-if="answerActionError" :title="errorMessage(answerActionError)" type="error" :closable="false" show-icon />
-                <div class="actions">
-                  <el-button v-if="!answerSubmitted" type="primary" :disabled="!canSubmitAnswer" :loading="answerSubmitting" @click="submitAnswer">{{ answerConflict ? '确认并再次提交评价' : '提交评价' }}</el-button>
-                  <el-button v-if="answerSubmitted && (answer?.status === 'FAILED' || evaluationTask && ['FAILED', 'CANCELLED', 'EXPIRED'].includes(evaluationTask.status))" type="primary" :loading="answerRetrying" :disabled="evaluationTaskActive" @click="retryEvaluation">使用相同回答重试评价</el-button>
-                </div>
-              </div>
-            </template>
-            <el-empty v-else description="会话尚未返回题目" />
-
-            <div v-if="evaluationTask" class="evaluation-task">
-              <TaskStatus :task="evaluationTask" :reasoning="evaluationTracker.reasoningText.value">
-                <template #actions>
-                  <el-button v-if="canRetryTrackedTask(evaluationTask)" size="small" type="primary" :loading="answerRetrying" @click="retryEvaluation">使用相同回答重试</el-button>
-                </template>
-              </TaskStatus>
-              <div v-if="evaluationTrackingError" class="tracking-error">
-                <span>{{ errorMessage(evaluationTrackingError) }}</span>
-                <el-button size="small" @click="evaluationTracker.restart">恢复任务跟踪</el-button>
+          <div class="config-block">
+            <h4>每组题目数</h4>
+            <div class="config-total">
+              <el-input-number v-model="practiceConfig.totalQuestions" :min="5" :max="20" :step="5" />
+              <div class="config-total__quick">
+                <el-button v-for="size in [5, 10, 15, 20]" :key="size" size="small" :type="practiceConfig.totalQuestions === size ? 'primary' : ''" @click="practiceConfig.totalQuestions = size">{{ size }}</el-button>
               </div>
             </div>
+          </div>
+          <div class="config-block">
+            <h4>题型分布</h4>
+            <div v-for="option in typeDistributionOptions" :key="option.key" class="config-type">
+              <div class="config-type__text">
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.desc }}</span>
+              </div>
+              <el-input-number v-model="practiceConfig.typeDistribution[option.key]" :min="0" :max="practiceConfig.totalQuestions" size="small" />
+            </div>
+            <p class="config-sum" :class="{ 'config-sum--error': !configValid }">
+              已配置题目总数 {{ configuredTotal }} / {{ practiceConfig.totalQuestions }}
+              <el-icon v-if="configValid"><CircleCheck /></el-icon>
+            </p>
+          </div>
+          <div class="config-block">
+            <h4>训练难度</h4>
+            <el-radio-group v-model="practiceConfig.difficulty">
+              <el-radio-button v-for="option in difficultyOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div class="config-block">
+            <h4>训练方向</h4>
+            <el-select v-model="practiceConfig.direction" placeholder="选择训练方向">
+              <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+          </div>
+          <el-alert type="info" :closable="false" show-icon title="整组预生成说明" description="点击左侧任意训练单元下方的「生成并开始本组练习」，将按右侧当前配置一次性预生成整组题目，并进入答题页面；客观题自动判分，主观题交卷后由 AI 统一评估。" />
+          <p class="config-generate-hint">配置完成后，请到左侧训练单元卡片下方点击生成。</p>
+          <el-alert v-if="groupTaskError" :title="errorMessage(groupTaskError)" type="error" :closable="false" show-icon />
+        </section>
+      </div>
 
-            <section v-if="answer || answerLoading || answerError" class="answer-result">
-              <div class="panel__heading"><h2>回答与评价</h2><el-button v-if="answer" size="small" :icon="Refresh" @click="loadAnswer(answer.id, { preserveContent: true })">刷新评价</el-button></div>
-              <AsyncState :loading="answerLoading" :error="answerError" :empty="!answer" empty-text="暂无回答评价" @retry="loadAnswer(answerRequestId, { preserveContent: true })">
-                <template v-if="answer">
-                  <div class="original-answer">
-                    <h3>已提交原回答</h3>
-                    <p class="pre-wrap">{{ answer.content }}</p>
-                    <span class="muted break-all">回答ID：{{ answer.id }}</span>
-                  </div>
-                  <el-tag :type="statusTagType(answer.status)">{{ commonStatusLabels[answer.status] || answer.status }}</el-tag>
-                  <el-alert v-if="answer.status === 'EVALUATING'" title="回答已保存，正在等待权威评价结果" type="warning" :closable="false" show-icon />
-                  <el-alert v-else-if="answer.status === 'FAILED'" title="评价失败，回答内容已保留，可按相同内容重试" type="error" :closable="false" show-icon />
-                  <template v-if="answer.evaluation">
-                    <div class="evaluation-overview">
-                      <div class="overall-score"><strong>{{ answer.evaluation.overallScore === null ? '待评估' : displayScore(answer.evaluation.overallScore) }}</strong><span>综合得分</span></div>
-                      <div>
-                        <el-tag :type="statusTagType(answer.evaluation.evidenceStatus)">{{ evidenceLabel(answer.evaluation.evidenceStatus) }}</el-tag>
-                        <p class="muted">量表 {{ answer.evaluation.rubricVersion }} · 提示词 {{ answer.evaluation.promptVersion }}</p>
-                        <p class="muted break-all">模型 {{ answer.evaluation.modelVersion }}</p>
-                      </div>
-                    </div>
-                    <div class="detail-block">
-                      <h3>评价维度</h3>
-                      <el-table :data="answer.evaluation.dimensions" border size="small">
-                        <el-table-column label="维度" min-width="110"><template #default="scope">{{ dimensionLabel(scope.row.key) }}</template></el-table-column>
-                        <el-table-column prop="score" label="得分" width="80" />
-                        <el-table-column prop="weight" label="权重" width="80" />
-                        <el-table-column prop="comment" label="评价说明" min-width="240" />
-                      </el-table>
-                    </div>
-                    <div class="feedback-grid">
-                      <section class="feedback-card feedback-card--strength">
-                        <h3>优点</h3>
-                        <ul v-if="answer.evaluation.strengths.length"><li v-for="(item, index) in answer.evaluation.strengths" :key="index">{{ item }}</li></ul>
-                        <p v-else class="muted">暂无优点反馈</p>
-                      </section>
-                      <section class="feedback-card feedback-card--improvement">
-                        <h3>改进建议</h3>
-                        <ul v-if="answer.evaluation.improvements.length"><li v-for="(item, index) in answer.evaluation.improvements" :key="index">{{ item }}</li></ul>
-                        <p v-else class="muted">暂无改进建议</p>
-                      </section>
-                    </div>
-                    <section class="reference-answer">
-                      <h3>参考答案</h3>
-                      <p v-if="answer.evaluation.referenceAnswer" class="pre-wrap">{{ answer.evaluation.referenceAnswer }}</p>
-                      <p v-else class="muted">当前评价未提供参考答案</p>
-                    </section>
-                  </template>
-                  <el-empty v-else-if="answer.status === 'EVALUATED'" :image-size="60" description="评价结果待评估，暂无可展示维度" />
-                </template>
-              </AsyncState>
-            </section>
-          </template>
-        </AsyncState>
-      </section>
+      <el-alert v-if="practiceActionError" :title="errorMessage(practiceActionError)" type="error" :closable="false" show-icon />
     </template>
 
     <template v-else>
@@ -1032,12 +820,7 @@ onMounted(async () => {
             <el-radio-button :label="true">已解决</el-radio-button>
           </el-radio-group>
         </div>
-        <el-alert v-if="sessionActionError" :title="errorMessage(sessionActionError)" type="error" :closable="false" show-icon />
-        <TaskStatus v-if="sessionTask && sessionTaskContext === 'mistakes'" :task="sessionTask" :reasoning="sessionTracker.reasoningText.value">
-          <template #actions>
-            <el-button v-if="canRetryTrackedTask(sessionTask)" size="small" type="primary" :loading="sessionRetrying" @click="retrySessionTask">按原参数重试错题重练</el-button>
-          </template>
-        </TaskStatus>
+        <el-alert v-if="practiceActionError" :title="errorMessage(practiceActionError)" type="error" :closable="false" show-icon />
         <AsyncState :loading="mistakesLoading" :error="mistakesError" :empty="!mistakes.records.length" :empty-text="mistakeResolved ? '暂无已解决错题' : '暂无待攻克错题'" @retry="loadMistakes">
           <div class="mistake-list">
             <article v-for="mistake in mistakes.records" :key="mistake.id" class="mistake-card">
@@ -1053,7 +836,7 @@ onMounted(async () => {
               <p class="muted break-all">最近回答ID：{{ mistake.lastAnswerId }}</p>
               <div class="actions">
                 <el-button type="primary" plain @click="openMistake(mistake)">查看题目与原回答</el-button>
-                <el-button type="primary" :loading="retryingMistakeId === mistake.id" :disabled="sessionTaskActive" @click="retryMistake(mistake)">重新练习</el-button>
+                <el-button type="primary" :loading="retryingMistakeId === mistake.id" :disabled="groupGeneratingItemId !== null" @click="retryMistake(mistake)">重新练习</el-button>
               </div>
             </article>
           </div>
@@ -1180,9 +963,38 @@ onMounted(async () => {
 .form-hint { margin-left: 8px; color: $ai-text-secondary; font-size: 12px; }
 .page-header h1 { display: flex; align-items: center; gap: 10px; }
 .training-tabs { margin-bottom: 16px; padding: 0 16px; border: 1px solid #e8f0fa; border-radius: $ai-radius-lg; background: #fff; }
-.training-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); align-items: start; gap: 14px; }
+.training-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr) 300px; align-items: start; gap: 14px; }
+.training-layout--home { grid-template-columns: minmax(0, 1fr) 340px; }
 .plan-list-panel { min-width: 0; }
 .plan-detail-panel { min-width: 0; }
+.config-panel { position: sticky; top: 76px; display: grid; gap: 14px; align-self: start; }
+.config-block { display: grid; gap: 8px; }
+.config-block h4 { margin: 0; font-size: 13px; color: $ai-text-primary; }
+.config-total { display: grid; gap: 8px; }
+.config-total__quick { display: flex; gap: 8px; }
+.config-type { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid $ai-border-light; border-radius: $ai-radius; background: $ai-bg-page; }
+.config-type__text { display: grid; gap: 2px; }
+.config-type__text strong { font-size: 13px; color: $ai-text-primary; }
+.config-type__text span { color: $ai-text-tertiary; font-size: 11px; }
+.config-sum { display: flex; align-items: center; gap: 6px; margin: 0; color: $ai-text-secondary; font-size: 12px; }
+.config-sum--error { color: $ai-danger; }
+.config-generate-hint { margin: 0; padding: 10px 12px; border: 1px dashed #bfdbfe; border-radius: $ai-radius; color: #1e40af; font-size: 12px; line-height: 1.6; background: $ai-primary-light; }
+.hero-banner { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 14px; padding: 24px 28px; border-radius: $ai-radius-lg; background: linear-gradient(105deg, #2563eb 0%, #1d4ed8 60%, #1e40af 100%); color: #fff; }
+.hero-banner__eyebrow { color: rgba(255, 255, 255, 0.72); font-size: 12px; letter-spacing: 1px; }
+.hero-banner h2 { margin: 6px 0 6px; font-size: 24px; }
+.hero-banner p { margin: 0 0 12px; max-width: 560px; color: rgba(255, 255, 255, 0.82); font-size: 13px; line-height: 1.6; }
+.hero-banner__tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.hero-tag { padding: 3px 10px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 999px; font-size: 12px; }
+.hero-banner__progress { display: grid; justify-items: center; gap: 4px; flex-shrink: 0; }
+.hero-banner__progress strong { font-size: 24px; }
+.hero-banner__progress span { color: rgba(255, 255, 255, 0.72); font-size: 12px; }
+.hero-banner__progress :deep(.el-progress__text) { color: #fff; }
+.stats-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.stat-card { display: flex; align-items: baseline; gap: 8px; padding: 16px 18px; border: 1px solid $ai-border-light; border-radius: $ai-radius-lg; background: #fff; box-shadow: $ai-shadow-card; }
+.stat-card__label { color: $ai-text-secondary; font-size: 12px; }
+.stat-card strong { color: #101d4b; font-size: 26px; line-height: 1; }
+.stat-card__unit { color: $ai-text-tertiary; font-size: 12px; }
+.page-header__en { margin-left: 8px; color: $ai-text-tertiary; font-size: 12px; font-weight: 500; letter-spacing: 1px; }
 .break-all { word-break: break-all; }
 .plan-card { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; width: 100%; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: #fff; cursor: pointer; overflow-wrap: anywhere; }
 .plan-card :deep(.el-tag) { max-width: 100%; height: auto; min-height: 20px; white-space: normal; }
@@ -1199,7 +1011,9 @@ onMounted(async () => {
 .plan-item__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .plan-item__heading h3 { margin: 0 0 6px; color: #101d4b; font-size: 16px; }
 .plan-item__heading p { margin: 0; color: $ai-text-secondary; font-size: 13px; }
-.plan-item .actions { margin-top: 13px; }
+.plan-item__actions { margin-top: 13px; }
+.plan-item__actions .el-button { min-width: 220px; }
+.practice-jump-note { margin: 8px 0 0; font-size: 12px; line-height: 1.6; }
 .resource-refs { margin: 14px 0; }
 .resource-refs h4 { margin: 0 0 8px; }
 .resource-refs blockquote { margin: 8px 0; padding: 10px 12px; border-left: 3px solid $ai-primary; background: $ai-bg-page; }
@@ -1255,12 +1069,20 @@ onMounted(async () => {
 .mistake-dialog-question { margin-bottom: 16px; }
 :global(.responsive-dialog) { max-width: calc(100vw - 24px); }
 @media (max-width: 1100px) {
-  .training-layout { grid-template-columns: 1fr; }
+  .training-layout { grid-template-columns: 320px minmax(0, 1fr); }
+  .training-layout--home { grid-template-columns: minmax(0, 1fr) 320px; }
+  .config-panel { position: static; grid-column: 1 / -1; }
+  .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero-banner { flex-direction: column; align-items: flex-start; }
 }
 @media (max-width: 700px) {
+  .training-layout { grid-template-columns: 1fr; }
+  .training-layout--home { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: 1fr; }
   .training-tabs { padding: 0 8px; }
   .feedback-grid, .mistake-list { grid-template-columns: 1fr; }
   .plan-item { padding: 12px; }
+  .plan-item__actions .el-button { width: 100%; min-width: 0; }
   .plan-item__heading, .mistake-card__heading { flex-direction: column; }
   .evaluation-overview { align-items: flex-start; flex-direction: column; }
   .pagination { justify-content: center; overflow-x: auto; }

@@ -3,13 +3,14 @@ package com.aijob.backend.learning;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -53,7 +54,6 @@ class LearningServiceResumePlanTest {
         profile.put("targetRole", "JAVA_BACKEND");
         profile.put("activeResumeVersionId", null);
         when(profiles.get("user")).thenReturn(profile);
-        when(profiles.roles()).thenReturn(Set.of("JAVA_BACKEND"));
         when(resumes.latestVersions("user", 20)).thenReturn(List.of());
 
         BusinessException error = assertThrows(BusinessException.class,
@@ -66,8 +66,9 @@ class LearningServiceResumePlanTest {
         assertEquals("GO_RESUME", error.getDetails().get("action"));
     }
 
-    @Test
-    void buildsResumePayloadWithHistoryAndLineage() {
+    @ParameterizedTest
+    @CsvSource({"JAVA_BACKEND, SPRING_BOOT", "AI_APPLICATION_DEVELOPER, PYTHON"})
+    void buildsResumePayloadWithHistoryAndLineage(String targetDirection, String directionSkill) {
         LearningMapper mapper = mock(LearningMapper.class);
         ProfileService profiles = mock(ProfileService.class);
         ResumeMapper resumes = mock(ResumeMapper.class);
@@ -77,10 +78,10 @@ class LearningServiceResumePlanTest {
         profile.put("targetRole", "JAVA_BACKEND");
         profile.put("activeResumeVersionId", "version-1");
         when(profiles.get("user")).thenReturn(profile);
-        when(profiles.roles()).thenReturn(Set.of("JAVA_BACKEND"));
         when(profiles.agentSkillCatalog("user")).thenReturn(List.of(
                 Map.of("code", "JAVA", "name", "Java"),
-                Map.of("code", "SPRING_BOOT", "name", "Spring Boot")));
+                Map.of("code", "SPRING_BOOT", "name", "Spring Boot"),
+                Map.of("code", "PYTHON", "name", "Python")));
         Map<String, Object> facts = new LinkedHashMap<>();
         facts.put("education", "BACHELOR");
         facts.put("experienceMonths", 12);
@@ -106,21 +107,21 @@ class LearningServiceResumePlanTest {
 
         service(mapper, profiles, resumes, tasks).createPlanFromResume("user",
                 "/api/v1/learning/plans/from-resume", "key",
-                Map.of("dailyMinutes", 30, "days", 7, "targetDirection", "JAVA_BACKEND"));
+                Map.of("dailyMinutes", 30, "days", 7, "targetDirection", targetDirection));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
         verify(tasks).create(eq("user"), eq("POST"), eq("/api/v1/learning/plans/from-resume"), eq("key"), any(),
                 eq("LEARNING_PLAN"), eq("LEARNING_PLAN"), anyString(), any(), payload.capture(), any());
         assertEquals("RESUME", payload.getValue().get("planSource"));
-        assertEquals("JAVA_BACKEND", payload.getValue().get("targetDirection"));
-        assertTrue(((List<?>) payload.getValue().get("allowedSkillCodes")).contains("JAVA"));
+        assertEquals(targetDirection, payload.getValue().get("targetDirection"));
+        assertTrue(((List<?>) payload.getValue().get("allowedSkillCodes")).containsAll(List.of("JAVA", directionSkill)));
         @SuppressWarnings("unchecked")
         Map<String, Object> history = (Map<String, Object>) payload.getValue().get("trainingHistory");
         assertEquals(0, history.get("evaluatedAnswers"));
         assertEquals(List.of("SPRING_BOOT"), history.get("weakSkillCodes"));
 
         verify(mapper).insertPlan(anyString(), eq("user"), nullable(String.class), eq("RESUME"), eq("version-1"),
-                eq("JAVA_BACKEND"), nullable(String.class), eq(1), anyString(), eq("task-1"), eq(3L), eq(30), eq(7));
+                eq(targetDirection), nullable(String.class), eq(1), anyString(), eq("task-1"), eq(3L), eq(30), eq(7));
     }
 }

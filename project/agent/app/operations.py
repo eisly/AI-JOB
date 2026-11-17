@@ -26,7 +26,11 @@ from .schemas import (
     JobMatchPayload,
     JobSearchPayload,
     LearningEvaluatePayload,
+    AIPracticeEvaluateResult,
+    AIPracticeQuestionSet,
     LearningPlanPayload,
+    LearningPracticeEvaluatePayload,
+    LearningPracticeQuestionsPayload,
     LearningQuestionPayload,
     ProjectPlanPayload,
     ProjectRecommendPayload,
@@ -44,6 +48,8 @@ JOB_SEARCH = "JOB_SEARCH"
 LEARNING_PLAN = "LEARNING_PLAN"
 LEARNING_QUESTION = "LEARNING_QUESTION"
 LEARNING_EVALUATE = "LEARNING_EVALUATE"
+LEARNING_PRACTICE_QUESTIONS = "LEARNING_PRACTICE_QUESTIONS"
+LEARNING_PRACTICE_EVALUATE = "LEARNING_PRACTICE_EVALUATE"
 INTERVIEW_TURN = "INTERVIEW_TURN"
 INTERVIEW_REPORT = "INTERVIEW_REPORT"
 GROWTH_ANALYZE = "GROWTH_ANALYZE"
@@ -60,6 +66,8 @@ OPERATIONS: tuple[str, ...] = (
     LEARNING_PLAN,
     LEARNING_QUESTION,
     LEARNING_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
+    LEARNING_PRACTICE_EVALUATE,
     INTERVIEW_TURN,
     INTERVIEW_REPORT,
     GROWTH_ANALYZE,
@@ -77,6 +85,8 @@ PAYLOAD_MODELS: dict[str, type] = {
     LEARNING_PLAN: LearningPlanPayload,
     LEARNING_QUESTION: LearningQuestionPayload,
     LEARNING_EVALUATE: LearningEvaluatePayload,
+    LEARNING_PRACTICE_QUESTIONS: LearningPracticeQuestionsPayload,
+    LEARNING_PRACTICE_EVALUATE: LearningPracticeEvaluatePayload,
     INTERVIEW_TURN: InterviewTurnPayload,
     INTERVIEW_REPORT: InterviewReportPayload,
     GROWTH_ANALYZE: GrowthPayload,
@@ -94,6 +104,8 @@ RESULT_MODELS: dict[str, type] = {
     LEARNING_PLAN: AIPlanResult,
     LEARNING_QUESTION: AIQuestionResult,
     LEARNING_EVALUATE: AIEvaluateResult,
+    LEARNING_PRACTICE_QUESTIONS: AIPracticeQuestionSet,
+    LEARNING_PRACTICE_EVALUATE: AIPracticeEvaluateResult,
     INTERVIEW_TURN: AIInterviewTurnResult,
     INTERVIEW_REPORT: AIInterviewReportResult,
     GROWTH_ANALYZE: AIGrowthResult,
@@ -111,6 +123,8 @@ PROMPT_VERSIONS: dict[str, str] = {
     LEARNING_PLAN: "learning-plan-v3",
     LEARNING_QUESTION: "learning-question-v3",
     LEARNING_EVALUATE: "answer-evaluate-v3",
+    LEARNING_PRACTICE_QUESTIONS: "learning-practice-questions-v1",
+    LEARNING_PRACTICE_EVALUATE: "learning-practice-evaluate-v1",
     INTERVIEW_TURN: "interview-turn-v5",
     INTERVIEW_REPORT: "interview-report-v2",
     GROWTH_ANALYZE: "growth-analyze-v2",
@@ -129,6 +143,8 @@ REQUIRED_VERSION_KEYS: dict[str, tuple[str, ...]] = {
     LEARNING_PLAN: ("profileVersion",),
     LEARNING_QUESTION: ("profileVersion",),
     LEARNING_EVALUATE: ("questionVersion",),
+    LEARNING_PRACTICE_QUESTIONS: ("profileVersion",),
+    LEARNING_PRACTICE_EVALUATE: ("practiceSetVersion",),
     INTERVIEW_TURN: ("profileVersion", "interviewVersion"),
     INTERVIEW_REPORT: ("interviewVersion",),
     GROWTH_ANALYZE: ("profileVersion",),

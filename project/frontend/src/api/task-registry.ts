@@ -30,7 +30,7 @@ function readRegistry() {
 
 function writeRegistry(registry: Record<string, TaskSubmission>) {
   try {
-    const entries = Object.entries(registry).sort((a, b) => b[0].localeCompare(a[0])).slice(-200)
+    const entries = Object.entries(registry).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 200)
     localStorage.setItem(currentStorageKey(), JSON.stringify(Object.fromEntries(entries)))
   } catch {
     return
@@ -78,6 +78,8 @@ export function taskBusinessPath(task: TaskVO) {
       LEARNING_PLAN: `/training?planId=${resourceId}`,
       LEARNING_SESSION: `/training?sessionId=${resourceId}`,
       LEARNING_ANSWER: `/training?answerId=${resourceId}`,
+      PRACTICE_SET: `/training/practice/${resourceId}`,
+      PRACTICE_EVALUATION: `/training/practice/${resourceId}`,
       INTERVIEW: `/interview?interviewId=${resourceId}`,
       INTERVIEW_REPORT: `/interview?interviewId=${resourceId}&report=1`,
       GROWTH: '/growth',
@@ -99,6 +101,8 @@ export function taskBusinessPath(task: TaskVO) {
     LEARNING_PLAN: '/training',
     LEARNING_QUESTION: '/training',
     LEARNING_EVALUATE: '/training',
+    PRACTICE_SET: '/training',
+    PRACTICE_EVALUATION: '/training',
     PROJECT_RECOMMEND: '/project',
     PROJECT_PLAN: '/project',
     INTERVIEW_TURN: '/interview',

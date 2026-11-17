@@ -1,6 +1,14 @@
 import { request } from './request'
 import { submitTrackedTask } from './task-registry'
-import type { LearningAnswerVO, LearningPlanVO, LearningSessionVO, MistakeVO, Page, PageQuery } from './types'
+import type {
+  LearningAnswerVO,
+  LearningPlanVO,
+  LearningSessionVO,
+  MistakeVO,
+  Page,
+  PageQuery,
+  PracticeSetVO,
+} from './types'
 
 export const learningApi = {
   createPlan(body: { matchItemId: string; dailyMinutes: number; days: number }) {
@@ -41,5 +49,9 @@ export const learningApi = {
   },
   retryMistake(mistakeId: string) {
     return submitTrackedTask(`/api/v1/learning/mistakes/${mistakeId}/retry`, {}, '/training?tab=mistakes')
+  },
+  /** 错题重练（整组模式）：复用原题创建单题练习集，直接返回可答题的练习集。 */
+  retryMistakePractice(mistakeId: string) {
+    return request<PracticeSetVO>(`/api/v1/learning/mistakes/${mistakeId}/retry-practice`, { method: 'POST' })
   },
 }

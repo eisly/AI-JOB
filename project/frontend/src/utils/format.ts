@@ -220,7 +220,24 @@ export function cloneFacts(facts?: ResumeFacts | null): ResumeFacts {
 }
 
 export function errorMessage(reason: unknown) {
-  const base = reason instanceof Error ? reason.message : String(reason)
+  const base = reason instanceof Error
+    ? reason.message
+    : reason && typeof reason === 'object'
+      ? objectMessage(reason)
+      : String(reason ?? '未知错误')
   const detail = errorDetailText(reason)
   return detail && !base.includes(detail) ? `${base}（${detail}）` : base
+}
+
+function objectMessage(reason: object) {
+  const message = (reason as { message?: unknown }).message
+  if (typeof message === 'string' && message) return message
+  const code = (reason as { code?: unknown }).code
+  if (typeof code === 'string' && code) return `请求失败（${code}）`
+  try {
+    const text = JSON.stringify(reason)
+    return text && text !== '{}' ? text : '请求失败，请稍后重试'
+  } catch {
+    return '请求失败，请稍后重试'
+  }
 }
