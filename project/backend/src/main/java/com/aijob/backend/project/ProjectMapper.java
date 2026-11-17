@@ -39,15 +39,18 @@ public interface ProjectMapper {
 
     @Insert("""
             INSERT INTO project_recommendation_item
-              (id,recommendation_id,user_id,title,summary,skill_codes_json,difficulty,estimated_weeks,reason,deliverables_json)
+              (id,recommendation_id,user_id,title,summary,skill_codes_json,difficulty,estimated_weeks,reason,deliverables_json,
+               source_type,recommendation_source,repository_json)
             VALUES (#{id},#{recommendationId},#{userId},#{title},#{summary},#{skillCodesJson},#{difficulty},
-              #{estimatedWeeks},#{reason},#{deliverablesJson})
+              #{estimatedWeeks},#{reason},#{deliverablesJson},#{sourceType},#{recommendationSource},#{repositoryJson})
             """)
     int insertRecommendationItem(@Param("id") String id, @Param("recommendationId") String recommendationId,
                                  @Param("userId") String userId, @Param("title") String title,
                                  @Param("summary") String summary, @Param("skillCodesJson") String skillCodesJson,
                                  @Param("difficulty") String difficulty, @Param("estimatedWeeks") int estimatedWeeks,
-                                 @Param("reason") String reason, @Param("deliverablesJson") String deliverablesJson);
+                                 @Param("reason") String reason, @Param("deliverablesJson") String deliverablesJson,
+                                 @Param("sourceType") String sourceType, @Param("recommendationSource") String recommendationSource,
+                                 @Param("repositoryJson") String repositoryJson);
 
     @Select("SELECT * FROM project_recommendation_item WHERE recommendation_id=#{recommendationId} ORDER BY created_at,id")
     List<Map<String, Object>> recommendationItems(@Param("recommendationId") String recommendationId);

@@ -130,6 +130,7 @@ class GitHubCandidate(APIModel):
     language: str | None = Field(default=None, max_length=64)
     pushed_at: datetime | None = None
     topics: list[str] = Field(default_factory=list, max_length=20)
+    matched_skill_codes: list[str] = Field(default_factory=list, max_length=10)
     source: Literal["GITHUB_API"] = "GITHUB_API"
     verified_at: datetime
 
@@ -256,6 +257,8 @@ class AIInterviewReportResult(APIModel):
 
 ResumeDiagnosisPriority = Literal["IMPORTANT", "SUGGESTION", "NOTICE"]
 ProjectDifficulty = Literal["BEGINNER", "INTERMEDIATE", "ADVANCED"]
+ProjectRecommendationSourceType = Literal["GITHUB_REPOSITORY", "AI_GENERATED"]
+ProjectRecommendationSource = Literal["GITHUB_API", "MODEL", "LOCAL_RULES"]
 
 
 class ResumeDiagnosisItem(APIModel):
@@ -292,10 +295,18 @@ class ProjectRecommendationItem(APIModel):
     estimated_weeks: int = Field(ge=1, le=12)
     reason: str = Field(min_length=1, max_length=2000)
     deliverables: list[str] = Field(min_length=1, max_length=10)
+    source_type: ProjectRecommendationSourceType = "AI_GENERATED"
+    source: ProjectRecommendationSource = "MODEL"
+    repository: GitHubCandidate | None = None
+    missing_skill_codes: list[str] = Field(default_factory=list, max_length=20)
 
 
 class AIProjectRecommendResult(APIModel):
     items: list[ProjectRecommendationItem] = Field(min_length=1, max_length=6)
+    target_skill_codes: list[str] = Field(default_factory=list, max_length=20)
+    covered_skill_codes: list[str] = Field(default_factory=list, max_length=20)
+    github_covered_skill_codes: list[str] = Field(default_factory=list, max_length=20)
+    missing_skill_codes: list[str] = Field(default_factory=list, max_length=20)
 
 
 class ProjectPlanTask(APIModel):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -9,7 +10,8 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.errors import ApiError, HandlerValidationError
-from app.fake_model import fake_llm_from_payload
+from app.fake_model import FakeLLM, fake_llm_from_payload
+from app.project_fallback import recommend_project
 from app.handlers import (
     ExecutionContext,
     ProjectPlanHandler,
@@ -32,6 +34,8 @@ from app.schemas import (
     AIProjectRecommendResult,
     AIResumeDiagnoseResult,
     AIResumeOptimizeResult,
+    GitHubCandidate,
+    GitHubLookup,
     InterviewTurnPayload,
     ProjectPlanMilestone,
     ProjectPlanPayload,
@@ -189,6 +193,141 @@ def test_project_recommend_checks_skill_difficulty_and_duration():
         handler.validate_business(_ctx(payload), output, {}, {})
 
 
+def test_project_recommend_accepts_only_verified_github_candidates():
+    payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
+    candidate = GitHubCandidate(
+        fullName="spring-projects/spring-boot",
+        htmlUrl="https://github.com/spring-projects/spring-boot",
+        description="Spring Boot helps create stand-alone applications.",
+        stargazersCount=80000,
+        language="Java",
+        pushedAt=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        topics=["java", "spring-boot"],
+        matchedSkillCodes=["java"],
+        verifiedAt=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    output = AIProjectRecommendResult(items=[ProjectRecommendationItem(
+        title="Spring Boot 仓库实战",
+        summary="阅读并改进真实仓库",
+        skillCodes=["java"],
+        difficulty="BEGINNER",
+        estimatedWeeks=2,
+        reason="来自 GitHub API",
+        deliverables=["运行仓库", "提交测试改进"],
+        sourceType="GITHUB_REPOSITORY",
+        source="GITHUB_API",
+        repository=candidate,
+    )])
+    prepared = {"github": GitHubLookup(status="AVAILABLE", candidates=[candidate]).model_dump(by_alias=True)}
+    result = ProjectRecommendHandler().validate_business(_ctx(payload), output, prepared, {})
+    assert result.items[0].source_type == "GITHUB_REPOSITORY"
+    assert result.items[0].repository.full_name == candidate.full_name
+
+    forged = output.model_copy(deep=True)
+    forged.items[0].repository = candidate.model_copy(update={"html_url": "https://github.com/example/forged"})
+    with pytest.raises(HandlerValidationError, match="白名单"):
+        ProjectRecommendHandler().validate_business(_ctx(payload), forged, prepared, {})
+
+
+def _multi_skill_project_input():
+    body = project_recommend_envelope(uuid4())["payload"]
+    body.update(allowedSkillCodes=["docker", "fastapi", "python"], matchItem=None)
+    payload = ProjectRecommendPayload.model_validate(body)
+    base = dict(description="A service", verifiedAt=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    docker = GitHubCandidate(fullName="example/docker", htmlUrl="https://github.com/example/docker",
+                             stargazersCount=100000, matchedSkillCodes=["DOCKER"], **base)
+    combined = GitHubCandidate(fullName="example/api", htmlUrl="https://github.com/example/api",
+                               stargazersCount=100, matchedSkillCodes=["DOCKER", "FASTAPI", "PYTHON"], **base)
+    prepared = {"github": GitHubLookup(status="AVAILABLE", candidates=[docker, combined]).model_dump(by_alias=True)}
+    return payload, prepared, docker, combined
+
+
+def test_project_recommend_restores_full_skill_overlap_and_sorts_model_output():
+    payload, prepared, docker, combined = _multi_skill_project_input()
+    def item(candidate):
+        return ProjectRecommendationItem(title=candidate.full_name, summary="实战",
+                                         skillCodes=["docker"], difficulty="BEGINNER", estimatedWeeks=2,
+                                         reason="来源已验证", deliverables=["源码"], sourceType="GITHUB_REPOSITORY",
+                                         source="GITHUB_API", repository=candidate)
+    result = ProjectRecommendHandler().validate_business(
+        _ctx(payload), AIProjectRecommendResult(items=[item(docker), item(combined)]), prepared, {})
+    assert result.items[0].repository.full_name == combined.full_name
+    assert result.items[0].skill_codes == ["docker", "fastapi", "python"]
+    assert result.items[1].skill_codes == ["docker"]
+    completed = ProjectRecommendHandler().validate_business(
+        _ctx(payload), AIProjectRecommendResult(items=[item(docker)]), prepared, {})
+    assert len(completed.items) == 2
+    assert completed.items[0].repository.full_name == combined.full_name
+    assert completed.covered_skill_codes == payload.allowed_skill_codes
+
+
+def test_project_local_fallback_keeps_multiple_options_and_integrates_ai_skills():
+    payload, prepared, _, combined = _multi_skill_project_input()
+    result = recommend_project(payload, prepared)
+    assert len(result.items) == 2
+    assert result.items[0].repository.full_name == combined.full_name
+    assert result.items[0].skill_codes == ["docker", "fastapi", "python"]
+    result = recommend_project(payload, {"github": {"status": "UNAVAILABLE"}})
+    assert len(result.items) == 1
+    assert result.items[0].source_type == "AI_GENERATED"
+    assert result.items[0].repository is None
+    assert result.items[0].skill_codes == ["docker", "fastapi", "python"]
+
+
+@pytest.mark.asyncio
+async def test_project_fake_model_executes_multi_skill_overlap_contract(monkeypatch):
+    payload, prepared, _, combined = _multi_skill_project_input()
+    async def lookup(*_args, **_kwargs):
+        return GitHubLookup.model_validate(prepared["github"])
+    async def emit(*_args):
+        pass
+    monkeypatch.setattr("app.handlers.search_project_repositories", lookup)
+    result, _ = await ProjectRecommendHandler().execute(ExecutionContext(
+        None, payload, Settings(llm_provider="fake"), FakeLLM(), None, emit))
+    assert len(result["items"]) == 2
+    assert result["items"][0]["repository"]["fullName"] == combined.full_name
+    assert result["items"][0]["skillCodes"] == ["docker", "fastapi", "python"]
+
+
+@pytest.mark.asyncio
+async def test_project_recommend_fallback_uses_github_candidate(monkeypatch):
+    payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
+    candidate = GitHubCandidate(
+        fullName="spring-projects/spring-boot",
+        htmlUrl="https://github.com/spring-projects/spring-boot",
+        description="Spring Boot helps create stand-alone applications.",
+        stargazersCount=80000,
+        language="Java",
+        pushedAt=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        topics=["java"],
+        matchedSkillCodes=["java"],
+        verifiedAt=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    async def lookup(*_args, **_kwargs):
+        return GitHubLookup(status="AVAILABLE", candidates=[candidate])
+
+    class BlockedProvider:
+        name = "deepseek"
+
+        async def complete(self, _request):
+            raise LLMProviderError("model unavailable", retryable=False)
+
+    monkeypatch.setattr("app.handlers.search_project_repositories", lookup)
+    stages = []
+
+    async def emit(name, _progress):
+        stages.append(name)
+
+    result, meta = await ProjectRecommendHandler().execute(ExecutionContext(
+        None, payload, Settings(llm_provider="fake"), BlockedProvider(), None, emit,
+    ))
+    assert result["items"][0]["sourceType"] == "GITHUB_REPOSITORY"
+    assert result["items"][0]["repository"]["htmlUrl"] == candidate.html_url
+    assert meta["provider"] == "local_rules"
+    assert "using_local_project_rules" in stages
+
+
 def test_project_plan_checks_sequence_and_hour_budget():
     payload = ProjectPlanPayload.model_validate(project_plan_envelope(uuid4())["payload"])
     handler = ProjectPlanHandler()
@@ -225,7 +364,7 @@ async def test_project_recommend_and_plan_degrade_through_result_contract():
     recommend = project_recommend_envelope(uuid4())["payload"]
     recommend.update(allowedSkillCodes=["JAVA"], difficulty="ADVANCED", maxDurationWeeks=1)
     orchestrator = CareerOrchestrator()
-    settings = Settings(llm_provider="fake")
+    settings = Settings(llm_provider="fake", github_search_enabled=False)
     result, meta = await orchestrator.execute(ExecutionContext(
         SimpleNamespace(operation=PROJECT_RECOMMEND), ProjectRecommendPayload.model_validate(recommend),
         settings, provider, None, emit,
@@ -234,6 +373,7 @@ async def test_project_recommend_and_plan_degrade_through_result_contract():
     assert item["title"] == "Java 投递进度看板"
     assert (item["skillCodes"], item["difficulty"], item["estimatedWeeks"]) == (["JAVA"], "ADVANCED", 1)
     assert item["reason"].startswith("本地规则建议")
+    assert (item["sourceType"], item["source"], item["repository"]) == ("AI_GENERATED", "LOCAL_RULES", None)
     assert (meta["fallbackReason"], meta["resultValidated"], provider.calls) == ("MODEL_HTTP_402", True, 1)
     result, meta = await orchestrator.execute(ExecutionContext(
         SimpleNamespace(operation=PROJECT_PLAN),
@@ -260,7 +400,7 @@ async def test_project_model_deadline_returns_local_recommendation():
     handler.model_deadline_seconds = 0.05
     payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
     result, meta = await handler.execute(ExecutionContext(
-        None, payload, Settings(llm_provider="fake"), SlowProvider(), None, emit,
+        None, payload, Settings(llm_provider="fake", github_search_enabled=False), SlowProvider(), None, emit,
     ))
     assert result["items"]
     assert meta["fallbackReason"] == "MODEL_TIMEOUT"

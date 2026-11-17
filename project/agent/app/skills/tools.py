@@ -164,6 +164,7 @@ def build_model_input(
             else None,
             "difficulty": payload.get("difficulty"),
             "maxDurationWeeks": payload.get("maxDurationWeeks"),
+            "github": context.get("github") or {"status": "UNAVAILABLE"},
         }
     if operation == "JOB_SEARCH":
         return {

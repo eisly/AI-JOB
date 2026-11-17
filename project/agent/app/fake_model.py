@@ -8,6 +8,8 @@ import re
 from typing import Any, Callable
 
 from .llm import LLMRequest, LLMResponse, LLMProviderError
+from .project_fallback import recommend_project
+from .schemas import ProjectRecommendPayload
 
 logger = logging.getLogger("agent.fake_model")
 
@@ -585,38 +587,19 @@ def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
 
 
 def _project_recommend(request: LLMRequest) -> dict[str, Any]:
-    payload = _payload(request)
-    allowed = [str(item) for item in payload.get("allowedSkillCodes") or []]
-    gaps = ((payload.get("matchItem") or {}).get("gaps")) or []
-    gap_skills = [
-        str(item.get("skillCode"))
-        for item in gaps
-        if isinstance(item, dict) and item.get("skillCode") in allowed
-    ]
-    selected = gap_skills[:1] or allowed[:1]
-    skill = selected[0] if selected else "general"
-    max_weeks = int(payload.get("maxDurationWeeks") or 12)
-    difficulty = str(payload.get("difficulty") or "INTERMEDIATE")
-    return {
-        "items": [
-            {
-                "title": f"{skill} 核心功能实战",
-                "summary": f"围绕 {skill} 完成一个边界清晰、可演示和可自测的学习项目",
-                "skillCodes": selected,
-                "difficulty": difficulty,
-                "estimatedWeeks": min(2, max_weeks),
-                "reason": "依据确认画像、授权技能目录和已提供的匹配差距形成学习建议，不代表用户已有项目经验",
-                "deliverables": ["项目说明与核心功能演示", "实现源码与自测记录"],
-            }
-        ]
-    }
+    result = recommend_project(ProjectRecommendPayload.model_validate(_payload(request)), {
+        "github": request.context.get("github") or {"status": "UNAVAILABLE"},
+    }).model_dump(by_alias=True, mode="json")
+    for item in result["items"]:
+        if item["sourceType"] == "AI_GENERATED":
+            item["source"] = "MODEL"
+    return result
 
 
 def _job_search(request: LLMRequest) -> dict[str, Any]:
     from .search.fake_understanding import understand as understand_postings
 
     return understand_postings(request)
-
 
 def _project_plan(request: LLMRequest) -> dict[str, Any]:
     payload = _payload(request)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -14,7 +14,8 @@ from .errors import HandlerError, HandlerValidationError
 from .files import FileFetcher
 from .llm import LLMClient, LLMProviderError, LLMRequest
 from .project_fallback import plan_project, recommend_project
-from .learning_github import search_github_repositories
+from .project_selection import complete_recommendations
+from .learning_github import search_github_repositories, search_project_repositories
 from .operations import (
     GROWTH_ANALYZE,
     INTERVIEW_REPORT,
@@ -182,6 +183,7 @@ class ExecutionContext:
     emit_stage: Callable[[str, int | None], Awaitable[None]]
     emit_reasoning: Callable[[str], Awaitable[None]] | None = None
     emit_candidates: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
+    prepared: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseHandler:
@@ -205,6 +207,7 @@ class BaseHandler:
     async def execute(self, ctx: ExecutionContext) -> tuple[dict[str, Any], dict[str, Any]]:
         skill = get_skill(self.operation)
         prepared = await self.prepare(ctx)
+        ctx.prepared = prepared
         await ctx.emit_stage("input_ready", 15)
         payload_dict = ctx.payload.model_dump(by_alias=True, mode="json")
         system, user_prompt, schema_hint = build_prompt(self.operation, payload_dict, prepared)
@@ -1272,12 +1275,12 @@ class ProjectFallbackHandler(BaseHandler):
             if status is not None:
                 reason = f"MODEL_HTTP_{status}"
         await ctx.emit_stage("using_local_project_rules", 85)
-        result = self.fallback(ctx.payload)
+        result = self.fallback(ctx.payload, ctx.prepared)
         meta = {"provider": "local_rules", "promptVersion": self.prompt_version,
                 "operation": self.operation, "modelDegraded": True, "fallbackReason": reason}
         logger.warning("project fallback operation=%s reason=%s", self.operation, reason)
         await ctx.emit_stage("validating_result", 90)
-        return self.validate_business(ctx, result, {}, meta).model_dump(by_alias=True, mode="json"), meta
+        return self.validate_business(ctx, result, ctx.prepared, meta).model_dump(by_alias=True, mode="json"), meta
 
 
 class ProjectRecommendHandler(ProjectFallbackHandler):
@@ -1286,6 +1289,15 @@ class ProjectRecommendHandler(ProjectFallbackHandler):
     output_model = AIProjectRecommendResult
     prompt_version = PROMPT_VERSIONS[PROJECT_RECOMMEND]
     fallback = staticmethod(recommend_project)
+
+    async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
+        payload: ProjectRecommendPayload = ctx.payload  # type: ignore[assignment]
+        lookup = await search_project_repositories(
+            ctx.settings,
+            payload.profile.target_role,
+            payload.allowed_skill_codes,
+        )
+        return {"github": lookup.model_dump(by_alias=True, mode="json")}
 
     def validate_business(
         self,
@@ -1296,6 +1308,13 @@ class ProjectRecommendHandler(ProjectFallbackHandler):
     ) -> AIProjectRecommendResult:
         payload = ctx.payload
         allowed = set(payload.allowed_skill_codes)
+        allowed_by_upper = {code.upper(): code for code in payload.allowed_skill_codes}
+        github = GitHubLookup.model_validate(prepared.get("github") or {"status": "UNAVAILABLE"})
+        github_by_url = {
+            _normalize_url(candidate.html_url): candidate
+            for candidate in github.candidates
+        }
+        validated = []
         for item in output.items:
             unknown = set(item.skill_codes) - allowed
             if unknown:
@@ -1306,7 +1325,39 @@ class ProjectRecommendHandler(ProjectFallbackHandler):
                 raise HandlerValidationError("推荐项目 difficulty 必须与输入难度一致")
             if item.estimated_weeks > payload.max_duration_weeks:
                 raise HandlerValidationError("推荐项目 estimatedWeeks 超出 maxDurationWeeks")
-        return AIProjectRecommendResult(items=output.items)
+            if item.source_type == "GITHUB_REPOSITORY":
+                if github.status != "AVAILABLE":
+                    raise HandlerValidationError("GitHub 数据不可用，不能生成真实仓库项目")
+                if item.source != "GITHUB_API" or item.repository is None:
+                    raise HandlerValidationError("真实仓库项目必须包含 GitHub API 来源和仓库信息")
+                candidate = github_by_url.get(_normalize_url(item.repository.html_url))
+                if candidate is None:
+                    raise HandlerValidationError("推荐仓库不在 GitHub 检索候选白名单中")
+                matched = {code.upper() for code in candidate.matched_skill_codes}
+                if matched and not matched.intersection(code.upper() for code in item.skill_codes):
+                    raise HandlerValidationError("推荐仓库与项目技能不匹配")
+                matched_allowed = [allowed_by_upper[code.upper()] for code in candidate.matched_skill_codes
+                                   if code.upper() in allowed_by_upper]
+                if not matched_allowed:
+                    raise HandlerValidationError("推荐仓库没有覆盖输入技能")
+                item = item.model_copy(
+                    update={
+                        "source": "GITHUB_API",
+                        "repository": candidate,
+                        "skill_codes": matched_allowed,
+                    }
+                )
+            else:
+                if item.source not in {"MODEL", "LOCAL_RULES"}:
+                    raise HandlerValidationError("AI 练习项目来源非法")
+                if item.repository is not None:
+                    raise HandlerValidationError("AI 练习项目不能携带未经验证的仓库信息")
+                item = item.model_copy(update={"source_type": "AI_GENERATED"})
+            validated.append(item)
+        result = complete_recommendations(payload, github, validated)
+        meta["githubCandidateCount"] = len(github.candidates)
+        meta["recommendationCount"] = len(result.items)
+        return result
 
 
 class ProjectPlanHandler(ProjectFallbackHandler):

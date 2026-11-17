@@ -114,7 +114,7 @@ PROMPT_VERSIONS: dict[str, str] = {
     INTERVIEW_TURN: "interview-turn-v5",
     INTERVIEW_REPORT: "interview-report-v2",
     GROWTH_ANALYZE: "growth-analyze-v2",
-    PROJECT_RECOMMEND: "project-recommend-v1",
+    PROJECT_RECOMMEND: "project-recommend-v3",
     PROJECT_PLAN: "project-plan-v1",
 }
 

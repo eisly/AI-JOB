@@ -1,6 +1,7 @@
 package com.aijob.backend.project;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,9 +128,44 @@ public class ProjectService {
             throw BusinessException.notFound();
         }
         Map<String, Object> result = view.map(recommendation, "user_id", "items_json");
-        result.put("items", mapper.recommendationItems(recommendationId).stream()
-                .map(item -> view.map(item, "user_id", "recommendation_id")).toList());
+        List<Map<String, Object>> items = mapper.recommendationItems(recommendationId).stream()
+                .map(this::recommendationItemVo)
+                .sorted(Comparator.comparing((Map<String, Object> item) ->
+                                !"GITHUB_REPOSITORY".equals(item.get("sourceType")))
+                        .thenComparing(Comparator.comparingInt(this::recommendationCoverage).reversed())
+                        .thenComparing(Comparator.comparingLong(this::recommendationStars).reversed()))
+                .toList();
+        result.put("items", items);
+        Object snapshot = json.convert(json.parse((String) recommendation.get("items_json")), Object.class);
+        List<String> targets = snapshot instanceof Map<?, ?> saved
+                && saved.get("targetSkillCodes") instanceof List<?> codes
+                ? codes.stream().filter(String.class::isInstance).map(String.class::cast).toList() : List.of();
+        for (Map<String, Object> item : items) {
+            List<?> skills = item.get("skillCodes") instanceof List<?> values ? values : List.of();
+            item.put("missingSkillCodes", targets.stream().filter(code -> !skills.contains(code)).toList());
+        }
+        List<String> covered = targets.stream().filter(code -> items.stream()
+                .anyMatch(item -> item.get("skillCodes") instanceof List<?> skills && skills.contains(code))).toList();
+        List<String> githubCovered = targets.stream().filter(code -> items.stream()
+                .anyMatch(item -> "GITHUB_REPOSITORY".equals(item.get("sourceType"))
+                        && item.get("skillCodes") instanceof List<?> skills && skills.contains(code))).toList();
+        result.put("targetSkillCodes", targets);
+        result.put("coveredSkillCodes", covered);
+        result.put("githubCoveredSkillCodes", githubCovered);
+        result.put("missingSkillCodes", targets.stream().filter(code -> !covered.contains(code)).toList());
         return result;
+    }
+
+    private int recommendationCoverage(Map<String, Object> item) {
+        return item.get("skillCodes") instanceof List<?> skills ? skills.size() : 0;
+    }
+
+    private long recommendationStars(Map<String, Object> item) {
+        if (item.get("repository") instanceof Map<?, ?> repository
+                && repository.get("stargazersCount") instanceof Number stars) {
+            return stars.longValue();
+        }
+        return 0;
     }
 
     public ResponseEntity<CommonResult<Object>> createPlan(String userId, String route, String key,
@@ -270,6 +306,21 @@ public class ProjectService {
         result.put("estimatedWeeks", item.get("estimated_weeks"));
         result.put("reason", item.get("reason"));
         result.put("deliverables", json.convert(json.parse(String.valueOf(item.get("deliverables_json"))), Object.class));
+        result.put("sourceType", item.get("source_type"));
+        result.put("source", item.get("recommendation_source"));
+        Object repository = item.get("repository_json");
+        result.put("repository", repository == null ? null
+                : json.convert(json.parse(String.valueOf(repository)), Object.class));
+        return result;
+    }
+
+    private Map<String, Object> recommendationItemVo(Map<String, Object> item) {
+        Map<String, Object> result = view.map(item, "user_id", "recommendation_id", "repository_json",
+                "recommendation_source");
+        result.put("source", item.get("recommendation_source"));
+        Object repository = item.get("repository_json");
+        result.put("repository", repository == null ? null
+                : json.convert(json.parse(String.valueOf(repository)), Object.class));
         return result;
     }
 

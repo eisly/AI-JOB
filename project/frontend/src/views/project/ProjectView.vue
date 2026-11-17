@@ -186,9 +186,29 @@ const nextTask = computed(() => projectTasks.value.find(task => task.status === 
 const tasksUpdating = computed(() => updatingTaskIds.value.size > 0)
 const projectEditable = computed(() => project.value?.status === 'ACTIVE' || project.value?.status === 'COMPLETED')
 const skillNames = reactive<Record<string, string>>({})
+const recommendationTargets = computed(() => recommendation.value?.targetSkillCodes || [])
+const recommendationCovered = computed(() => recommendation.value?.coveredSkillCodes || [])
+const githubMissingSkills = computed(() => recommendationTargets.value.filter(code =>
+  !(recommendation.value?.githubCoveredSkillCodes || []).includes(code)))
+
+function missingSkills(item: ProjectRecommendationItem) {
+  return recommendationTargets.value.filter(code => !item.skillCodes.includes(code))
+}
 
 function skillName(code: string) {
   return skillNames[code] || code
+}
+
+function sourceLabel(item: ProjectRecommendationItem) {
+  if (item.sourceType === 'GITHUB_REPOSITORY') return 'GitHub 真实仓库'
+  if (item.source === 'LOCAL_RULES') return 'AI 练习项目（本地兜底）'
+  return 'AI 生成练习项目'
+}
+
+function sourceTagType(item: ProjectRecommendationItem): 'success' | 'info' | 'warning' {
+  if (item.sourceType === 'GITHUB_REPOSITORY') return 'success'
+  if (item.source === 'LOCAL_RULES') return 'warning'
+  return 'info'
 }
 
 function selectCandidate(item: ProjectRecommendationItem) {
@@ -631,6 +651,13 @@ onMounted(() => {
       </section>
 
       <AsyncState :loading="recommendationLoading" :error="recommendationError" @retry="loadRecommendation()">
+        <section v-if="recommendation?.status === 'READY' && recommendationTargets.length" class="surface coverage-summary" aria-live="polite">
+          <strong>这组候选合计覆盖 {{ recommendationCovered.length }}/{{ recommendationTargets.length }} 项目标技能</strong>
+          <p>多个候选相互补充；选择单个项目时，以该项目列出的技能为准。</p>
+          <p v-if="recommendation.missingSkillCodes?.length" class="coverage-gap">仍未覆盖：{{ recommendation.missingSkillCodes.map(skillName).join('、') }}</p>
+          <p v-else-if="githubMissingSkills.length" class="coverage-gap">这组 GitHub 项目未覆盖 {{ githubMissingSkills.map(skillName).join('、') }}，已由 AI 练习方案补充。</p>
+          <p v-else>全部目标技能均已在这组 GitHub 候选中找到匹配。</p>
+        </section>
         <div class="recommendation-layout">
           <section class="surface candidate-panel">
             <div class="section-heading">
@@ -643,7 +670,10 @@ onMounted(() => {
                 <span class="candidate-card__body">
                   <span class="candidate-card__title">{{ item.title }}<el-icon><ArrowRight /></el-icon></span>
                   <span class="candidate-card__summary">{{ item.summary }}</span>
+                  <span class="candidate-card__source"><el-tag size="small" :type="sourceTagType(item)" effect="plain">{{ sourceLabel(item) }}</el-tag><span v-if="item.repository">{{ item.repository.fullName }} · {{ item.repository.stargazersCount.toLocaleString() }} stars</span></span>
+                  <span v-if="recommendationTargets.length" class="candidate-card__coverage">{{ item.sourceType === 'GITHUB_REPOSITORY' ? '覆盖目标技能' : '计划练习技能' }} {{ item.skillCodes.length }}/{{ recommendationTargets.length }} 项</span>
                   <span class="skill-tags"><span v-for="code in item.skillCodes" :key="code">{{ skillName(code) }}</span></span>
+                  <span v-if="recommendationTargets.length" class="candidate-card__missing">{{ missingSkills(item).length ? `本项目未覆盖：${missingSkills(item).map(skillName).join('、')}` : '包含全部目标技能' }}</span>
                   <span class="candidate-card__meta">{{ difficultyLabels[item.difficulty] }}<span>·</span>预计 {{ item.estimatedWeeks }} 周</span>
                   <span class="candidate-card__reason"><strong>推荐理由</strong><span>{{ item.reason }}</span></span>
                 </span>
@@ -664,7 +694,20 @@ onMounted(() => {
                 <span class="eyebrow">{{ candidate.reason.startsWith('本地规则建议 ·') ? '本地规则建议' : '为你推荐的实战项目' }}</span>
                 <h2>{{ candidate.title }}</h2>
                 <p>{{ candidate.summary }}</p>
+                <div class="candidate-source">
+                  <el-tag size="small" :type="sourceTagType(candidate)" effect="plain">{{ sourceLabel(candidate) }}</el-tag>
+                  <template v-if="candidate.repository">
+                    <a :href="candidate.repository.htmlUrl" target="_blank" rel="noopener noreferrer">{{ candidate.repository.fullName }}<el-icon><ArrowRight /></el-icon></a>
+                    <span>{{ candidate.repository.language || '多语言' }} · {{ candidate.repository.stargazersCount.toLocaleString() }} stars · 验证于 {{ formatDate(candidate.repository.verifiedAt) }}</span>
+                  </template>
+                  <span v-else>该项目为练习方案，未绑定现实中的 GitHub 仓库。</span>
+                </div>
                 <div class="skill-tags"><span v-for="code in candidate.skillCodes" :key="code">{{ skillName(code) }}</span></div>
+                <div v-if="recommendationTargets.length" class="candidate-coverage">
+                  <strong>{{ candidate.sourceType === 'GITHUB_REPOSITORY' ? '覆盖目标技能' : '计划练习技能' }} {{ candidate.skillCodes.length }}/{{ recommendationTargets.length }} 项</strong>
+                  <p v-if="missingSkills(candidate).length">本项目未覆盖：{{ missingSkills(candidate).map(skillName).join('、') }}。可查看其他候选补充这些技能。</p>
+                  <p v-else>包含本次全部目标技能。</p>
+                </div>
               </div>
             </div>
             <div class="candidate-facts">
@@ -692,7 +735,7 @@ onMounted(() => {
               <p class="reason-callout">{{ candidate.reason }}</p>
             </section>
             <footer class="candidate-detail__footer">
-              <p><el-icon><InfoFilled /></el-icon>项目建议用于学习实践，请以实际完成的成果记录经历。</p>
+              <p><el-icon><InfoFilled /></el-icon>{{ candidate.sourceType === 'GITHUB_REPOSITORY' ? '仓库来源已通过 GitHub API 检索验证；仍请先阅读 README 和许可证，再开始运行或改造。' : '项目建议用于学习实践，请以实际完成的成果记录经历。' }}</p>
               <el-button type="primary" size="large" :icon="VideoPlay" :disabled="planBusy" @click="openPlanDialog(candidate)">选择此项目，生成计划<el-icon class="trailing-icon"><ArrowRight /></el-icon></el-button>
             </footer>
           </article>
@@ -809,7 +852,7 @@ onMounted(() => {
     </template>
 
     <el-dialog v-model="recommendationDialogVisible" title="设置项目推荐" width="min(720px, 94vw)" :close-on-click-modal="!recommendSubmitting" :close-on-press-escape="!recommendSubmitting" :show-close="!recommendSubmitting">
-      <p class="dialog-intro">根据当前确认画像与目标技能推荐 1～6 个候选项目，也可关联一个有效岗位匹配结果。</p>
+      <p class="dialog-intro">优先推荐覆盖多项技能的综合项目，再用其他候选补齐遗漏技能；候选充足时提供 3～6 个备选，也可关联有效岗位匹配结果。</p>
           <el-form ref="recommendationFormRef" :model="recommendationForm" :rules="recommendationRules" label-position="top">
             <div class="form-grid">
               <el-form-item label="关联岗位匹配结果（可选）" prop="matchItemId">
@@ -964,6 +1007,7 @@ onMounted(() => {
 .candidate-card__title { display: flex; justify-content: space-between; align-items: flex-start; gap: 7px; color: #111a3d; font-size: 17px; line-height: 1.6; font-weight: 700; overflow-wrap: anywhere; }
 .candidate-card__title .el-icon { flex-shrink: 0; margin-top: 5px; font-size: 15px; }
 .candidate-card__summary { color: #52658e; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.candidate-card__source { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #7488a8; font-size: 11px; line-height: 1.5; }
 .skill-tags { display: flex; flex-wrap: wrap; gap: 7px; }
 .skill-tags > span { display: inline-block; padding: 4px 10px; border-radius: 5px; color: #3e6098; background: #eef4ff; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .candidate-card--selected .skill-tags > span { background: #e4efff; }
@@ -971,6 +1015,13 @@ onMounted(() => {
 .candidate-card__reason { display: flex; flex-direction: column; gap: 4px; color: #52658e; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .candidate-card__reason strong { color: #27395f; font-size: 13px; }
 .candidate-footer { margin: 14px 7px 0; color: #91a0b9; font-size: 11px; }
+.coverage-summary { margin-bottom: 12px; padding: 16px 20px; color: #315681; }
+.coverage-summary p { margin: 6px 0 0; font-size: 13px; line-height: 1.7; }
+.coverage-summary .coverage-gap, .candidate-card__missing { color: #916225; }
+.candidate-card__coverage { color: #426393; font-size: 12px; font-weight: 600; }
+.candidate-card__missing { font-size: 12px; line-height: 1.7; }
+.candidate-coverage { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: #f5f8fd; color: #426393; font-size: 13px; }
+.candidate-coverage p { margin: 6px 0 0; font-size: 13px; line-height: 1.7; }
 .candidate-detail { display: flex; flex-direction: column; padding: 25px 23px 20px; }
 .candidate-detail__hero { display: flex; gap: 21px; padding: 0 2px 22px; }
 .candidate-detail__hero > div { min-width: 0; }
@@ -978,6 +1029,9 @@ onMounted(() => {
 .candidate-detail__hero h2 { margin: 0 0 12px; font-size: 27px; line-height: 1.4; color: #0c1437; overflow-wrap: anywhere; }
 .candidate-detail__hero p { margin: 0 0 14px; color: #52658e; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
 .candidate-detail__hero .skill-tags > span { color: #2964dc; }
+.candidate-source { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; color: #7b8eac; font-size: 12px; line-height: 1.6; }
+.candidate-source a { display: inline-flex; align-items: center; gap: 4px; color: #2868d7; font-weight: 600; }
+.candidate-source a:hover { text-decoration: underline; }
 .candidate-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid #e6eefb; }
 .candidate-facts > div { display: flex; align-items: flex-start; gap: 10px; padding: 18px 10px; border-right: 1px solid #eaf0fa; }
 .candidate-facts > div:last-child { border-right: 0; }

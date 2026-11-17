@@ -597,6 +597,23 @@ export interface ProjectRecommendationItem {
   estimatedWeeks: number
   reason: string
   deliverables: string[]
+  sourceType: 'GITHUB_REPOSITORY' | 'AI_GENERATED'
+  source: 'GITHUB_API' | 'MODEL' | 'LOCAL_RULES'
+  repository: ProjectRepository | null
+  missingSkillCodes?: string[]
+}
+
+export interface ProjectRepository {
+  fullName: string
+  htmlUrl: string
+  description: string
+  stargazersCount: number
+  language: string | null
+  pushedAt: string
+  topics: string[]
+  matchedSkillCodes: string[]
+  source: 'GITHUB_API'
+  verifiedAt: string
 }
 
 export interface ProjectRecommendationVO {
@@ -604,6 +621,10 @@ export interface ProjectRecommendationVO {
   status: 'GENERATING' | 'READY' | 'FAILED'
   items: ProjectRecommendationItem[]
   createdAt: string
+  targetSkillCodes?: string[]
+  coveredSkillCodes?: string[]
+  githubCoveredSkillCodes?: string[]
+  missingSkillCodes?: string[]
 }
 
 export interface ProjectTaskVO {
