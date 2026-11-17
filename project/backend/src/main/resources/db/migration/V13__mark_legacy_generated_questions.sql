@@ -11,5 +11,5 @@ SET q.generation_env = 'LEGACY'
 WHERE q.source_type = 'GENERATED'
   AND q.generation_env = 'PROD'
   AND q.created_at < (
-      SELECT MAX(installed_at) FROM flyway_schema_history WHERE version = '12'
+      SELECT MAX(installed_on) FROM flyway_schema_history WHERE version = '12'
   );
