@@ -143,6 +143,16 @@ public class BusinessException extends RuntimeException {
         return new BusinessException(503, 50301, message, "DEPENDENCY_UNAVAILABLE", true, null);
     }
 
+    /** 503 DEPENDENCY_UNAVAILABLE，details 可携带 reason=TIMEOUT（不新增 504 错误码） */
+    public static BusinessException dependencyUnavailable(String message, Map<String, Object> details) {
+        return new BusinessException(503, 50301, message, "DEPENDENCY_UNAVAILABLE", true, details);
+    }
+
+    /** 429 RATE_LIMITED，携带 Retry-After 秒数 */
+    public static BusinessException rateLimited(long retryAfterSeconds) {
+        return new BusinessException(ApiErrorCode.RATE_LIMITED, "请求过于频繁，请稍后再试", retryAfterSeconds);
+    }
+
     public int getHttpStatus() {
         return httpStatus;
     }

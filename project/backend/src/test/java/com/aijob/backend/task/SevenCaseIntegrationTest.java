@@ -133,8 +133,8 @@ class SevenCaseIntegrationTest {
                 input_snapshot_json,status,question_limit,current_question_no)
             VALUES (?,?,?,1,?,1,'{}','GENERATING',3,1)
             """, session, user, job, resume);
-        interviewMapper.insertMessage(question, session, 1, "ASSISTANT", "Java问题", 1, 0, null, "[\"JAVA\",\"MYSQL\"]", null);
-        interviewMapper.insertMessage(answer, session, 2, "USER", "测试回答", 1, 0, question, "[]", null);
+        interviewMapper.insertMessage(question, session, 1, "ASSISTANT", null, "Java问题", 1, 0, null, "[\"JAVA\",\"MYSQL\"]", null);
+        interviewMapper.insertMessage(answer, session, 2, "USER", "TEXT", "测试回答", 1, 0, question, "[]", null);
         AiTask turn = task("INTERVIEW_TURN", "INTERVIEW", session, Map.of(),
                 Map.of("latestAnswer", Map.of("messageId", answer, "questionMessageId", question)));
         Map<String, Object> evaluation = Map.of("evidenceStatus", mode.equals("INVALID") ? "INVALID" : "VALID",

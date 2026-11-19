@@ -139,7 +139,7 @@ public class InterviewResultHandler implements TaskResultHandler {
         int questionNo = ((Number) question.get("questionNo")).intValue();
         int followUpNo = ((Number) question.get("followUpNo")).intValue();
         int seq = mapper.nextSeq(task.getResourceId());
-        mapper.insertMessage(UUID.randomUUID().toString(), task.getResourceId(), seq, "ASSISTANT", content,
+        mapper.insertMessage(UUID.randomUUID().toString(), task.getResourceId(), seq, "ASSISTANT", null, content,
                 questionNo, followUpNo, null, json.stringify(skills), task.getId());
         mapper.updateTurn(task.getResourceId(), "WAITING_ANSWER", task.getId(), questionNo, followUpNo, seq);
         return ((Number) session.get("version")).intValue() + 1;

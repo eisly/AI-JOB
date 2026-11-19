@@ -20,6 +20,7 @@ import com.aijob.backend.common.JsonService;
 import com.aijob.backend.common.PageResult;
 import com.aijob.backend.job.JobMapper;
 import com.aijob.backend.learning.LearningMapper;
+import com.aijob.backend.interview.voice.VoiceMapper;
 import com.aijob.backend.profile.ProfileService;
 import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.AiTask;
@@ -39,10 +40,11 @@ public class InterviewService {
     private final TaskMapper taskMapper;
     private final JsonService json;
     private final ApiView view;
+    private final VoiceMapper voice;
 
     public InterviewService(InterviewMapper mapper, JobMapper jobs, ResumeMapper resumes, LearningMapper learning,
                             ProfileService profiles, AbilityService ability, TaskService tasks, TaskMapper taskMapper,
-                            JsonService json, ApiView view) {
+                            JsonService json, ApiView view, VoiceMapper voice) {
         this.mapper = mapper;
         this.jobs = jobs;
         this.resumes = resumes;
@@ -53,6 +55,7 @@ public class InterviewService {
         this.taskMapper = taskMapper;
         this.json = json;
         this.view = view;
+        this.voice = voice;
     }
 
     @Transactional
@@ -118,6 +121,15 @@ public class InterviewService {
         String questionMessageId = Data.uuid(body, "questionMessageId", true);
         String content = Data.text(body, "content", true, 10000);
         int expected = requiredInt(body, "expectedVersion");
+        String answerSource = Data.text(body, "answerSource", false, 8);
+        answerSource = answerSource == null ? "TEXT" : answerSource;
+        if (!Set.of("TEXT", "VOICE").contains(answerSource)) {
+            throw BusinessException.validation("answerSource", "answerSource 只能为 TEXT 或 VOICE");
+        }
+        String transcriptionId = Data.uuid(body, "voiceTranscriptionId", false);
+        if ("VOICE".equals(answerSource) && transcriptionId == null) {
+            throw BusinessException.validation("voiceTranscriptionId", "语音回答必须携带 voiceTranscriptionId");
+        }
         Map<String, Object> session = mapper.lockSession(interviewId, userId);
         if (session == null) throw BusinessException.notFound();
         int actual = ((Number) session.get("version")).intValue();
@@ -130,6 +142,29 @@ public class InterviewService {
             throw BusinessException.conflict("只能回答当前问题", "INVALID_STATE");
         }
         Map<String, Object> existing = mapper.answerByQuestion(questionMessageId, interviewId);
+        if (transcriptionId != null) {
+            Map<String, Object> transcription = voice.findById(transcriptionId, userId, interviewId);
+            if (transcription == null
+                    || !questionMessageId.equals(String.valueOf(transcription.get("question_message_id")))) {
+                throw BusinessException.stale("转写记录不存在或不属于当前问题",
+                        Map.of("reason", "TRANSCRIPTION_NOT_FOUND"));
+            }
+            Object consumedMessage = transcription.get("consumed_message_id");
+            if (consumedMessage != null && (existing == null
+                    || !String.valueOf(existing.get("id")).equals(String.valueOf(consumedMessage)))) {
+                throw BusinessException.stale("转写已用于其他回答", Map.of("reason", "TRANSCRIPTION_CONSUMED"));
+            }
+            if ("VOICE".equals(answerSource)) {
+                if (!"SUCCEEDED".equals(String.valueOf(transcription.get("status")))) {
+                    throw BusinessException.stale("转写不可用",
+                            Map.of("reason", "TRANSCRIPTION_" + transcription.get("status")));
+                }
+                if (expired(transcription)) {
+                    voice.expireIfStale(transcriptionId);
+                    throw BusinessException.stale("转写已过期，请重新录音", Map.of("reason", "TRANSCRIPTION_EXPIRED"));
+                }
+            }
+        }
         if (existing != null) {
             AiTask original = taskMapper.latestResourceTask("INTERVIEW", interviewId);
             String status = original == null ? "" : original.getStatus();
@@ -151,6 +186,7 @@ public class InterviewService {
         }
         String answerId = UUID.randomUUID().toString();
         int seq = mapper.nextSeq(interviewId);
+        final String messageSource = answerSource;
         Map<String, Object> message = message(answerId, seq, "USER", content,
                 ((Number) latest.get("question_no")).intValue(), ((Number) latest.get("follow_up_no")).intValue());
         List<Map<String, Object>> messages = new ArrayList<>(agentMessages(interviewId));
@@ -166,9 +202,15 @@ public class InterviewService {
                 "interviewVersion", expected);
         return tasks.create(userId, "POST", route, key, body, "INTERVIEW_TURN", "INTERVIEW", interviewId,
                 versions, payload, taskId -> {
-                    mapper.insertMessage(answerId, interviewId, seq, "USER", content,
+                    mapper.insertMessage(answerId, interviewId, seq, "USER", messageSource, content,
                             ((Number) latest.get("question_no")).intValue(), ((Number) latest.get("follow_up_no")).intValue(),
                             questionMessageId, "[]", taskId);
+                    if (transcriptionId != null) {
+                        voice.markConsumed(transcriptionId, answerId);
+                    }
+                    if ("VOICE".equals(messageSource)) {
+                        mapper.markVoiceMode(interviewId);
+                    }
                     mapper.updateTaskStatus(interviewId, "GENERATING", taskId);
 
                 });
@@ -231,6 +273,7 @@ public class InterviewService {
         result.put("jobId", session.get("job_id"));
         result.put("resumeVersionId", session.get("resume_version_id"));
         result.put("status", session.get("status"));
+        result.put("mode", session.get("mode"));
         result.put("questionLimit", session.get("question_limit"));
         result.put("version", session.get("version"));
         result.put("pendingTaskId", session.get("pending_task_id"));
@@ -296,5 +339,16 @@ public class InterviewService {
         Integer value = Data.integer(body, field, null, 1, Integer.MAX_VALUE);
         if (value == null) throw BusinessException.validation(field, field + " 不能为空");
         return value;
+    }
+
+    private static boolean expired(Map<String, Object> row) {
+        Object value = row.get("expires_at");
+        if (value instanceof java.time.LocalDateTime time) {
+            return time.isBefore(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        }
+        if (value instanceof java.sql.Timestamp time) {
+            return time.toInstant().isBefore(java.time.Instant.now());
+        }
+        return false;
     }
 }

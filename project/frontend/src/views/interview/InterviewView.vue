@@ -3,13 +3,15 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '@/api/interviews'
+import { voiceInterviewApi } from '@/api/voiceInterviews'
 import { jobApi } from '@/api/jobs'
 import { resumeApi } from '@/api/resumes'
 import { ApiError } from '@/api/request'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
-import type { InterviewReportVO, InterviewVO, JobVO, ResumeVO, TaskVO } from '@/api/types'
+import type { InterviewReportVO, InterviewVO, JobVO, ResumeVO, TaskVO, VoiceCapabilityVO } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
+import VoiceAnswerPanel from './components/VoiceAnswerPanel.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
 import { commonStatusLabels, errorMessage, formatDate } from '@/utils/format'
 
@@ -18,6 +20,8 @@ interface AnswerAttempt {
   questionMessageId: string
   content: string
   expectedVersion: number
+  answerSource: 'TEXT' | 'VOICE'
+  voiceTranscriptionId?: string
 }
 
 const route = useRoute()
@@ -48,6 +52,13 @@ const submitting = ref(false)
 const ending = ref(false)
 const retrying = ref(false)
 const actionError = ref<unknown>(null)
+const voiceCapability = ref<VoiceCapabilityVO | null>(null)
+let voiceCapabilitySeq = 0
+const voiceAvailable = computed(() => {
+  if (!voiceCapability.value?.asrEnabled) return false
+  if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false
+  return typeof window === 'undefined' || window.isSecureContext || ['localhost', '127.0.0.1'].includes(window.location.hostname)
+})
 const createForm = ref({
   jobId: typeof route.query.jobId === 'string' ? route.query.jobId : '',
   resumeVersionId: '',
@@ -200,6 +211,18 @@ async function loadReport(interviewId: string) {
   }
 }
 
+async function loadCapability(interviewId: string) {
+  const run = ++voiceCapabilitySeq
+  voiceCapability.value = null
+  if (!interviewId) return
+  try {
+    const value = await voiceInterviewApi.capability(interviewId)
+    if (run === voiceCapabilitySeq) voiceCapability.value = value
+  } catch {
+    if (run === voiceCapabilitySeq) voiceCapability.value = null
+  }
+}
+
 async function loadInterview(interviewId: string, showReport = false) {
   if (!interviewId) return null
   const run = ++interviewRequestSeq
@@ -223,6 +246,7 @@ async function loadInterview(interviewId: string, showReport = false) {
     selectedInterviewId.value = value.id
     activeTaskId.value = value.pendingTaskId || ''
     taskSnapshot.value = null
+    void loadCapability(value.id)
     const historyIndex = history.value.findIndex((item) => item.id === value.id)
     if (historyIndex >= 0) history.value[historyIndex] = { ...history.value[historyIndex], ...value, messages: history.value[historyIndex].messages }
     if (value.status === 'COMPLETED') await loadReport(value.id)
@@ -311,7 +335,7 @@ async function createInterview() {
   }
 }
 
-async function submitAnswer(content: string) {
+async function submitAnswer(content: string, answerSource: 'TEXT' | 'VOICE' = 'TEXT', voiceTranscriptionId = '') {
   const interview = currentInterview.value
   const question = currentQuestion.value
   if (!interview || !question || interview.status !== 'WAITING_ANSWER') {
@@ -329,6 +353,8 @@ async function submitAnswer(content: string) {
     questionMessageId: question.id,
     content,
     expectedVersion: interview.version,
+    answerSource,
+    ...(answerSource === 'VOICE' ? { voiceTranscriptionId } : {}),
   }
   answerAttempt.value = attempt
   try {
@@ -336,6 +362,7 @@ async function submitAnswer(content: string) {
       questionMessageId: question.id,
       content,
       expectedVersion: interview.version,
+      ...(answerSource === 'VOICE' ? { answerSource, voiceTranscriptionId } : {}),
     })
     answerAttempt.value = { ...attempt, taskId: task.id }
     taskSnapshot.value = task
@@ -356,6 +383,15 @@ async function submitAnswer(content: string) {
 
 async function sendAnswer() {
   await submitAnswer(answerContent.value)
+}
+
+async function handleVoiceSubmit(payload: { content: string; transcriptionId: string }) {
+  answerContent.value = payload.content
+  await submitAnswer(payload.content, 'VOICE', payload.transcriptionId)
+}
+
+function handleVoiceSwitchText() {
+  ElMessage.info('已切换为文字作答，已识别的文本会保留在当前编辑区')
 }
 
 async function retryAnswerWithSameContent() {
@@ -502,7 +538,33 @@ onMounted(async () => {
       </div>
     </header>
 
-    <el-alert class="text-only-alert" title="当前仅支持文字面试" description="请直接输入文字回答；流式题目仅作生成过程预览，最终消息以保存后的面试记录为准。" type="info" :closable="false" show-icon />
+    <el-alert
+      v-if="currentInterview && voiceCapability && !voiceCapability.asrEnabled"
+      class="text-only-alert"
+      title="当前会话暂未开启语音作答"
+      description="可直接输入文字完成面试；语音能力恢复后会在此处展示入口。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-else-if="currentInterview && !voiceAvailable"
+      class="text-only-alert"
+      title="当前浏览器环境不支持录音"
+      description="需要使用 HTTPS 或本机地址，并允许麦克风权限；也可以直接输入文字作答。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-else
+      class="text-only-alert"
+      title="支持文字与语音逐题作答"
+      description="语音回答会先转写为文字，经你确认后提交；播放题目请点击播报按钮，开始录音会自动停止播报。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
 
     <section v-if="activeTask" class="panel task-panel">
       <div class="panel__heading">
@@ -609,21 +671,34 @@ onMounted(async () => {
                 <strong>回答当前问题</strong>
                 <span class="muted">使用当前会话版本 {{ currentInterview.version }}</span>
               </div>
-              <el-input
-                v-model="answerContent"
-                type="textarea"
-                :rows="7"
-                maxlength="10000"
-                show-word-limit
-                resize="vertical"
-                placeholder="请输入 1–10000 个字符的回答"
-                :disabled="submitting || (!!activeTask && !isTerminalTask(activeTask.status))"
-                @keydown.ctrl.enter.prevent="canAnswer && sendAnswer()"
+              <VoiceAnswerPanel
+                v-if="voiceAvailable && voiceCapability && currentQuestion"
+                :key="`${currentInterview.id}:${currentQuestion.id}`"
+                :interview="currentInterview"
+                :question="currentQuestion"
+                :capability="voiceCapability"
+                :disabled="!!activeTask && !isTerminalTask(activeTask.status)"
+                :submitting="submitting"
+                @submit="handleVoiceSubmit"
+                @switch-text="handleVoiceSwitchText"
               />
-              <div class="answer-box__actions">
-                <span class="muted">发送失败时保留原内容；遇到版本冲突会先刷新，不会自动重发。</span>
-                <el-button type="primary" :loading="submitting" :disabled="!canAnswer" @click="sendAnswer">提交回答</el-button>
-              </div>
+              <template v-else>
+                <el-input
+                  v-model="answerContent"
+                  type="textarea"
+                  :rows="7"
+                  maxlength="10000"
+                  show-word-limit
+                  resize="vertical"
+                  placeholder="请输入 1–10000 个字符的回答"
+                  :disabled="submitting || (!!activeTask && !isTerminalTask(activeTask.status))"
+                  @keydown.ctrl.enter.prevent="canAnswer && sendAnswer()"
+                />
+                <div class="answer-box__actions">
+                  <span class="muted">发送失败时保留原内容；遇到版本冲突会先刷新，不会自动重发。</span>
+                  <el-button type="primary" :loading="submitting" :disabled="!canAnswer" @click="sendAnswer">提交回答</el-button>
+                </div>
+              </template>
             </div>
             <div class="session-actions">
               <el-button v-if="currentInterview.status === 'WAITING_ANSWER'" type="danger" plain :loading="ending" :disabled="!!activeTask && !isTerminalTask(activeTask.status)" @click="endInterview">结束面试并生成报告</el-button>

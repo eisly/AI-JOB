@@ -530,3 +530,291 @@
 **遗留问题：** 本次浏览器验收使用接口测试数据，未调用真实模型或写入真实账号数据。
 
 ---
+
+### [2026-11-19 14:09:05] 获取语音面试分支并核对合并起点
+
+**任务目标：** 将 `feature/voice-interview` 合入当前 `feature/bug`。
+
+**执行行为：**
+
+1. 确认当前提交为 `cc71c08`，暂存区为空，工作区已有项目实战、文档、构建产物和 SQLite 运行时改动。
+2. 从配置的 `origin` 获取 `feature/voice-interview` 到本地远程跟踪引用。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/merge_process.md` | 追加合并起点与分支获取记录 | 保存操作依据 |
+
+**执行命令与验证：**
+
+- 命令：`git status --short --branch`、`git diff --cached --name-only`。结果：当前分支为 `feature/bug`，可见已有工作区改动，暂存区为空。
+- 命令：`git fetch origin refs/heads/feature/voice-interview:refs/remotes/origin/feature/voice-interview`。结果：通过，建立本地远程跟踪引用。
+
+**影响范围：** 本地 Git 引用及合并过程记录。规范举例的 `D:/vscode/AI-JOB/docs/功能资料` 不存在，记录追加到当前仓库的同一相对路径。
+
+**遗留问题：** 核对变更重叠、数据库迁移和测试范围后进行合并。
+
+---
+
+### [2026-11-19 14:10:53] 暂存语音面试分支并恢复本地项目实战改动
+
+**任务目标：** 完整引入语音面试分支，同时保护合并前的未提交工作。
+
+**执行行为：**
+
+1. 比对源分支和工作区，确认仅 `project/agent/app/config.py` 和 `project/frontend/src/api/types.ts` 路径重叠。在独立目录保存原文件及 SHA-256，并用 `git merge-file -p` 预先合成保留两侧改动的工作区版本。
+2. 校验原文件未发生变化，临时恢复两处重叠文件到当前提交，执行 `git merge --no-ff --no-commit origin/feature/voice-interview`，随后恢复两处合成后的工作区文件。项目实战部分保留在暂存区外。
+3. 核对源分支和现有工作区，发现语音面试和项目仓库来源的迁移均使用 V15，工作区还有项目推荐发现的 V16。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `.codeartsdoer/specs/voice_interview/`、`docs/功能资料/09-模拟面试/` | 引入源分支的语音规格、设计、任务、过程及回滚文档 | 纳入语音面试交付资料 |
+| 新增或修改 | `project/agent/app/`、`project/agent/tests/`、`requirements.txt` | 引入语音配置、内部 API、Mock Provider、单测和 multipart 依赖 | 支持 Mock 语音识别和播报 |
+| 新增或修改 | `project/backend/src/main/`、`project/backend/src/test/` | 引入面试语音 API、权限、存储、Flyway 脚本、相关面试和 Java 测试 | 支持语音面试业务功能 |
+| 新增或修改 | `project/frontend/src/api/`、`project/frontend/src/composables/voice/`、`project/frontend/src/utils/voice/`、`project/frontend/src/views/interview/` | 引入录音、转写确认、播报及面试页面集成 | 支持语音面试交互 |
+| 修改 | `docs/功能资料/merge_process.md` | 追加暂存和保护本地工作区记录 | 保存合并过程 |
+
+**执行命令与验证：**
+
+- 命令：`git merge-file -p`、`git merge --no-ff --no-commit origin/feature/voice-interview`、`git rev-parse MERGE_HEAD`。结果：无 Git 冲突，暂存 55 个源分支文件，`MERGE_HEAD` 为 `6da3514`。
+- 命令：`git diff --name-only -- project/agent/app/config.py project/frontend/src/api/types.ts`。结果：两处原有项目实战改动已恢复为工作区差异。
+
+**影响范围：** 当前分支处于待提交合并状态，源分支变更已暂存，本地项目实战改动仍在工作区。
+
+**遗留问题：** 调整语音迁移版本后执行验证并完成提交。
+
+---
+
+### [2026-11-19 14:11:49] 解决 Flyway 迁移编号冲突
+
+**任务目标：** 保留项目实战 V15、V16，将语音面试迁移放在其后。
+
+**执行行为：**
+
+1. 将语音面试脚本从 V15 移至 V17，更新脚本版本注释，保留 SQL 语句。
+2. 更新运维手册的迁移版本及旧语音分支数据库的核对说明。设计和历史过程记录仍保留当时的编号。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 重命名 | `project/backend/src/main/resources/db/migration/V15__add_voice_interview.sql` → `project/backend/src/main/resources/db/migration/V17__add_voice_interview.sql` | 调整语音迁移编号及头部注释 | 避免与项目实战 V15 重复 |
+| 修改 | `docs/功能资料/09-模拟面试/语音模拟面试-回滚与清理.md` | 对齐 V17，并补充旧语音 V15 数据库的迁移提示 | 防止发布时误用旧编号 |
+| 修改 | `docs/功能资料/merge_process.md` | 记录迁移改号 | 保留合并依据 |
+
+**执行命令与验证：**
+
+- 命令：`Get-ChildItem ... -Filter 'V*__*.sql' | Group-Object { $_.BaseName.Split('__')[0] }`。结果：工作区未发现重复版本，V15 和 V16 为项目实战迁移，V17 为语音迁移。
+
+**影响范围：** 语音面试的 Flyway 版本调整，项目实战的本地 V15 和 V16 脚本仍保留在工作区。
+
+**遗留问题：** 有旧语音 V15 的数据库需单独核对迁移历史。项目实战 V15 和 V16 仍未提交，部署到共享环境前需确认它们与 V17 一起发布。
+
+---
+
+### [2026-11-19 14:14:04] 首轮三端检查与隔离迁移验证
+
+**任务目标：** 验证暂存合并与本地项目实战改动共同运行。
+
+**执行行为：**
+
+1. 运行 Agent 全量测试、Java 定向测试和前端构建。
+2. 临时初始化独立 MySQL 8.0 实例，使用 Flyway 在空库迁移到 V16，再执行 V17 与校验，检查历史面试的模式列默认值为 `TEXT`，最后关闭临时实例。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/merge_process.md` | 追加首轮验证结论 | 保留实际结果 |
+
+**执行命令与验证：**
+
+- 命令：`python -m pytest -o addopts='' -q`。结果：391 通过，4 失败，118 错误。默认临时目录权限导致 118 项夹具错误，浏览器子进程权限导致 2 项渲染测试失败，语音的生产配置错误文案及音频类型校验各失败 1 项。
+- 命令：`mvn -o -q -Dtest=InterviewServiceTest,QuestionSpeechServiceTest,ProjectResultHandlerTest,ProjectServiceTechStackKeywordsTest,TaskRetryServiceTechStackKeywordsTest test`。结果：23 项通过。
+- 命令：`npm.cmd run build -- --outDir <独立目录> --emptyOutDir`。结果：TypeScript 校验已通过，Vite 在启动 esbuild 子进程时遇到 `spawn EPERM`。
+- 命令：`python <独立目录>/run_mysql_check.py <输出根目录>`。结果：隔离 MySQL 的 V1→V16、V16→V17 及 Flyway 校验均通过。
+
+**影响范围：** 验证仅使用临时测试数据和构建目录，未写入现有业务库。
+
+**遗留问题：** 修复语音测试暴露的问题并调整测试环境后复跑。
+
+---
+
+
+### [2026-11-19 14:15:03] 修复语音面试合入后的 Agent 校验和启动问题
+
+**任务目标：** 修复源分支既有语音测试暴露的问题，并确保未启用语音的生产 Agent 能正常启动。
+
+**执行行为：**
+
+1. 将声明音频格式与可识别的文件头匹配，拒绝未识别或不一致的内容。
+2. 生产环境的自动模式关闭 Mock 语音路由，显式配置 Mock 仍触发生产限制。补充回归覆盖，有无语音服务密钥都可创建核心应用。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/config.py`、`project/agent/app/api.py` | 生产自动模式关闭语音路由，明确 Mock 配置错误 | 避免 Mock 功能阻断已有生产 Agent |
+| 修改 | `project/agent/app/speech/service.py` | 根据音频文件头检验声明格式 | 使语音服务拒绝格式不符的上传 |
+| 修改 | `project/agent/tests/test_speech_config.py` | 覆盖生产自动模式保持核心接口可用 | 防止启动兼容性回归 |
+| 修改 | `docs/功能资料/09-模拟面试/语音模拟面试-回滚与清理.md` | 补充当前 Mock 发布边界及后端语音开关 | 记录生产配置要求 |
+| 修改 | `docs/功能资料/merge_process.md` | 追加修复过程 | 记录合并改动 |
+
+**执行命令与验证：**
+
+- 语音全量复测待执行。
+
+**影响范围：** 仅涉及 Agent 语音功能启用和输入校验，真实语音服务仍由源分支后续工作实现。
+
+**遗留问题：** 复跑 Agent 测试、前端构建和提交范围检查。
+
+---
+
+
+### [2026-11-19 14:17:00] 修正本地自动选择语音 Provider 的启动回归
+
+**任务目标：** 让含有语音配置的既有本地环境继续使用 Mock，并完成三端复测。
+
+**执行行为：**
+
+1. 将 Agent 临时目录改到独立目录后复跑全量测试，确认已有本地配置使自动模式选择尚未实现的 Qwen Provider，导致 96 项测试夹具在启动时出错。
+2. 调整自动模式：开发和测试使用 Mock，生产关闭语音。保留显式指定 Provider 的行为，增加本地有无语音服务密钥的覆盖。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/config.py`、`project/agent/tests/test_speech_config.py` | 修正自动模式并覆盖本地配置兼容性 | 避免未实现的 Qwen Provider 阻断已有功能 |
+| 修改 | `docs/功能资料/09-模拟面试/语音模拟面试-回滚与清理.md`、`docs/功能资料/merge_process.md` | 同步行为说明和阶段结果 | 记录合并发现的问题及环境要求 |
+
+**执行命令与验证：**
+
+- 命令：`python -m pytest -o addopts='' -p no:cacheprovider --basetemp <独立目录> --tb=short -q`。结果：418 项通过、1 项跳过、96 项夹具错误，均定位到自动选择尚未实现的 Qwen Provider。
+- 命令：`npm.cmd run build -- --outDir <独立目录> --emptyOutDir`。结果：在允许启动 esbuild 子进程后，类型校验和生产构建通过，Vite 提示大 chunk。
+
+**影响范围：** 自动模式保持已有 Agent 路由可用，开发和测试环境仍可使用源分支的 Mock 语音功能。
+
+**遗留问题：** 复跑 Agent 和核对最终提交范围。
+
+---
+
+
+### [2026-11-19 14:18:31] 对齐语音 API 测试的共享夹具
+
+**任务目标：** 使新测试使用现有 `client_and_app` 夹具的返回契约。
+
+**执行行为：**
+
+1. Agent 全量复跑确认启动恢复。新语音 API 测试把 `(client, app)` 元组当作 HTTP 客户端，调用接口前即失败。
+2. 只调整新语音测试，从共享夹具解包 HTTP 客户端，保留既有夹具和其他调用方。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/tests/test_speech_api.py` | 解包共享夹具返回的 HTTP 客户端 | 让转写、播报和授权断言进入实际 API |
+| 修改 | `docs/功能资料/merge_process.md` | 记录复测结果与测试修复 | 保留验证过程 |
+
+**执行命令与验证：**
+
+- 命令：`python -m pytest -o addopts='' -p no:cacheprovider --basetemp <独立目录> --tb=short -q -rs`。结果：505 项通过、1 项跳过、10 项失败，失败均为语音 API 测试对夹具元组调用 `post`。
+
+**影响范围：** 只涉及新语音 API 测试的调用方式。
+
+**遗留问题：** 复跑语音测试并核对最终全量结果。
+
+---
+
+
+### [2026-11-19 14:19:55] 完成合并前验证并核对提交范围
+
+**任务目标：** 确认合并结果可验证，原工作区改动保持未提交。
+
+**执行行为：**
+
+1. 复跑 Agent 全量测试，语音 API 授权、转写和播报测试通过。独立复核两个重叠文件，去掉合入内容后与合并前本地文件逐字节一致（按 LF 统一换行）。
+2. 将暂存路径与源分支差异比对，确认共 56 个路径，仅额外纳入合并过程记录，语音 SQL 使用 V17。清单由暂存区生成。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/merge_process.md` | 记录最终回归结果、提交边界和文件清单 | 保留合并验收证据 |
+
+**执行命令与验证：**
+
+- 命令：`python -m pytest -o addopts='' -p no:cacheprovider --basetemp <独立目录> --tb=short -q -rs`。结果：515 项通过，1 项因仅适用于 SQLite 的内存后端参数跳过。直接在默认沙箱执行语音定向测试时仍有 pytest 临时目录权限错误，全量测试通过授权的独立临时目录完成。
+- Java 23 项定向测试通过，前端类型校验和生产构建通过。隔离 MySQL 的 V1→V16、V16→V17 及 Flyway 校验通过。
+- 命令：`git ls-files -u`、`git diff --cached --name-only HEAD`、`git merge-file -p`。结果：无未合并条目，路径范围符合预期，两个重叠文件的既有本地改动已核对。
+
+
+<details>
+<summary>暂存文件清单</summary>
+
+- 新增 `.codeartsdoer/specs/voice_interview/design.md`
+- 新增 `.codeartsdoer/specs/voice_interview/spec.md`
+- 新增 `.codeartsdoer/specs/voice_interview/tasks.md`
+- 新增 `docs/功能资料/09-模拟面试/语音模拟面试-回滚与清理.md`
+- 新增 `docs/功能资料/09-模拟面试/语音模拟面试_process.md`
+- 修改 `docs/功能资料/merge_process.md`
+- 修改 `project/agent/app/api.py`
+- 修改 `project/agent/app/config.py`
+- 新增 `project/agent/app/speech/__init__.py`
+- 新增 `project/agent/app/speech/base.py`
+- 新增 `project/agent/app/speech/fake.py`
+- 新增 `project/agent/app/speech/router.py`
+- 新增 `project/agent/app/speech/schemas.py`
+- 新增 `project/agent/app/speech/service.py`
+- 新增 `project/agent/tests/test_speech_api.py`
+- 新增 `project/agent/tests/test_speech_config.py`
+- 新增 `project/agent/tests/test_speech_fake.py`
+- 新增 `project/agent/tests/test_speech_service.py`
+- 修改 `project/backend/src/main/java/com/aijob/backend/common/BusinessException.java`
+- 修改 `project/backend/src/main/java/com/aijob/backend/common/GlobalExceptionHandler.java`
+- 修改 `project/backend/src/main/java/com/aijob/backend/interview/InterviewMapper.java`
+- 修改 `project/backend/src/main/java/com/aijob/backend/interview/InterviewResultHandler.java`
+- 修改 `project/backend/src/main/java/com/aijob/backend/interview/InterviewService.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/QuestionSpeechService.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/SpeechAgentClient.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/SpeechAudioCache.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceCapabilityService.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceInterviewController.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceLimits.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceMapper.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceRateLimiter.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceStatus.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceTranscriptionService.java`
+- 新增 `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceTranscriptionSweeper.java`
+- 修改 `project/backend/src/main/java/com/aijob/backend/task/InternalJwtService.java`
+- 修改 `project/backend/src/main/resources/application.yml`
+- 新增 `project/backend/src/main/resources/db/migration/V17__add_voice_interview.sql`
+- 修改 `project/backend/src/test/java/com/aijob/backend/interview/InterviewServiceTest.java`
+- 新增 `project/backend/src/test/java/com/aijob/backend/interview/voice/QuestionSpeechServiceTest.java`
+- 修改 `project/backend/src/test/java/com/aijob/backend/task/SevenCaseIntegrationTest.java`
+- 修改 `project/frontend/src/api/interviews.ts`
+- 修改 `project/frontend/src/api/request.ts`
+- 修改 `project/frontend/src/api/types.ts`
+- 新增 `project/frontend/src/api/voiceInterviews.ts`
+- 新增 `project/frontend/src/composables/voice/useQuestionSpeech.ts`
+- 新增 `project/frontend/src/composables/voice/useVoiceAnswer.ts`
+- 新增 `project/frontend/src/composables/voice/useVoiceRecorder.ts`
+- 新增 `project/frontend/src/utils/voice/formats.ts`
+- 新增 `project/frontend/src/utils/voice/limits.ts`
+- 修改 `project/frontend/src/views/interview/InterviewView.vue`
+- 新增 `project/frontend/src/views/interview/components/QuestionAudioPlayer.vue`
+- 新增 `project/frontend/src/views/interview/components/RecordingControls.vue`
+- 新增 `project/frontend/src/views/interview/components/TranscriptionEditor.vue`
+- 新增 `project/frontend/src/views/interview/components/VoiceAnswerPanel.vue`
+- 新增 `project/frontend/src/views/interview/components/VoicePrivacyDialog.vue`
+- 修改 `requirements.txt`
+
+</details>
+
+**影响范围：** 本次引入语音面试 Mock 功能和上述合入修复，既有项目实战未提交工作仍在工作区。
+
+**遗留问题：** 提交后核对两个父提交。未执行真实语音供应商与真实麦克风端到端验收。发布到共享库前应将本地项目实战 V15、V16 与 V17 一同发布。
+
+---

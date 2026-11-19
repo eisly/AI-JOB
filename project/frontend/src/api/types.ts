@@ -795,6 +795,8 @@ export interface MessageVO {
   questionNo: number
   followUpNo: number
   createdAt: string
+  /** 语音面试：USER 消息的来源；历史数据为 null，按 TEXT 处理 */
+  answerSource?: 'TEXT' | 'VOICE' | null
 }
 
 export interface InterviewVO {
@@ -802,6 +804,8 @@ export interface InterviewVO {
   jobId: string
   resumeVersionId: string
   status: 'PREPARING' | 'WAITING_ANSWER' | 'GENERATING' | 'ENDING' | 'COMPLETED' | 'FAILED'
+  /** 语音面试：会话作答模式；历史数据为 TEXT */
+  mode?: 'TEXT' | 'VOICE'
   questionLimit: number
   version: number
   pendingTaskId: string | null
@@ -811,6 +815,37 @@ export interface InterviewVO {
   jobTitle?: string | null
   completionType?: 'NORMAL' | 'EARLY_END' | 'NO_VALID_ANSWER' | null
   answeredCount?: number | null
+}
+
+export type VoiceTranscriptionStatus = 'PENDING' | 'SUCCEEDED' | 'EMPTY' | 'FAILED' | 'DISCARDED' | 'EXPIRED'
+
+export interface VoiceCapabilityVO {
+  asrEnabled: boolean
+  ttsEnabled: boolean
+  consentRequired: boolean
+  consentVersion: string
+  consented: boolean
+  maxDurationSeconds: number
+  maxAudioBytes: number
+  allowedMimeTypes: string[]
+  transcriptionTtlSeconds: number
+}
+
+export interface VoiceTranscriptionVO {
+  id: string
+  status: VoiceTranscriptionStatus
+  text: string | null
+  questionMessageId: string
+  interviewVersion: number
+  durationMs: number
+  expiresAt: string
+  reused?: boolean
+}
+
+export interface VoiceConsentVO {
+  agreed: boolean
+  policyVersion: string
+  agreedAt: string | null
 }
 
 export interface InterviewReportVO {
