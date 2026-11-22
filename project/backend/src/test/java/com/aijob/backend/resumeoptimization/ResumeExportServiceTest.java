@@ -42,4 +42,14 @@ class ResumeExportServiceTest {
             assertTrue(bytes.length > 1000);
         }
     }
+
+    @Test
+    void loadsConfiguredChineseFontCollection() throws Exception {
+        String path = "/System/Library/Fonts/Supplemental/Songti.ttc";
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.isRegularFile(java.nio.file.Path.of(path)));
+        byte[] bytes = new ResumeExportService(path).pdf("中文简历", sections);
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            assertTrue(new PDFTextStripper().getText(document).contains("中文简历"));
+        }
+    }
 }

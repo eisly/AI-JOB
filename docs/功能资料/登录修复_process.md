@@ -217,3 +217,167 @@
 **遗留问题：** 尚未测试生产构建或跨浏览器行为；测试账号待后续按依赖关系安全清理，不能直接删除已有数据。
 
 ---
+
+### [2026-11-20 19:58:12] 移除密码登录限流
+
+**任务目标：**
+按用户要求取消密码登录限流，解决 Redis 连接失败时登录报「限流服务暂不可用」的问题。
+
+**执行行为：**
+
+1. 定位到登录在校验密码前读取 Redis 中的邮箱和 IP 计数，失败时也写入 Redis。连接异常会被转换为截图中的业务错误。
+2. 移除登录限流调用及其专用代码和配置。登录继续检查邮箱、密码和账号状态，并走原有会话签发逻辑。
+3. 将原有 429 回归用例改为验证连续六次错误密码均返回 401，随后正确密码可完成登录。移除测试对旧限流键的批量删除。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/auth/service/impl/AuthServiceImpl.java` | 移除限流检查、失败计数及限流服务依赖 | 登录不再依赖 Redis 限流 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/auth/service/AuthService.java`、`project/backend/src/main/java/com/aijob/backend/auth/controller/AuthController.java` | 清理仅用于限流的 IP 参数和提取逻辑 | 同步内部调用 |
+| 删除 | `project/backend/src/main/java/com/aijob/backend/auth/service/RateLimitService.java` | 删除密码登录专用 Redis 限流服务 | 唯一调用已移除 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/config/AppProperties.java`、`project/backend/src/main/resources/application.yml`、`.env.example` | 删除登录限流配置；保留现有仓库检索配置 | 清理失效配置 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/interview/voice/VoiceRateLimiter.java` | 删除注释中对旧登录限流的引用 | 对齐当前实现 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/AuthFlowIntegrationTest.java` | 更新登录回归断言及测试准备逻辑 | 覆盖取消限流后的登录表现 |
+| 修改 | `docs/功能资料/数据说明.md` | 更新登录与 Redis 用途说明 | 对齐当前实现 |
+| 修改 | `docs/功能资料/登录修复_process.md` | 在当前工作区的既有文件末尾追加记录 | 规范中列出的另一工作区路径不存在 |
+
+**执行命令与验证：**
+
+- 命令：`rg -n -i` 核对报错来源、限流调用和配置；`Test-Path D:/vscode/AI-JOB/docs/功能资料` 核对记录位置；读取认证服务、控制器和集成测试。
+- 结果：确认登录限流实现是截图报错来源，指定的另一工作区目录不存在。后端构建和请求验证待执行。
+
+**影响范围：**
+密码登录不再按邮箱或 IP 对失败尝试计数。找回密码验证码、令牌撤销和语音频次控制仍使用各自既有逻辑。
+
+**遗留问题：**
+待验证 Redis 不可连接时密码登录的实际结果，并确认本机运行实例加载新版本。
+
+---
+
+### [2026-11-20 19:59:30] 编译验证并复现运行实例的登录错误
+
+**任务目标：**
+检查代码和测试能否编译，确认浏览器正在连接的后端是否仍需替换。
+
+**执行行为：**
+
+1. 离线编译后端和测试源码，核对当前实现中已没有旧登录限流服务引用和配置。
+2. 查询本机监听端口，发现 3306、5173 和 8080 正在运行，6379 和隔离测试库端口 3307 未监听。前端只监听 IPv6 回环地址。
+3. 使用合成账号通过前端代理请求当前运行实例，收到 HTTP 503 和业务码 50301，确认待更新的运行实例仍受旧登录链路影响。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/登录修复_process.md` | 追加编译与运行状态记录 | 记录实际验证情况 |
+
+**执行命令与验证：**
+
+- 命令：`mvn -o -B test-compile`。结果：构建成功，编译 136 个主源码和 50 个测试源码。该命令未执行测试。
+- 命令：`git -c core.fsmonitor=false diff --check`、`rg -n`。结果：差异检查通过，仅出现既有换行提示；无旧登录限流实现引用。
+- 命令：`Get-NetTCPConnection -State Listen`、HTTP POST `http://localhost:5173/api/v1/auth/login`。结果：旧运行实例返回 503 / 50301。
+
+**影响范围：**
+只更新了本地编译输出和过程记录。业务库未发生写入。
+
+**遗留问题：**
+3307 隔离库当前未启动；需先确认现有 Java 启动方式和数据库迁移版本，再选择兼容的验证与生效方式。
+
+---
+
+### [2026-11-20 20:02:14] 重启本机 Java 后端以加载修复
+
+**任务目标：**
+让当前浏览器连接的 8080 后端加载新版认证代码。
+
+**执行行为：**
+
+1. 用监听端口、JVM 系统属性和父进程核实旧实例来自当前工作区的 `target/classes`，通过 `spring-boot:run` 启动。
+2. 直接复用 JVM 参数文件的两次预检均在停止进程前中止。随后改用已核实的原 Maven 入口。
+3. 确认编译目录已无旧限流类，只停止原 8080 Java 进程，并以同一后端工作目录后台启动。未改动前端、Redis 或数据库启动配置。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/target/local-restarts/login-no-rate-limit-20261120-200151/backend.out.log`、`backend.err.log` | 添加本地后端运行日志 | 核对启动与接口请求 |
+| 修改 | `docs/功能资料/登录修复_process.md` | 追加本次重启记录 | 跟踪生效过程 |
+
+**执行命令与验证：**
+
+- 命令：`Get-NetTCPConnection`、`jcmd VM.system_properties`、`Stop-Process`、`Start-Process`、`mvn -o -B -DskipTests spring-boot:run`。
+- 结果：原 Java 进程已停止，启动器 PID 为 9008，待核实新实例监听和登录响应。
+
+**影响范围：**
+本机 8080 开发后端经历一次短暂重启。
+
+**遗留问题：**
+验证前端代理和认证回归用例。
+
+---
+
+### [2026-11-20 20:05:22] 验证新实例及前端代理
+
+**任务目标：**
+确认本机页面所使用的登录接口已恢复正常的凭据校验行为。
+
+**执行行为：**
+
+1. 确认后端新进程监听 8080。Flyway 校验 17 个迁移，现有业务库为 V17，无待执行迁移。
+2. 在 Redis 6379 无监听时，使用合成邮箱分别直接请求后端和经由前端代理请求登录。每个入口连续请求六次。
+3. 单独初始化 3307 的 MySQL 测试目录。首次启动后的监听校验提前终止，随后 MySQL 客户端的简写地址被解释为 `127`，两次均未执行集成用例。改用完整参数重试。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/target/login-regression-20261120-200312/` | 临时 MySQL 数据和日志，位于 Git 忽略目录 | 在独立测试库验证正确密码 |
+| 修改 | `docs/功能资料/登录修复_process.md` | 追加运行验证和隔离库准备结果 | 记录实际结果 |
+
+**执行命令与验证：**
+
+- 命令：读取后台日志，执行 `Get-NetTCPConnection`，向 `http://127.0.0.1:8080/api/v1/auth/login` 和 `http://localhost:5173/api/v1/auth/login` 发送合成请求。
+- 结果：两个入口共 12 次均为 HTTP 401 / 40101。旧的 503 和连续失败触发的 429 未出现。
+- 命令：`mysqld --initialize-insecure`、`mysqld --port=3307`、`mysql`。结果：隔离目录已初始化。前两次集成测试准备因监听校验和客户端参数问题中止，已开始重试。
+
+**影响范围：**
+本机 8080 使用新代码。业务库未执行迁移或写入测试账号。
+
+**遗留问题：**
+等待隔离库中的正确密码回归结果。
+
+---
+
+### [2026-11-20 20:07:45] 完成登录回归与现场复查
+
+**任务目标：**
+验证 Redis 停止时使用正确密码能完成登录，确认测试完毕后当前页面仍可使用修复后的后端。
+
+**执行行为：**
+
+1. 隔离 MySQL 启动后，改为跨命令核对 3307 的监听进程和数据目录，使用完整回环地址连接。在 `career_business_test` 应用 17 个迁移并创建合成测试账号。
+2. 执行登录定向用例。Redis 6379 在测试前后均无监听。连续六次错误密码返回 401 / 40101，随后正确密码返回 200，响应包含 access token 和 refresh Cookie。
+3. 关闭隔离 MySQL，确认 3307 已释放。当前 5173 前端与 8080 后端仍监听，代理登录对合成的错误凭据返回 401 / 40101。
+4. 常规沙箱内的 H2 启动测试在 Surefire 子进程阶段停滞，结束该次进程后，在本机用同进程模式重跑，测试通过。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增或更新 | `project/backend/target/login-regression-20261120-200312/`、`project/backend/target/surefire-reports/` | 隔离库运行日志、测试数据及测试报告，均在 Git 忽略目录 | 支持回归以及结果复查 |
+| 修改 | `docs/功能资料/登录修复_process.md` | 追加本次测试、复查和失败恢复记录 | 记录实际结果 |
+
+**执行命令与验证：**
+
+- 命令：`mvn -o -B "-Dtest=AuthFlowIntegrationTest#acceptsCorrectPasswordAfterRepeatedLoginFailures" "-DforkCount=0" surefire:test`。结果：1 项通过，0 失败，0 错误，0 跳过。
+- 命令：`mvn -o -B "-Dtest=BackendApplicationTest" "-DforkCount=0" surefire:test`。结果：重跑 1 项通过，0 失败，0 错误，0 跳过。
+- 命令：`mysqladmin ... shutdown`、`Get-NetTCPConnection`、本机前端登录请求、`git -c core.fsmonitor=false diff --check`。结果：隔离库已关闭，现用后端继续服务，登录代理返回预期 401，差异检查通过。
+
+**影响范围：**
+当前本机开发页面已生效。合成账号与测试迁移仅存在于本次隔离数据库，业务库未执行新迁移或写入测试数据。
+
+**遗留问题：**
+未使用用户真实账户或执行全量测试套件。本次验收覆盖密码登录和应用上下文启动。
+
+---

@@ -36,7 +36,8 @@ class InterviewServiceTest {
         JsonService json = new JsonService(JsonMapper.builder().build());
         InterviewService service = new InterviewService(mapper, mock(JobMapper.class), mock(ResumeMapper.class),
                 mock(LearningMapper.class), mock(ProfileService.class), mock(AbilityService.class),
-                mock(TaskService.class), mock(TaskMapper.class), json, new ApiView(json));
+                mock(TaskService.class), mock(TaskMapper.class), json, new ApiView(json),
+                mock(com.aijob.backend.interview.voice.VoiceMapper.class));
         when(mapper.messages("interview")).thenReturn(List.of(Map.of(
                 "id", "question", "seq", 1, "role", "ASSISTANT", "content", "Explain transactions",
                 "question_no", 1, "follow_up_no", 0, "skill_codes_json", "[\"JAVA\",\"MYSQL\"]")));
@@ -52,7 +53,7 @@ class InterviewServiceTest {
         JsonService json = new JsonService(JsonMapper.builder().build());
         InterviewService service = new InterviewService(mapper, mock(JobMapper.class), mock(ResumeMapper.class),
                 mock(LearningMapper.class), mock(ProfileService.class), mock(AbilityService.class), tasks, taskMapper,
-                json, new ApiView(json));
+                json, new ApiView(json), mock(com.aijob.backend.interview.voice.VoiceMapper.class));
         String userId = "user";
         String interviewId = "interview";
         String questionId = "60000000-0000-4000-8000-000000000002";
@@ -85,7 +86,7 @@ class InterviewServiceTest {
         assertEquals("answer", latestAnswer.get("messageId"));
         assertEquals(3, payload.getValue().get("expectedVersion"));
         assertEquals(3, versions.getValue().get("interviewVersion"));
-        verify(mapper, never()).insertMessage(anyString(), anyString(), anyInt(), anyString(), anyString(), anyInt(),
-                anyInt(), any(), anyString(), anyString());
+        verify(mapper, never()).insertMessage(anyString(), anyString(), anyInt(), anyString(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), anyString(), anyString());
     }
 }

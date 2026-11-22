@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { Bell, ArrowDown, User } from '@element-plus/icons-vue'
+import { Bell, ArrowDown, ArrowRight, User } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { errorMessage } from '@/utils/format'
 
 const router = useRouter()
 const userStore = useUserStore()
+defineProps<{ section?: string }>()
 
 async function logout() {
   try {
@@ -20,6 +22,8 @@ async function logout() {
 
 <template>
   <header class="header">
+    <div v-if="section" class="header__location"><span>学习与成长</span><el-icon><ArrowRight /></el-icon><strong>{{ section }}</strong></div>
+    <ThemeToggle />
     <el-button class="header__notification" text circle title="打开任务中心" @click="router.push('/tasks')">
       <el-icon :size="21"><Bell /></el-icon>
     </el-button>
@@ -41,11 +45,14 @@ async function logout() {
 </template>
 
 <style scoped lang="scss">
-.header { position:absolute; z-index:1; top:16px; right:24px; display:flex; align-items:center; gap:18px; color:#445e90; pointer-events:none; }
+.header { flex:0 0 64px; display:flex; justify-content:flex-end; align-items:center; gap:18px; padding:0 24px; color:var(--ai-text-secondary, #445e90); }
 .header__notification, .header__user { pointer-events:auto; }
-.header__notification { color:#445e90; }
+.header__notification { color:var(--ai-text-secondary, #445e90); }
 .header__user { display:flex; align-items:center; gap:10px; cursor:pointer; outline:none; }
-.header__avatar { background:#3868b2; color:#fff; }
+.header__avatar { background:var(--ai-primary-solid, #3868b2); color:#fff; }
 .header__name { max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-@media(max-width:700px){.header{right:12px}.header__name{display:none}}
+.header__location { display:flex; align-items:center; gap:10px; margin-right:auto; font-size:13px; color:$ai-text-secondary; }
+.header__location strong { color:$ai-text-primary; }
+@media(max-width:460px){.header__location span,.header__location .el-icon{display:none}}
+@media(max-width:700px){.header{padding:0 12px}.header__name{display:none}}
 </style>

@@ -120,12 +120,14 @@ public class JobSearchResultHandler implements TaskResultHandler {
         List<String> warnings = strings(summary.get("warnings"), 20, 64);
         int uniqueCount = summary.get("uniqueCount") instanceof Number number ? number.intValue() : 0;
         boolean sourceFailed = warnings.contains("SEARCH_FAILED");
-        boolean sourcePartial = warnings.contains("SOURCE_PARTIAL");
+        boolean sourcePartial = warnings.contains("SOURCE_PARTIAL")
+                || warnings.contains("SOME_SOURCES_PARTIAL_FAILURE")
+                || warnings.contains("SOME_SOURCES_UNAVAILABLE");
         String outcome;
         if (uniqueCount > 0) {
             outcome = (sourceFailed || sourcePartial) ? "PARTIAL" : "OK";
         } else {
-            outcome = sourceFailed ? "NO_RESULTS_SOURCE_FAILED" : "EMPTY";
+            outcome = (sourceFailed || sourcePartial) ? "NO_RESULTS_SOURCE_FAILED" : "EMPTY";
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("outcome", outcome);

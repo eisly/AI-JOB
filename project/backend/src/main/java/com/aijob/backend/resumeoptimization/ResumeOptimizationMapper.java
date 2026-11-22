@@ -41,13 +41,16 @@ public interface ResumeOptimizationMapper {
             """)
     long diagnosisCount(@Param("userId") String userId, @Param("resumeVersionId") String resumeVersionId);
 
-    @Update("UPDATE resume_diagnosis SET items_json=#{itemsJson},status='READY',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'")
-    int completeDiagnosis(@Param("id") String id, @Param("taskId") String taskId, @Param("itemsJson") String itemsJson);
+    @Update("UPDATE resume_diagnosis SET items_json=#{itemsJson},assessment_json=#{assessmentJson},source_text=#{sourceText},text_layout_version=#{textLayoutVersion},read_order_verified=#{readOrderVerified},status='READY',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'")
+    int completeDiagnosis(@Param("id") String id, @Param("taskId") String taskId, @Param("itemsJson") String itemsJson,
+                          @Param("assessmentJson") String assessmentJson, @Param("sourceText") String sourceText,
+                          @Param("textLayoutVersion") String textLayoutVersion,
+                          @Param("readOrderVerified") boolean readOrderVerified);
 
     @Update("UPDATE resume_diagnosis SET status='FAILED',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'")
     int failDiagnosis(@Param("id") String id, @Param("taskId") String taskId);
 
-    @Update("UPDATE resume_diagnosis SET status='GENERATING',task_id=#{taskId},items_json=NULL,updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='FAILED'")
+    @Update("UPDATE resume_diagnosis SET status='GENERATING',task_id=#{taskId},items_json=NULL,assessment_json=NULL,source_text=NULL,text_layout_version=NULL,read_order_verified=0,updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='FAILED'")
     int retryDiagnosis(@Param("id") String id, @Param("taskId") String taskId);
 
     @Insert("""

@@ -14,12 +14,12 @@ import org.apache.ibatis.annotations.Update;
 public interface ProjectMapper {
 
     @Insert("""
-            INSERT INTO project_recommendation (id,user_id,match_item_id,task_id,profile_version)
-            VALUES (#{id},#{userId},#{matchItemId},#{taskId},#{profileVersion})
+            INSERT INTO project_recommendation (id,user_id,match_item_id,task_id,profile_version,mode)
+            VALUES (#{id},#{userId},#{matchItemId},#{taskId},#{profileVersion},#{mode})
             """)
     int insertRecommendation(@Param("id") String id, @Param("userId") String userId,
                              @Param("matchItemId") String matchItemId, @Param("taskId") String taskId,
-                             @Param("profileVersion") long profileVersion);
+                             @Param("profileVersion") long profileVersion, @Param("mode") String mode);
 
     @Select("SELECT * FROM project_recommendation WHERE id=#{id} AND user_id=#{userId}")
     Map<String, Object> recommendation(@Param("id") String id, @Param("userId") String userId);
@@ -27,27 +27,64 @@ public interface ProjectMapper {
     @Select("SELECT * FROM project_recommendation WHERE id=#{id} AND user_id=#{userId} FOR UPDATE")
     Map<String, Object> lockRecommendation(@Param("id") String id, @Param("userId") String userId);
 
+    @Select("""
+            SELECT * FROM project_recommendation
+            WHERE root_recommendation_id=#{rootId} AND user_id=#{userId}
+            ORDER BY discovery_round
+            """)
+    List<Map<String, Object>> discoveryBatches(@Param("rootId") String rootId, @Param("userId") String userId);
+
+    @Select("""
+            SELECT task_id FROM project_recommendation
+            WHERE previous_batch_id=#{previousId} AND user_id=#{userId} FOR UPDATE
+            """)
+    String continuationTask(@Param("previousId") String previousId, @Param("userId") String userId);
+
+    @Select("SELECT input_snapshot_json,input_versions_json FROM ai_task WHERE id=#{id} AND user_id=#{userId}")
+    Map<String, Object> discoveryInput(@Param("id") String id, @Param("userId") String userId);
+
+    @Update("""
+            UPDATE project_recommendation SET root_recommendation_id=#{rootId},
+              previous_batch_id=#{previousId},discovery_round=#{round}
+            WHERE id=#{id}
+            """)
+    int setDiscoveryBatch(@Param("id") String id, @Param("rootId") String rootId,
+                          @Param("previousId") String previousId, @Param("round") int round);
+
+    @Update("UPDATE project_recommendation SET search_state_json=#{state} WHERE id=#{id}")
+    int saveSearchState(@Param("id") String id, @Param("state") String state);
+
     @Update("UPDATE project_recommendation SET status=#{status},task_id=#{taskId},updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND (task_id=#{taskId} OR status='FAILED')")
     int updateRecommendation(@Param("id") String id, @Param("status") String status, @Param("taskId") String taskId);
 
     @Update("""
             UPDATE project_recommendation SET status=#{status},task_id=#{taskId},items_json=#{itemsJson},
-              updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'
+              source_runs_json=#{sourceRunsJson},updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'
             """)
     int completeRecommendation(@Param("id") String id, @Param("status") String status,
-                               @Param("taskId") String taskId, @Param("itemsJson") String itemsJson);
+                               @Param("taskId") String taskId, @Param("itemsJson") String itemsJson,
+                               @Param("sourceRunsJson") String sourceRunsJson);
+
+    @Update("UPDATE project_recommendation SET mode='REPOSITORY',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id}")
+    int markRepositoryMode(@Param("id") String id);
 
     @Insert("""
             INSERT INTO project_recommendation_item
-              (id,recommendation_id,user_id,title,summary,skill_codes_json,difficulty,estimated_weeks,reason,deliverables_json)
+              (id,recommendation_id,user_id,title,summary,skill_codes_json,difficulty,estimated_weeks,reason,
+               getting_started_json,primary_source_json,alternate_sources_json,deliverables_json)
             VALUES (#{id},#{recommendationId},#{userId},#{title},#{summary},#{skillCodesJson},#{difficulty},
-              #{estimatedWeeks},#{reason},#{deliverablesJson})
+              #{estimatedWeeks},#{reason},#{gettingStartedJson},#{primarySourceJson},#{alternateSourcesJson},
+              #{deliverablesJson})
             """)
     int insertRecommendationItem(@Param("id") String id, @Param("recommendationId") String recommendationId,
                                  @Param("userId") String userId, @Param("title") String title,
                                  @Param("summary") String summary, @Param("skillCodesJson") String skillCodesJson,
                                  @Param("difficulty") String difficulty, @Param("estimatedWeeks") int estimatedWeeks,
-                                 @Param("reason") String reason, @Param("deliverablesJson") String deliverablesJson);
+                                 @Param("reason") String reason, @Param("gettingStartedJson") String gettingStartedJson,
+                                 @Param("primarySourceJson") String primarySourceJson,
+                                 @Param("alternateSourcesJson") String alternateSourcesJson,
+                                 @Param("deliverablesJson") String deliverablesJson);
 
     @Select("SELECT * FROM project_recommendation_item WHERE recommendation_id=#{recommendationId} ORDER BY created_at,id")
     List<Map<String, Object>> recommendationItems(@Param("recommendationId") String recommendationId);
@@ -60,12 +97,15 @@ public interface ProjectMapper {
     Map<String, Object> recommendationItem(@Param("id") String id, @Param("userId") String userId);
 
     @Insert("""
-            INSERT INTO project (id,user_id,recommendation_item_id,task_id,weekly_hours,skill_codes_json)
-            VALUES (#{id},#{userId},#{recommendationItemId},#{taskId},#{weeklyHours},#{skillCodesJson})
+            INSERT INTO project (id,user_id,recommendation_item_id,task_id,weekly_hours,skill_codes_json,
+              primary_source_json)
+            VALUES (#{id},#{userId},#{recommendationItemId},#{taskId},#{weeklyHours},#{skillCodesJson},
+              #{primarySourceJson})
             """)
     int insertProject(@Param("id") String id, @Param("userId") String userId,
                       @Param("recommendationItemId") String recommendationItemId, @Param("taskId") String taskId,
-                      @Param("weeklyHours") int weeklyHours, @Param("skillCodesJson") String skillCodesJson);
+                      @Param("weeklyHours") int weeklyHours, @Param("skillCodesJson") String skillCodesJson,
+                      @Param("primarySourceJson") String primarySourceJson);
 
     @Select("SELECT * FROM project WHERE id=#{id} AND user_id=#{userId}")
     Map<String, Object> project(@Param("id") String id, @Param("userId") String userId);

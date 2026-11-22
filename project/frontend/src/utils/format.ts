@@ -20,6 +20,8 @@ export const taskTypeLabels: Record<string, string> = {
   LEARNING_PLAN: '生成训练计划',
   LEARNING_QUESTION: '准备训练题',
   LEARNING_EVALUATE: '训练评价',
+  LEARNING_PRACTICE_QUESTIONS: '准备整组练习',
+  LEARNING_PRACTICE_EVALUATE: '整组练习评估',
   PROJECT_RECOMMEND: '项目推荐',
   PROJECT_PLAN: '生成项目计划',
   INTERVIEW_TURN: '面试对话生成',
@@ -36,7 +38,8 @@ export const taskStageLabels: Record<string, string> = {
   calling_model: '正在调用模型',
   repairing_output: '正在修正模型输出',
   validating_result: '正在校验结果',
-  using_local_project_rules: '正在生成本地规则方案',
+  using_local_project_rules: '正在基于已选仓库生成规则化计划',
+  using_repository_hints: '正在整理候选仓库',
   search_planning: '正在规划搜索',
   searching_sources: '正在检索岗位来源',
   search_candidates_available: '已获得候选岗位',
@@ -44,6 +47,11 @@ export const taskStageLabels: Record<string, string> = {
   search_normalizing: '正在归一化岗位数据',
   understanding_jd: '正在理解 JD',
   finalizing_result: '正在汇总结果',
+}
+
+export function taskStageText(task: { status?: string; stage?: string | null }): string {
+  if (task.status === 'RUNNING') return taskStageLabels[task.stage || ''] || '处理中'
+  return taskStatusLabels[task.status || ''] || '等待任务状态'
 }
 
 export const commonStatusLabels: Record<string, string> = {
@@ -136,6 +144,13 @@ export const taskOutcomeLabels: Record<string, string> = {
   NO_RESULTS_SOURCE_FAILED: '来源失败，无可用结果',
 }
 
+export function taskErrorSummary(error: { code: string; message: string }) {
+  if (/PROMPT_VERSIONS|\.md.*version|Agent 内部/.test(error.message) || error.code === 'INTERNAL_ERROR') {
+    return '服务处理异常，请稍后重试；若仍失败，请联系维护人员。'
+  }
+  return error.message
+}
+
 export const searchWarningLabels: Record<string, string> = {
   MISSING_SALARY: '薪资未提供',
   MISSING_EDUCATION: '学历要求未提供',
@@ -213,7 +228,24 @@ export function cloneFacts(facts?: ResumeFacts | null): ResumeFacts {
 }
 
 export function errorMessage(reason: unknown) {
-  const base = reason instanceof Error ? reason.message : String(reason)
+  const base = reason instanceof Error
+    ? reason.message
+    : reason && typeof reason === 'object'
+      ? objectMessage(reason)
+      : String(reason ?? '未知错误')
   const detail = errorDetailText(reason)
   return detail && !base.includes(detail) ? `${base}（${detail}）` : base
+}
+
+function objectMessage(reason: object) {
+  const message = (reason as { message?: unknown }).message
+  if (typeof message === 'string' && message) return message
+  const code = (reason as { code?: unknown }).code
+  if (typeof code === 'string' && code) return `请求失败（${code}）`
+  try {
+    const text = JSON.stringify(reason)
+    return text && text !== '{}' ? text : '请求失败，请稍后重试'
+  } catch {
+    return '请求失败，请稍后重试'
+  }
 }

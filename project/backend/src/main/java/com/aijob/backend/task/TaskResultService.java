@@ -91,10 +91,28 @@ public class TaskResultService {
         JsonNode result = json.tree(request.get("result"));
         JsonNode error = json.tree(request.get("error"));
         if ("SUCCEEDED".equals(status)) {
-            if (result == null || result.isNull()) {
-                throw BusinessException.aiSchema("成功回调缺少 result");
+            int version;
+            try {
+                if (result == null || result.isNull()) {
+                    throw BusinessException.aiSchema("成功回调缺少 result");
+                }
+                version = handler.success(task, result);
+            } catch (BusinessException ex) {
+                boolean rejectAsFailure = ("RESUME_DIAGNOSE".equals(operation) || "RESUME_PARSE".equals(operation)
+                        || "RESUME_OCR".equals(operation)) && "AI_SCHEMA_INVALID".equals(ex.getErrorKey());
+                if (!rejectAsFailure) {
+                    throw ex;
+                }
+                // 诊断/解析/OCR 的结果在写库前整体校验：校验失败按业务失败落库（含空事实拒绝），
+                // 不能让回调 500 触发无限重试。
+                JsonNode invalid = json.tree(Map.of("code", ex.getErrorKey(), "message", ex.getMessage(),
+                        "retryable", true));
+                handler.failure(task, invalid);
+                agentEventSync.syncTask(taskId, runId);
+                finish(task, "FAILED", invalid, digest);
+                log.warn("result rejected task={} run={} operation={} reason={}", taskId, runId, operation, ex.getMessage());
+                return response(true, taskId, "FAILED");
             }
-            int version = handler.success(task, result);
             Map<String, Object> reference = new LinkedHashMap<>();
             reference.put("resourceType", task.getResourceType());
             reference.put("resourceId", task.getResourceId());

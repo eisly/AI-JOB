@@ -323,7 +323,6 @@ export interface NextTaskSuggestion {
   title: string
   typeLabel?: string
   stage?: string
-  progress?: number
   meta?: string
   description?: string
   action: NavigationTarget

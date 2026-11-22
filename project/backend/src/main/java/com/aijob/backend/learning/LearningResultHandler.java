@@ -26,15 +26,18 @@ public class LearningResultHandler implements TaskResultHandler {
 
     private final LearningMapper mapper;
     private final LearningService learning;
+    private final PracticeService practice;
     private final EvaluationService evaluations;
     private final AbilityService ability;
     private final ProfileService profiles;
     private final JsonService json;
 
-    public LearningResultHandler(LearningMapper mapper, LearningService learning, EvaluationService evaluations,
-                                 AbilityService ability, ProfileService profiles, JsonService json) {
+    public LearningResultHandler(LearningMapper mapper, LearningService learning, PracticeService practice,
+                                 EvaluationService evaluations, AbilityService ability, ProfileService profiles,
+                                 JsonService json) {
         this.mapper = mapper;
         this.learning = learning;
+        this.practice = practice;
         this.evaluations = evaluations;
         this.ability = ability;
         this.profiles = profiles;
@@ -43,7 +46,8 @@ public class LearningResultHandler implements TaskResultHandler {
 
     @Override
     public Set<String> operations() {
-        return Set.of("LEARNING_PLAN", "LEARNING_QUESTION", "LEARNING_EVALUATE");
+        return Set.of("LEARNING_PLAN", "LEARNING_QUESTION", "LEARNING_EVALUATE",
+                "LEARNING_PRACTICE_QUESTIONS", "LEARNING_PRACTICE_EVALUATE");
     }
 
     @Override
@@ -52,6 +56,8 @@ public class LearningResultHandler implements TaskResultHandler {
             case "LEARNING_PLAN" -> plan(task, result);
             case "LEARNING_QUESTION" -> question(task, result);
             case "LEARNING_EVALUATE" -> evaluate(task, result);
+            case "LEARNING_PRACTICE_QUESTIONS" -> practice.applyQuestions(task, result);
+            case "LEARNING_PRACTICE_EVALUATE" -> practice.applyEvaluation(task, result);
             default -> throw BusinessException.aiSchema("不支持的训练任务");
         };
     }
@@ -75,6 +81,18 @@ public class LearningResultHandler implements TaskResultHandler {
                     mapper.updateSessionStatus(String.valueOf(answer.get("session_id")), "ACTIVE");
                 }
             }
+            case "LEARNING_PRACTICE_QUESTIONS" -> {
+                if (mapper.session(task.getResourceId(), task.getUserId()) != null) {
+                    mapper.updateSessionStatus(task.getResourceId(), "FAILED");
+                }
+            }
+            // 整组评估失败：保留 EVALUATING 状态与已保存答案，用户可通过任务中心按原参数重试，
+            // 避免重新交卷时命中 (session_id, question_id) 唯一约束
+            case "LEARNING_PRACTICE_EVALUATE" -> {
+                if (mapper.session(task.getResourceId(), task.getUserId()) != null) {
+                    mapper.updateSessionStatus(task.getResourceId(), "EVALUATING");
+                }
+            }
             default -> throw BusinessException.aiSchema("不支持的训练任务");
         }
     }
@@ -91,6 +109,12 @@ public class LearningResultHandler implements TaskResultHandler {
                 Map<String, Object> answer = mapper.answer(original.getResourceId(), original.getUserId());
                 mapper.updateAnswerTask(original.getResourceId(), "EVALUATING", newTaskId);
                 mapper.answerSubmitted(String.valueOf(answer.get("session_id")), original.getResourceId());
+            }
+            case "LEARNING_PRACTICE_QUESTIONS" -> mapper.updateSessionStatus(original.getResourceId(), "PREPARING");
+            case "LEARNING_PRACTICE_EVALUATE" -> {
+                if (mapper.practiceEvaluationRetried(original.getResourceId(), newTaskId) == 0) {
+                    throw BusinessException.conflict("练习评估状态已变化", "INVALID_STATE");
+                }
             }
             default -> throw BusinessException.conflict("不支持的任务重试", "INVALID_STATE");
         }

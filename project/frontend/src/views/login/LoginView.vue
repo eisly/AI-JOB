@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -9,10 +10,10 @@ import { useUserStore } from '@/stores/user'
 import { errorMessage } from '@/utils/format'
 
 const features = [
-  { icon: Aim, color: '#DBEAFE', title: '智能匹配岗位', desc: '基于简历与能力画像，精准推荐目标岗位' },
-  { icon: Edit, color: '#EDE9FE', title: '定向提升能力', desc: '提供针对性的学习与训练建议' },
-  { icon: TrendCharts, color: '#D1FAE5', title: '实战模拟练习', desc: '通过项目实战与模拟面试提升实战能力' },
-  { icon: School, color: '#FEF3C7', title: '跟踪投递进展', desc: '管理投递记录，跟踪求职全流程' },
+  { icon: Aim, color: 'var(--ai-primary-light, #DBEAFE)', title: '智能匹配岗位', desc: '基于简历与能力画像，精准推荐目标岗位' },
+  { icon: Edit, color: 'var(--ai-accent-alt-bg, #EDE9FE)', title: '定向提升能力', desc: '提供针对性的学习与训练建议' },
+  { icon: TrendCharts, color: 'var(--ai-success-bg, #D1FAE5)', title: '实战模拟练习', desc: '通过项目实战与模拟面试提升实战能力' },
+  { icon: School, color: 'var(--ai-warning-bg, #FEF3C7)', title: '跟踪投递进展', desc: '管理投递记录，跟踪求职全流程' },
 ]
 
 const router = useRouter()
@@ -82,6 +83,7 @@ async function handleRegister() {
 
 <template>
   <div class="login">
+    <ThemeToggle class="auth-theme-toggle" />
     <div class="login__brand">
       <h1 class="login__brand-title">AI-JOB</h1>
       <p class="login__brand-slogan">AI 一站式智能求职平台</p>
@@ -96,12 +98,12 @@ async function handleRegister() {
     <div class="login__form-side">
       <div class="login__card">
         <h2 class="login__title">登录</h2>
-        <p class="login__subtitle">访问令牌仅保存在当前页面内存中。</p>
+        <p class="login__subtitle">登录后继续管理简历、训练和求职进度。</p>
         <el-alert v-if="sessionNotice" :title="sessionNotice" type="warning" show-icon :closable="true" class="login__error" />
         <el-alert v-if="loginError" :title="loginError" type="error" show-icon :closable="false" class="login__error" />
         <el-form ref="formRef" :model="form" :rules="rules" size="large" class="login__form" @submit.prevent="handleLogin">
-          <el-form-item prop="email"><el-input v-model="form.email" placeholder="请输入邮箱地址" :prefix-icon="Message" autocomplete="email" /></el-form-item>
-          <el-form-item prop="password"><el-input v-model="form.password" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password autocomplete="current-password" @keyup.enter="handleLogin" /></el-form-item>
+          <el-form-item prop="email"><el-input v-model="form.email" aria-label="邮箱" placeholder="请输入邮箱地址" :prefix-icon="Message" autocomplete="email" /></el-form-item>
+          <el-form-item prop="password"><el-input v-model="form.password" aria-label="密码" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password autocomplete="current-password" @keyup.enter="handleLogin" /></el-form-item>
           <el-button type="primary" native-type="submit" class="login__submit" :loading="loading">登录</el-button>
         </el-form>
         <router-link to="/forgot-password">忘记密码？</router-link>
@@ -123,7 +125,7 @@ async function handleRegister() {
 
 <style scoped lang="scss">
 .login { display:flex; min-height:100vh; width:100%; }
-.login__brand { width:55%; background:linear-gradient(135deg,#{$ai-primary-light} 0%,#DBEAFE 100%); display:flex; flex-direction:column; justify-content:center; padding:48px 8%; }
+.login__brand { width:55%; background:linear-gradient(135deg,#{$ai-primary-light} 0%,var(--ai-primary-light, #DBEAFE) 100%); display:flex; flex-direction:column; justify-content:center; padding:48px 8%; }
 .login__brand-title { font-size:42px; font-weight:800; color:$ai-primary; margin-bottom:12px; }
 .login__brand-slogan { font-size:24px; font-weight:700; color:$ai-text-primary; margin-bottom:8px; }
 .login__brand-desc { font-size:15px; color:$ai-text-secondary; margin-bottom:40px; line-height:1.6; }

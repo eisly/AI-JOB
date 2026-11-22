@@ -17,7 +17,7 @@ public interface AuthService {
 
     UserVO register(RegisterRequest request);
 
-    LoginOutcome login(LoginRequest request, String clientIp);
+    LoginOutcome login(LoginRequest request);
 
     LoginOutcome refresh(String refreshToken, String csrfToken);
 

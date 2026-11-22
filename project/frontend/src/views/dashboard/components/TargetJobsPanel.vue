@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WaitStatus from '@/components/WaitStatus.vue'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Aim, ArrowRight } from '@element-plus/icons-vue'
@@ -69,11 +70,9 @@ function go(target: NavigationTarget | null): void {
         <button v-if="jobMatchRoute" type="button" class="panel__link" @click="go(jobMatchRoute)">重新匹配</button>
       </div>
 
-      <div v-if="model?.phase === 'GENERATING'" class="job-state">
-        <strong>正在为你匹配岗位</strong>
-        <p>可进入岗位匹配查看进度，完成后刷新工作台查看结果。</p>
-        <button v-if="jobMatchRoute" type="button" class="panel__button" @click="go(jobMatchRoute)">进入岗位匹配</button>
-      </div>
+      <WaitStatus v-if="model?.phase === 'GENERATING'" title="正在匹配岗位" description="可进入岗位匹配查看任务状态。">
+        <template #actions><el-button v-if="jobMatchRoute" size="small" @click="go(jobMatchRoute)">进入岗位匹配</el-button></template>
+      </WaitStatus>
 
       <div v-else-if="model?.phase === 'FAILED'" class="job-state">
         <strong>岗位匹配未成功</strong>
@@ -104,26 +103,26 @@ function go(target: NavigationTarget | null): void {
 </template>
 
 <style scoped lang="scss">
-.panel { background: #fff; border: 1px solid #e8f0fa; border-radius: 10px; padding: 16px 18px 12px; }
+.panel { background: var(--ai-bg-card, #fff); border: 1px solid var(--ai-border-light, #e8f0fa); border-radius: 10px; padding: 16px 18px 12px; }
 .panel__heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
 .panel h2 { font-size: 18px; display: flex; align-items: center; gap: 10px; line-height: 1.4; }
-.panel h2 > .el-icon { color: #0861fc; font-size: 23px; }
-.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: #0662ff; font-size: 14px; cursor: pointer; }
-.job-panel__refresh { height: 2px; margin-bottom: 8px; border-radius: 2px; background: linear-gradient(90deg, transparent, #0c5cf5, transparent); background-size: 50% 100%; animation: job-refresh 1.1s linear infinite; }
+.panel h2 > .el-icon { color: var(--ai-primary, #0861fc); font-size: 23px; }
+.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: var(--ai-primary, #0662ff); font-size: 14px; cursor: pointer; }
+.job-panel__refresh { height: 2px; margin-bottom: 8px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--ai-primary-solid, #0c5cf5), transparent); background-size: 50% 100%; animation: job-refresh 1.1s linear infinite; }
 @keyframes job-refresh { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
-.job-panel__stale { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding: 8px 12px; border-radius: 8px; background: #fff8ef; border: 1px solid #ffe2c2; color: #9a5b09; font-size: 13px; }
+.job-panel__stale { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; padding: 8px 12px; border-radius: 8px; background: var(--ai-warning-bg, #fff8ef); border: 1px solid var(--ai-warning-border, #ffe2c2); color: var(--ai-warning, #9a5b09); font-size: 13px; }
 .job-list { display: flex; flex-direction: column; gap: 10px; }
-.job-card { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; padding: 12px 14px; border: 1px solid #e5eef9; border-radius: 8px; background: #fff; text-align: left; cursor: pointer; }
-.job-card:hover { border-color: #b9d4fb; box-shadow: 0 4px 12px rgba(12, 92, 245, 0.08); }
-.job-card__title { color: #0b1746; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.job-card__company { color: #7184a6; font-size: 13px; }
+.job-card { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; padding: 12px 14px; border: 1px solid var(--ai-border-light, #e5eef9); border-radius: 8px; background: var(--ai-bg-card, #fff); text-align: left; cursor: pointer; }
+.job-card:hover { border-color: var(--ai-accent-border, #b9d4fb); box-shadow: 0 4px 12px rgba(12, 92, 245, 0.08); }
+.job-card__title { color: var(--ai-text-primary, #0b1746); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.job-card__company { color: var(--ai-text-secondary, #7184a6); font-size: 13px; }
 .job-card__meta { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.job-card__score { color: #0c5cf5; font-size: 13px; font-weight: 600; }
-.job-card__tag { padding: 1px 7px; border-radius: 999px; background: #eef5ff; color: #4d6a9c; font-size: 12px; }
-.job-card__source { color: #8495b1; font-size: 12px; }
-.job-card__gaps { color: #8495b1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.job-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 150px; justify-content: center; padding: 14px; border: 1px solid #e5eef9; border-radius: 9px; color: #7184a6; }
-.job-state strong { color: #33456f; font-size: 16px; }
-.panel__button { border: 0; cursor: pointer; padding: 9px 16px; border-radius: 7px; background: #0c5cf5; color: #fff; font-weight: 600; }
-.panel__button:hover { background: #084ed5; }
+.job-card__score { color: var(--ai-primary, #0c5cf5); font-size: 13px; font-weight: 600; }
+.job-card__tag { padding: 1px 7px; border-radius: 999px; background: var(--ai-bg-light, #eef5ff); color: var(--ai-text-secondary, #4d6a9c); font-size: 12px; }
+.job-card__source { color: var(--ai-text-tertiary, #8495b1); font-size: 12px; }
+.job-card__gaps { color: var(--ai-text-tertiary, #8495b1); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.job-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 150px; justify-content: center; padding: 14px; border: 1px solid var(--ai-border-light, #e5eef9); border-radius: 9px; color: var(--ai-text-secondary, #7184a6); }
+.job-state strong { color: var(--ai-text-secondary, #33456f); font-size: 16px; }
+.panel__button { border: 0; cursor: pointer; padding: 9px 16px; border-radius: 7px; background: var(--ai-primary-solid, #0c5cf5); color: #fff; font-weight: 600; }
+.panel__button:hover { background: var(--ai-primary-solid-hover, #084ed5); }
 </style>

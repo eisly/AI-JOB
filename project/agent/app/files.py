@@ -88,6 +88,16 @@ class FileFetcher:
         self._check_text(text)
         return ExtractedDocument(text=text, text_hash=self._hash(text), source="download")
 
+    async def download_bytes(self, document: DocumentRef) -> bytes:
+        """下载原始文件字节，供 OCR 等需要访问原始文件的流程使用。"""
+        self.validate(document)
+        if document.download_url is None:
+            raise validation_error("document 必须提供 downloadUrl 才能下载原始文件")
+        url = self._validate_url(document.download_url)
+        data = await self._download(url)
+        self._check_size(len(data))
+        return data
+
     def _check_size(self, size: int) -> None:
         if size > self._settings.max_document_bytes:
             raise too_large(f"简历文件不得超过 {self._settings.max_document_bytes} 字节")
@@ -106,14 +116,18 @@ class FileFetcher:
 
     def _validate_url(self, url: str) -> str:
         parsed = urlsplit(url)
-        if parsed.scheme.lower() not in self._settings.file_schemes:
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or "").lower()
+        # 本地回环地址允许 http：Java 后端在本机通过签名 URL 向 Agent 提供简历原件。
+        loopback = hostname in {"127.0.0.1", "localhost", "::1"}
+        allowed_schemes = self._settings.file_schemes | ({"http"} if loopback else set())
+        if scheme not in allowed_schemes:
             raise validation_error("文件 URL 协议不在白名单内")
         if parsed.username or parsed.password:
             raise validation_error("文件 URL 不得包含用户凭据")
         if not parsed.hostname:
             raise validation_error("文件 URL 缺少主机名")
         netloc = parsed.netloc.lower()
-        hostname = parsed.hostname.lower()
         allowed = self._settings.file_hosts
         if netloc not in allowed and hostname not in allowed:
             raise validation_error("文件 URL 主机不在白名单内")

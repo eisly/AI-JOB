@@ -9,8 +9,10 @@ import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
 import { errorMessage, formatDate } from '@/utils/format'
+import { useUserStore } from '@/stores/user'
 
-const suggestionTaskKey = 'ai-job-growth-suggestion-task'
+const suggestionTaskKey = `ai-job-growth-suggestion-task:${useUserStore().userInfo?.id || 'anon'}`
+let observedRunningTask = false
 const growth = ref<GrowthVO | null>(null)
 const growthLoading = ref(false)
 const growthError = ref<unknown>(null)
@@ -93,12 +95,17 @@ const {
   loading: suggestionTaskLoading,
   error: suggestionTaskError,
   reasoningText,
-  restart: restartSuggestionTask,
+  refresh: refreshSuggestionTask,
+  refreshing: suggestionTaskRefreshing,
 } = useTask(suggestionTaskId, {
+  onTask: task => {
+    if (!isTerminalTask(task.status)) observedRunningTask = true
+  },
   onDone: async () => {
     clearStoredTask()
     await loadGrowth()
-    ElMessage.success('成长建议已根据权威摘要更新')
+    if (observedRunningTask) ElMessage.success('成长建议已更新')
+    observedRunningTask = false
   },
 })
 
@@ -325,10 +332,10 @@ onMounted(() => {
             </div>
             <dl class="skill-meta">
               <div><dt>有效样本数</dt><dd>{{ skill.sampleCount }}</dd></div>
-              <div><dt>证据状态</dt><dd>{{ skill.evidenceStatus }}</dd></div>
-              <div><dt>计算公式版本</dt><dd>{{ skill.formulaVersion }}</dd></div>
+              <div><dt>证据状态</dt><dd>{{ evidenceStatusLabels[skill.evidenceStatus] }}</dd></div>
               <div><dt>更新时间</dt><dd>{{ formatDate(skill.updatedAt) }}</dd></div>
             </dl>
+            <details><summary>评分依据详情</summary><p>计算公式版本：{{ skill.formulaVersion }}</p></details>
           </article>
         </div>
       </AsyncState>
@@ -338,11 +345,11 @@ onMounted(() => {
       <div class="panel__heading">
         <div>
           <h2>成长时间线</h2>
-          <p class="section-note">{{ usesFilteredTimeline ? '使用当前筛选证据的本页结果' : '使用成长摘要中的最近证据' }}，仅绘制真实创建时间、VALID 且非 null 的评分点。</p>
+          <p class="section-note">{{ usesFilteredTimeline ? '展示当前筛选的本页记录' : '展示最近的成长记录' }}，仅包含有有效评分的训练与面试。</p>
         </div>
         <el-button :loading="timelineLoading" @click="retryTimeline">刷新时间线</el-button>
       </div>
-      <AsyncState :loading="timelineLoading" :error="timelineError" :empty="!validTimelineEvidence.length" empty-text="有效评分证据不足" empty-description="未评分、已撤销或无有效时间的证据不会按 0 分绘制。可调整筛选或完成新的有效评价。" @retry="retryTimeline">
+      <AsyncState :loading="timelineLoading" :retain="validTimelineEvidence.length > 0" :error="timelineError" :empty="!validTimelineEvidence.length" empty-text="有效评分证据不足" empty-description="未评分、已撤销或无有效时间的证据不会按 0 分绘制。可调整筛选或完成新的有效评价。" @retry="retryTimeline">
         <div class="timeline-legend">
           <span v-for="series in timelineModel.series" :key="series.skillCode"><i :style="{ backgroundColor: series.color }" />{{ series.skillCode }}（{{ series.points.length }} 点）</span>
         </div>
@@ -379,21 +386,16 @@ onMounted(() => {
       <div class="panel__heading">
         <div>
           <h2>下一步成长建议</h2>
-          <p class="section-note">建议任务使用当前摘要画像版本，完成后重新读取成长摘要，不直接修改能力分。</p>
+          <p class="section-note">根据当前求职画像与训练表现给出建议；完成新的训练后，能力评分才会更新。</p>
         </div>
         <el-button type="primary" :loading="suggestionSubmitting" :disabled="!growth || suggestionBusy" @click="generateSuggestions">生成成长建议</el-button>
       </div>
       <div v-if="suggestionTaskId" class="task-block">
-        <el-skeleton v-if="suggestionTaskLoading && !suggestionTask" :rows="2" animated />
-        <TaskStatus v-else :task="suggestionTask" :reasoning="reasoningText">
+        <TaskStatus :task="suggestionTask" :reasoning="reasoningText" :loading="suggestionTaskLoading" :tracking-error="suggestionTaskError" :refreshing="suggestionTaskRefreshing" @refresh="refreshSuggestionTask">
           <template #actions>
             <el-button v-if="suggestionTask?.status === 'FAILED'" size="small" :loading="suggestionSubmitting" @click="retrySuggestionTask">按原参数重试</el-button>
           </template>
         </TaskStatus>
-        <el-alert v-if="suggestionTaskError" type="warning" :closable="false" show-icon>
-          <template #title>任务事件连接异常，业务任务未被取消。{{ errorMessage(suggestionTaskError) }}</template>
-          <el-button size="small" @click="restartSuggestionTask">恢复任务状态</el-button>
-        </el-alert>
       </div>
       <el-alert v-if="suggestionSubmitError" class="inline-alert" type="error" :closable="false" show-icon>
         <template #title>{{ errorMessage(suggestionSubmitError) }}</template>
@@ -456,7 +458,7 @@ onMounted(() => {
         <el-button :disabled="!evidenceFilters.skillCode && !evidenceFilters.sourceType" @click="resetEvidenceFilters">清除筛选</el-button>
         <span v-if="usesFilteredTimeline" class="filter-hint">时间线正在使用筛选结果本页数据</span>
       </div>
-      <AsyncState :loading="evidenceLoading" :error="evidenceError" :empty="!evidencePage?.records.length" empty-text="当前筛选条件下暂无证据" empty-description="可清除筛选或调整分页后重试。" @retry="loadEvidence">
+      <AsyncState :loading="evidenceLoading" :retain="!!evidencePage?.records.length" :error="evidenceError" :empty="!evidencePage?.records.length" empty-text="当前筛选条件下暂无证据" empty-description="可清除筛选或调整分页后重试。" @retry="loadEvidence">
         <div class="evidence-list evidence-list--query">
           <article v-for="evidence in evidencePage?.records || []" :key="evidence.id" class="evidence-row">
             <div class="evidence-row__title">
@@ -467,10 +469,10 @@ onMounted(() => {
             <div class="evidence-metrics">
               <div><span>分数</span><strong :class="{ 'null-score': evidence.score === null }">{{ displayScore(evidence.score) }}</strong></div>
               <div><span>模型自报置信度（非准确率）</span><strong>{{ formatConfidence(evidence.confidence) }}</strong></div>
-              <div><span>状态 / 量表</span><strong>{{ evidence.status }} / {{ evidence.rubricVersion || '—' }}</strong></div>
+              <div><span>状态 / 量表</span><strong>{{ evidence.status === 'VALID' ? '有效' : '已撤销' }} / {{ evidence.rubricVersion || '—' }}</strong></div>
               <div><span>创建时间</span><strong>{{ formatDate(evidence.createdAt) }}</strong></div>
             </div>
-            <small>证据 ID：{{ evidence.id }} · 来源 ID：{{ evidence.sourceId }}</small>
+            <details><summary>查看记录编号</summary><small>证据 ID：{{ evidence.id }} · 来源 ID：{{ evidence.sourceId }}</small></details>
           </article>
         </div>
         <el-pagination
@@ -494,9 +496,9 @@ onMounted(() => {
 .section-note { margin: 6px 0 0; color: $ai-text-secondary; line-height: 1.6; }
 .refresh-alert, .inline-alert { margin-bottom: 14px; }
 .skills-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.skill-card { min-width: 0; padding: 16px; border: 1px solid #e1eaf7; border-radius: 11px; background: linear-gradient(150deg, #fff, #f8fbff); }
+.skill-card { min-width: 0; padding: 16px; border: 1px solid var(--ai-border-light, #e1eaf7); border-radius: 11px; background: linear-gradient(150deg, var(--ai-bg-card, #fff), var(--ai-bg-light, #f8fbff)); }
 .skill-card__heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.skill-card h3 { margin: 0; color: #101d4b; font-size: 18px; overflow-wrap: anywhere; }
+.skill-card h3 { margin: 0; color: var(--ai-text-primary, #101d4b); font-size: 18px; overflow-wrap: anywhere; }
 .skill-score { display: flex; align-items: baseline; gap: 7px; min-height: 61px; margin: 15px 0; }
 .skill-score strong { color: $ai-primary; font-size: 36px; line-height: 1.2; }
 .skill-score span { color: $ai-text-secondary; }
@@ -510,26 +512,26 @@ onMounted(() => {
 .timeline-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 10px; color: $ai-text-secondary; font-size: 12px; }
 .timeline-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .timeline-legend i { width: 9px; height: 9px; border-radius: 50%; }
-.timeline-scroll { overflow-x: auto; border: 1px solid #e6edf8; border-radius: 10px; background: #fbfdff; }
+.timeline-scroll { overflow-x: auto; border: 1px solid var(--ai-border-light, #e6edf8); border-radius: 10px; background: var(--ai-bg-card, #fbfdff); }
 .growth-timeline { display: block; width: 100%; min-width: 680px; height: auto; }
-.grid-line { stroke: #e8eef7; stroke-width: 1; }
-.axis-line, .tick-line { stroke: #9baac2; stroke-width: 1.2; }
-.axis-label { fill: #71809a; font-size: 12px; }
+.grid-line { stroke: var(--ai-border-light, #e8eef7); stroke-width: 1; }
+.axis-line, .tick-line { stroke: var(--ai-accent-border, #9baac2); stroke-width: 1.2; }
+.axis-label { fill: var(--ai-text-secondary, #71809a); font-size: 12px; }
 .axis-label--time { font-size: 11px; }
-.axis-title { fill: #536581; font-size: 12px; font-weight: 600; }
+.axis-title { fill: var(--ai-text-secondary, #536581); font-size: 12px; font-weight: 600; }
 .score-line { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.score-point { stroke: #fff; stroke-width: 2; }
+.score-point { stroke: var(--ai-bg-card, #fff); stroke-width: 2; }
 .point-score { font-size: 11px; font-weight: 700; }
 .timeline-caption { margin: 10px 0 0; color: $ai-text-secondary; font-size: 12px; line-height: 1.6; }
 .task-block { display: grid; gap: 10px; margin-bottom: 14px; }
 .suggestion-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .suggestion-list li { display: flex; align-items: flex-start; gap: 12px; padding: 13px; border-radius: 9px; background: $ai-bg-page; }
-.suggestion-list li > span { display: grid; flex: 0 0 26px; height: 26px; place-items: center; border-radius: 50%; background: $ai-primary; color: #fff; font-size: 12px; font-weight: 700; }
+.suggestion-list li > span { display: grid; flex: 0 0 26px; height: 26px; place-items: center; border-radius: 50%; background: var(--ai-primary-solid, $ai-primary); color: #fff; font-size: 12px; font-weight: 700; }
 .suggestion-list p { margin: 2px 0 0; line-height: 1.7; }
 .evidence-list { display: grid; gap: 10px; }
-.evidence-row { min-width: 0; padding: 14px; border: 1px solid #e5edf8; border-radius: 9px; }
+.evidence-row { min-width: 0; padding: 14px; border: 1px solid var(--ai-border-light, #e5edf8); border-radius: 9px; }
 .evidence-row__title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.evidence-row__title > strong { margin-right: 3px; color: #101d4b; font-size: 16px; }
+.evidence-row__title > strong { margin-right: 3px; color: var(--ai-text-primary, #101d4b); font-size: 16px; }
 .evidence-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .evidence-metrics > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .evidence-metrics span { color: $ai-text-secondary; font-size: 12px; line-height: 1.45; }

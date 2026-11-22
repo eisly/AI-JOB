@@ -131,6 +131,11 @@ public class BusinessException extends RuntimeException {
         return new BusinessException(415, 41501, "仅支持 PDF 或 DOCX 文件", "UNSUPPORTED_FILE_TYPE", false, null);
     }
 
+    /** 415 UNSUPPORTED_FILE_TYPE，用于语音录音容器不在允许范围或与声明 MIME 不一致。 */
+    public static BusinessException unsupportedAudioType() {
+        return new BusinessException(415, 41501, "仅支持 WebM、OGG 或 M4A 录音", "UNSUPPORTED_FILE_TYPE", false, null);
+    }
+
     public static BusinessException eventCursorExpired() {
         return new BusinessException(410, 41001, "事件游标已过期", "EVENT_CURSOR_EXPIRED", false, null);
     }
@@ -141,6 +146,16 @@ public class BusinessException extends RuntimeException {
 
     public static BusinessException dependencyUnavailable(String message) {
         return new BusinessException(503, 50301, message, "DEPENDENCY_UNAVAILABLE", true, null);
+    }
+
+    /** 503 DEPENDENCY_UNAVAILABLE，details 可携带 reason=TIMEOUT（不新增 504 错误码） */
+    public static BusinessException dependencyUnavailable(String message, Map<String, Object> details) {
+        return new BusinessException(503, 50301, message, "DEPENDENCY_UNAVAILABLE", true, details);
+    }
+
+    /** 429 RATE_LIMITED，携带 Retry-After 秒数 */
+    public static BusinessException rateLimited(long retryAfterSeconds) {
+        return new BusinessException(ApiErrorCode.RATE_LIMITED, "请求过于频繁，请稍后再试", retryAfterSeconds);
     }
 
     public int getHttpStatus() {

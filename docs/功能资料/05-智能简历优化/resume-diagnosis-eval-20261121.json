@@ -1,0 +1,522 @@
+{
+  "generatedAt": "2026-11-21",
+  "model": "deepseek-v4-pro",
+  "samples": [
+    {
+      "key": "backend_intern",
+      "direction": "Java 后端实习",
+      "noise": "技能行的连续空格",
+      "parallelTimeline": "项目 2024.09-2025.06 与实习 2025.03-2025.09 正常重叠",
+      "after": {
+        "calls": 1,
+        "attempts": 1,
+        "latencyMs": 22766,
+        "promptVersion": "resume-diagnose-v3",
+        "itemCount": 5,
+        "importantCount": 2,
+        "totalScore": 64,
+        "ruleVersion": "resume-quality-v2",
+        "quotesAllInText": true,
+        "impactCoverage": 1.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 1.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": false,
+        "strengthCount": 3,
+        "strengthEvidenceCoverage": 1.0,
+        "coveredSections": [
+          "实习经历",
+          "技能",
+          "项目经历"
+        ],
+        "crossSectionStrengths": 3,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "项目经历缺少个人贡献与问题解决细节",
+            "issue": "项目经历仅描述技术动作和结果，未说明个人具体职责、解决的问题及方案选择过程。",
+            "impact": "招聘方无法判断候选人的实际贡献深度和问题解决能力，项目经历说服力不足。",
+            "hasExample": true,
+            "pendingVerification": [
+              "订单与支付回调模块的具体功能范围",
+              "Redis 缓存策略细节",
+              "MySQL 索引优化的具体字段"
+            ]
+          },
+          {
+            "priority": "IMPORTANT",
+            "title": "实习经历缺少个人贡献与项目背景",
+            "issue": "实习经历仅列出技术栈和结果，未说明权限系统改造的背景、个人承担的具体任务及与团队的分工。",
+            "impact": "招聘方难以评估候选人在实习中的实际贡献和技术深度，实习经历价值被低估。",
+            "hasExample": true,
+            "pendingVerification": [
+              "权限系统改造的整体规模",
+              "个人负责的具体模块",
+              "缺陷率下降的统计口径"
+            ]
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "技能描述缺乏具体程度和关联证据",
+            "issue": "技能仅列出名称，未说明熟练程度或与项目/实习的对应关系。",
+            "impact": "招聘方无法快速判断候选人的技术栈深度和实际应用能力。",
+            "hasExample": true,
+            "pendingVerification": [
+              "各项技能的实际熟练程度",
+              "设计模式的具体应用实例"
+            ]
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "教育背景缺少关键课程或学术表现",
+            "issue": "教育背景仅列出学校、专业和时间，未提供与岗位相关的课程、成绩或学术活动。",
+            "impact": "教育背景信息单薄，无法为技能和经历提供学术支撑。",
+            "hasExample": true,
+            "pendingVerification": [
+              "GPA 或排名",
+              "相关课程成绩"
+            ]
+          },
+          {
+            "priority": "NOTICE",
+            "title": "竞赛荣誉缺少具体信息",
+            "issue": "竞赛荣誉仅列出奖项名称，未说明竞赛规模、参赛人数、个人角色或获奖比例。",
+            "impact": "竞赛荣誉对简历的加分作用有限。",
+            "hasExample": true,
+            "pendingVerification": [
+              "竞赛参赛人数",
+              "个人角色",
+              "获奖比例"
+            ]
+          }
+        ],
+        "strengthSummaries": [
+          {
+            "title": "项目经历体现性能优化能力",
+            "approach": "通过 MySQL 索引优化降低查询耗时，并使用 Redis 缓存热点商品。",
+            "contribution": "独立负责订单与支付回调模块，并实施性能优化。",
+            "result": "商品列表查询耗时从 800ms 降至 120ms。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "实习经历体现测试与质量意识",
+            "approach": "在权限系统改造中编写单元测试，保障代码质量。",
+            "contribution": "参与权限系统改造，编写 60 个单元测试。",
+            "result": "上线后缺陷率下降 30%。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "技术栈与岗位需求匹配度高",
+            "approach": "在项目中使用 Redis 缓存，在实习中使用 Spring Security 实现 RBAC。",
+            "contribution": "独立负责项目模块，参与实习改造。",
+            "result": "原文未给出可核实结果",
+            "hasAdditionalQuotes": true
+          }
+        ],
+        "sectionCoverage": "3/4",
+        "stage_count": 3
+      },
+      "before": {
+        "calls": 1,
+        "attempts": 1,
+        "latencyMs": 6917,
+        "promptVersion": "resume-diagnose-v2",
+        "itemCount": 5,
+        "importantCount": 1,
+        "totalScore": null,
+        "ruleVersion": null,
+        "quotesAllInText": true,
+        "impactCoverage": 0.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 0.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": true,
+        "strengthCount": 0,
+        "strengthEvidenceCoverage": 0.0,
+        "coveredSections": [],
+        "crossSectionStrengths": 0,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "技能描述缺乏具体证据",
+            "issue": "技能部分仅列出技术栈，未说明掌握程度或应用场景，且部分技能在项目经历中未体现。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "项目经历缺少个人贡献细节",
+            "issue": "项目描述仅说明负责模块和结果，未说明具体职责、技术难点及解决过程。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "实习经历缺乏量化成果细节",
+            "issue": "实习描述提到缺陷率下降30%，但未说明缺陷率的定义、统计范围或对比基线。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "NOTICE",
+            "title": "教育背景时间线存在重叠",
+            "issue": "教育背景显示本科在读时间为2023.09-2027.06，但实习经历为2025.03-2025.09，两者时间重叠。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "NOTICE",
+            "title": "竞赛荣誉缺少具体信息",
+            "issue": "竞赛荣誉仅列出奖项名称，未说明竞赛级别、参赛规模或个人角色。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          }
+        ],
+        "strengthSummaries": [],
+        "parseError": null
+      }
+    },
+    {
+      "key": "frontend_campus",
+      "direction": "前端校招",
+      "noise": "技能行的分号分隔",
+      "parallelTimeline": "项目 2025.01-2025.08 与实习 2025.06-2025.12 正常重叠",
+      "after": {
+        "calls": 1,
+        "attempts": 1,
+        "latencyMs": 21140,
+        "promptVersion": "resume-diagnose-v3",
+        "itemCount": 5,
+        "importantCount": 2,
+        "totalScore": 66,
+        "ruleVersion": "resume-quality-v2",
+        "quotesAllInText": true,
+        "impactCoverage": 1.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 1.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": false,
+        "strengthCount": 3,
+        "strengthEvidenceCoverage": 1.0,
+        "coveredSections": [
+          "实习经历",
+          "开源贡献",
+          "技能",
+          "项目经历"
+        ],
+        "crossSectionStrengths": 2,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "项目经历缺少个人贡献与问题背景",
+            "issue": "项目经历仅描述封装组件和性能优化结果，未说明项目目标、个人职责边界、解决的问题及技术难点。",
+            "impact": "招聘方难以评估候选人的实际贡献和技术深度，可能认为只是执行性工作。",
+            "hasExample": true,
+            "pendingVerification": [
+              "项目整体目标",
+              "个人在团队中的角色",
+              "性能瓶颈的具体原因"
+            ]
+          },
+          {
+            "priority": "IMPORTANT",
+            "title": "实习经历缺少具体职责与成果细节",
+            "issue": "实习经历仅提及重构和组件沉淀，未说明重构原因、个人具体职责、技术方案及如何衡量开发周期缩短。",
+            "impact": "招聘方难以评估候选人的工程能力和业务理解，可能认为只是简单组件抽取。",
+            "hasExample": true,
+            "pendingVerification": [
+              "重构前的问题",
+              "个人具体任务",
+              "开发周期缩短的统计方法"
+            ]
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "开源贡献缺少具体内容和影响",
+            "issue": "开源贡献仅说明修复 SSR 兼容问题且 PR 已合并，未说明问题现象、修复方案、组件库名称及 PR 影响范围。",
+            "impact": "开源贡献的亮点被弱化，招聘方可能认为只是简单修复。",
+            "hasExample": true,
+            "pendingVerification": [
+              "组件库名称",
+              "SSR 兼容问题的具体表现",
+              "PR 链接或编号"
+            ]
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "教育背景缺少关键课程或学术表现",
+            "issue": "教育背景仅列出学校、专业、学历和时间，未提供 GPA、核心课程、获奖或相关项目等能佐证专业能力的学术信息。",
+            "impact": "教育背景信息单薄，可能降低候选人在校招中的竞争力。",
+            "hasExample": true,
+            "pendingVerification": [
+              "GPA 或排名",
+              "核心课程",
+              "学术获奖或项目"
+            ]
+          },
+          {
+            "priority": "NOTICE",
+            "title": "技能描述过于笼统",
+            "issue": "技能章节仅列出技术栈和“熟悉前端性能优化”，未说明具体优化手段或熟练程度。",
+            "impact": "技能可信度降低，招聘方可能认为只是罗列关键词。",
+            "hasExample": true,
+            "pendingVerification": [
+              "性能优化的具体技术点",
+              "各技能的熟练程度"
+            ]
+          }
+        ],
+        "strengthSummaries": [
+          {
+            "title": "性能优化实践有量化结果",
+            "approach": "在数据可视化平台中采用虚拟滚动和按需加载技术优化首屏性能。",
+            "contribution": "独立封装 12 个图表组件并实施性能优化。",
+            "result": "首屏加载时间从 3.2s 降至 1.4s。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "组件抽象与复用能力",
+            "approach": "在实习中重构权限配置页，抽象出可复用表单组件；在项目中独立封装图表组件。",
+            "contribution": "负责权限配置页重构并沉淀 8 个可复用表单组件；独立封装 12 个图表组件。",
+            "result": "页面开发周期缩短约 40%。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "开源社区参与",
+            "approach": "参与开源项目，修复 Vue 组件库的 SSR 兼容问题。",
+            "contribution": "修复 SSR 兼容问题并提交 PR。",
+            "result": "PR 已合并。",
+            "hasAdditionalQuotes": false
+          }
+        ],
+        "sectionCoverage": "4/4",
+        "stage_count": 3
+      },
+      "before": {
+        "calls": 1,
+        "attempts": 1,
+        "latencyMs": 6720,
+        "promptVersion": "resume-diagnose-v2",
+        "itemCount": 5,
+        "importantCount": 1,
+        "totalScore": null,
+        "ruleVersion": null,
+        "quotesAllInText": true,
+        "impactCoverage": 0.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 0.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": false,
+        "strengthCount": 0,
+        "strengthEvidenceCoverage": 0.0,
+        "coveredSections": [],
+        "crossSectionStrengths": 0,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "教育背景缺少GPA或相关课程",
+            "issue": "教育背景仅列出学校和专业，未提供GPA或核心课程，无法评估学业表现。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "技能描述缺少具体工具或版本",
+            "issue": "技能列表仅列出技术名称，未说明熟练程度或使用场景。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "项目经历缺少个人职责和团队背景",
+            "issue": "项目描述只提到成果，未说明个人具体职责和团队规模。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "实习经历缺少具体业务背景",
+            "issue": "实习描述只提到技术成果，未说明业务场景和解决的问题。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "NOTICE",
+            "title": "开源贡献缺少具体项目名称和PR链接",
+            "issue": "开源贡献只提到修复SSR兼容问题，未提供项目名称或PR链接。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          }
+        ],
+        "strengthSummaries": [],
+        "parseError": null
+      }
+    },
+    {
+      "key": "data_analyst",
+      "direction": "数据分析社招转岗",
+      "noise": "无明显解析噪声",
+      "parallelTimeline": "工作 2022.07-2024.12 与项目 2024.03-2024.10 正常重叠",
+      "after": {
+        "calls": 1,
+        "attempts": 2,
+        "latencyMs": 29277,
+        "promptVersion": "resume-diagnose-v3",
+        "itemCount": 4,
+        "importantCount": 2,
+        "totalScore": 70,
+        "ruleVersion": "resume-quality-v2",
+        "quotesAllInText": true,
+        "impactCoverage": 1.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 1.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": false,
+        "strengthCount": 3,
+        "strengthEvidenceCoverage": 1.0,
+        "coveredSections": [
+          "工作经历",
+          "技能",
+          "项目经历"
+        ],
+        "crossSectionStrengths": 2,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "工作经历缺乏个人贡献与问题解决细节",
+            "issue": "工作经历仅描述任务和结果，未说明个人具体职责、解决的问题或采取的方法。",
+            "impact": "招聘方无法区分个人贡献与团队成果，降低简历说服力。",
+            "hasExample": true,
+            "pendingVerification": [
+              "个人具体职责",
+              "技术难点及解决方案"
+            ]
+          },
+          {
+            "priority": "IMPORTANT",
+            "title": "项目经历缺少个人贡献与业务影响说明",
+            "issue": "项目描述仅列出技术指标，未说明个人在项目中的具体工作、如何推动运营实验以及业务效果。",
+            "impact": "项目成果显得空洞，无法体现个人在项目中的关键作用。",
+            "hasExample": true,
+            "pendingVerification": [
+              "个人具体贡献",
+              "召回实验的业务效果"
+            ]
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "技能章节缺乏具体应用场景",
+            "issue": "技能仅列出名称，未说明熟练程度或与经历中使用的对应关系。",
+            "impact": "技能可信度降低，无法突出个人技术优势。",
+            "hasExample": true,
+            "pendingVerification": [
+              "各技能熟练程度"
+            ]
+          },
+          {
+            "priority": "NOTICE",
+            "title": "教育背景缺少专业方向或课程信息",
+            "issue": "教育背景仅列出学位和专业，未说明研究方向或相关课程，与数据分析岗位的关联性不明确。",
+            "impact": "教育背景信息略显单薄，可能影响对候选人专业基础的评估。",
+            "hasExample": true,
+            "pendingVerification": [
+              "研究方向",
+              "核心课程"
+            ]
+          }
+        ],
+        "strengthSummaries": [
+          {
+            "title": "工作经历中量化成果显著",
+            "approach": "使用 SQL 和 Python 搭建销售看板，覆盖 200+ 门店，优化报表流程。",
+            "contribution": "负责搭建销售看板并优化报表生成流程。",
+            "result": "月度报表耗时从 2 天缩短到 2 小时。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "项目经历中模型性能提升明显",
+            "approach": "使用 XGBoost 和特征工程构建用户流失预警模型。",
+            "contribution": "负责模型构建与特征工程。",
+            "result": "模型 AUC 达到 0.82，召回率提升 18%。",
+            "hasAdditionalQuotes": true
+          },
+          {
+            "title": "教育背景与岗位高度相关",
+            "approach": "攻读统计学硕士学位，奠定数据分析理论基础。",
+            "contribution": "获得统计学硕士学位。",
+            "result": "原文未给出可核实结果",
+            "hasAdditionalQuotes": false
+          }
+        ],
+        "sectionCoverage": "3/3",
+        "stage_count": 5
+      },
+      "before": {
+        "calls": 1,
+        "attempts": 1,
+        "latencyMs": 6076,
+        "promptVersion": "resume-diagnose-v2",
+        "itemCount": 4,
+        "importantCount": 2,
+        "totalScore": null,
+        "ruleVersion": null,
+        "quotesAllInText": true,
+        "impactCoverage": 0.0,
+        "actionCoverage": 1.0,
+        "exampleOrPendingCoverage": 0.0,
+        "top3NoiseOnly": false,
+        "timelineFalsePositive": false,
+        "strengthCount": 0,
+        "strengthEvidenceCoverage": 0.0,
+        "coveredSections": [],
+        "crossSectionStrengths": 0,
+        "itemSummaries": [
+          {
+            "priority": "IMPORTANT",
+            "title": "工作经历缺少个人贡献与问题解决细节",
+            "issue": "工作经历仅描述任务和结果，未说明个人具体职责、采取的行动或解决的问题。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "IMPORTANT",
+            "title": "项目经历缺少个人贡献与问题解决细节",
+            "issue": "项目经历仅列出模型和指标，未说明个人在项目中的具体工作、遇到的挑战及解决方案。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "SUGGESTION",
+            "title": "技能描述缺乏具体应用场景",
+            "issue": "技能列表仅列出工具名称，未说明熟练程度或在项目中的具体应用。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          },
+          {
+            "priority": "NOTICE",
+            "title": "教育背景缺少专业方向或课程信息",
+            "issue": "教育背景仅列出学位和专业，未提及研究方向或相关课程，信息不够完整。",
+            "impact": null,
+            "hasExample": false,
+            "pendingVerification": []
+          }
+        ],
+        "strengthSummaries": [],
+        "parseError": null
+      }
+    }
+  ]
+}

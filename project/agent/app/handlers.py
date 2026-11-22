@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import re
+import time
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -13,7 +17,9 @@ from .config import Settings
 from .errors import HandlerError, HandlerValidationError
 from .files import FileFetcher
 from .llm import LLMClient, LLMProviderError, LLMRequest
-from .project_fallback import plan_project, recommend_project
+from .project_fallback import plan_project
+from .project_sources import RepositorySourcesUnavailable, RepoHit, search_project_repositories
+from .project_discovery import discover
 from .learning_github import search_github_repositories
 from .operations import (
     GROWTH_ANALYZE,
@@ -24,15 +30,20 @@ from .operations import (
     JOB_SEARCH,
     LEARNING_EVALUATE,
     LEARNING_PLAN,
+    LEARNING_PRACTICE_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
     LEARNING_QUESTION,
     PROJECT_PLAN,
     PROJECT_RECOMMEND,
     PROMPT_VERSIONS,
     RESUME_DIAGNOSE,
     RESUME_OPTIMIZE,
+    RESUME_OCR,
     RESUME_PARSE,
 )
 from .prompts import build_prompt, build_repair_prompt
+from .resume_skills import locate_quote, recover_catalog_skills
+from .resume_timeline import has_unsupported_timeline_claim, quotes_reversed_range, timeline_level
 from .skills import get_skill
 from .schemas import (
     AIEvaluateResult,
@@ -50,6 +61,7 @@ from .schemas import (
     AIGrowthResult,
     AIResumeDiagnoseResult,
     AIResumeOptimizeResult,
+    AIResumeOcrResult,
     Citation,
     GitHubLookup,
     Education,
@@ -64,27 +76,47 @@ from .schemas import (
     JDParsePayload,
     JobMatchPayload,
     JobSearchPayload,
+    AIPracticeEvaluateResult,
+    AIPracticeQuestion,
+    AIPracticeQuestionSet,
     LearningEvaluatePayload,
     LearningPlanPayload,
+    LearningPracticeEvaluatePayload,
+    LearningPracticeQuestionsPayload,
     LearningQuestionPayload,
+    PracticeEvaluateModelOutput,
+    PracticeEvaluationItem,
     MatchItemModelOutput,
     MatchModelOutput,
     ParseModelOutput,
     PlanItem,
     ProjectPlanPayload,
+    ProjectRecommendModelOutput,
     ProjectRecommendPayload,
+    ProjectRecommendationItem,
+    RepositorySource,
+    RepositorySourceRun,
     ReportModelOutput,
     Requirement,
+    RESUME_ASSESSMENT_DEFAULT_RULES,
+    RESUME_ASSESSMENT_RUBRIC_VERSION,
+    RESUME_ASSESSMENT_SUPPORTED_RULE_VERSIONS,
+    ResumeAssessment,
+    ResumeAssessmentRules,
     ResumeEvidenceFact,
     ResumeDiagnosePayload,
     ResumeOptimizePayload,
+    ResumeOcrPayload,
     ResumeParsePayload,
     Rubric,
     RubricDimension,
+    SkillCatalogItem,
+    SkillFact,
     SkillScore,
     SkillScoreDraft,
     TurnModelOutput,
     TurnQuestion,
+    UnmappedSkillDetail,
 )
 
 logger = logging.getLogger("agent.handler")
@@ -94,7 +126,7 @@ FIXED_RUBRIC_WEIGHTS: dict[str, float] = {
     "completeness": 0.3,
     "expression": 0.2,
 }
-UNUSABLE_ANSWERS = {"不知道", "不清楚", "不会", "无", "没有", "不知道。", "不会。", "asdf", "test"}
+UNUSABLE_ANSWERS = {"不知道", "不清楚", "不会", "无", "没有"}
 
 
 def utcnow_iso() -> str:
@@ -110,6 +142,9 @@ def half_up(value: float, digits: int = 1) -> float:
 
 def norm_text(value: str) -> str:
     return re.sub(r"\s+", "", value).lower()
+
+
+_PAGE_LINE_MARKER = re.compile(r"^\[page:(\d+)\]$")
 
 
 def quote_in_text(quote: str, text: str) -> bool:
@@ -182,6 +217,7 @@ class ExecutionContext:
     emit_stage: Callable[[str, int | None], Awaitable[None]]
     emit_reasoning: Callable[[str], Awaitable[None]] | None = None
     emit_candidates: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
+    repository_client: Any = None
 
 
 class BaseHandler:
@@ -202,9 +238,10 @@ class BaseHandler:
     ) -> BaseModel:
         raise NotImplementedError
 
-    async def execute(self, ctx: ExecutionContext) -> tuple[dict[str, Any], dict[str, Any]]:
+    async def execute(self, ctx: ExecutionContext,
+                      prepared: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
         skill = get_skill(self.operation)
-        prepared = await self.prepare(ctx)
+        prepared = prepared if prepared is not None else await self.prepare(ctx)
         await ctx.emit_stage("input_ready", 15)
         payload_dict = ctx.payload.model_dump(by_alias=True, mode="json")
         system, user_prompt, schema_hint = build_prompt(self.operation, payload_dict, prepared)
@@ -227,9 +264,10 @@ class BaseHandler:
                 user_prompt=user_prompt + repair_note,
                 schema_hint=schema_hint,
                 context=context,
-                thinking=False if self.operation in {PROJECT_RECOMMEND, PROJECT_PLAN} else None,
+                thinking=False if self.operation in {RESUME_PARSE, RESUME_DIAGNOSE, PROJECT_RECOMMEND, PROJECT_PLAN} else None,
             )
-            logger.info("model call attempt=%s user_chars=%s", attempt + 1, len(request.user_prompt))
+            logger.info("model call attempt=%s user_chars=%s thinking=%s",
+                        attempt + 1, len(request.user_prompt), request.thinking)
             try:
                 response = await ctx.llm.complete(request)
             except LLMProviderError as exc:
@@ -312,21 +350,40 @@ class ResumeParseHandler(BaseHandler):
     payload_model = ResumeParsePayload
     output_model = ParseModelOutput
     prompt_version = PROMPT_VERSIONS[RESUME_PARSE]
+    timeout_seconds = 60.0
+
+    async def execute(self, ctx: ExecutionContext,
+                      prepared: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                return await super().execute(ctx, prepared)
+        except TimeoutError as exc:
+            raise HandlerError("MODEL_PROVIDER_ERROR", "简历解析响应超时，请重试", retryable=True) from exc
 
     @staticmethod
-    def evidence_facts(field: str, items: list[ResumeEvidenceFact], text: str) -> list[ResumeEvidenceFact]:
+    def evidence_facts(field: str, items: list[ResumeEvidenceFact], text: str,
+                       quote_cache: dict[str, Any]) -> list[ResumeEvidenceFact]:
         result: list[ResumeEvidenceFact] = []
         for item in items:
-            if not quote_in_text(item.quote, text):
-                raise HandlerValidationError(f"{field} 的 quote 不在简历原文中")
-            if not any(norm_text(item.quote) == norm_text(existing.quote) for existing in result):
-                result.append(item.model_copy(update={"quote": item.quote.strip(), "confirmed": False}))
+            try:
+                quote = _restore_quote(text, item.quote, quote_cache)
+            except HandlerValidationError:
+                continue
+            located = locate_quote(text, quote)
+            if located and not any(norm_text(quote) == norm_text(existing.quote) for existing in result):
+                result.append(item.model_copy(
+                    update={"quote": quote, "confirmed": False, "location": located}))
 
         marker = (r"实习|\bintern(?:ship)?\b" if field == "internships"
                   else r"获奖|奖学金|一等奖|二等奖|三等奖|金奖|银奖|铜奖")
         headings = {"实习经历", "实习经验", "获奖经历", "奖项荣誉", "荣誉奖项"}
+        page = 1
         for number, raw_line in enumerate(text.splitlines(), 1):
             line = raw_line.strip()
+            marker_match = _PAGE_LINE_MARKER.match(line)
+            if marker_match:
+                page = int(marker_match.group(1))
+                continue
             if not line or line in headings or not re.search(marker, line, re.IGNORECASE):
                 continue
             quote = line[:1000]
@@ -334,7 +391,7 @@ class ResumeParseHandler(BaseHandler):
                    for item in result):
                 continue
             result.append(ResumeEvidenceFact(claim=line[:500], quote=quote,
-                                             location=f"paragraph:{number}", confirmed=False))
+                                             location=f"page:{page};line:{number}", confirmed=False))
             if len(result) >= 20:
                 break
         return result
@@ -368,26 +425,190 @@ class ResumeParseHandler(BaseHandler):
         if facts.experience_months is not None and not 0 <= facts.experience_months <= 600:
             raise HandlerValidationError("experienceMonths 超出合理范围")
 
+        quote_cache: dict[str, Any] = {}
         seen: set[str] = set()
         skills = []
         for skill in facts.skills:
-            if skill.skill_code not in catalog:
-                raise HandlerValidationError(f"skillCode 不在 skillCatalog 中: {skill.skill_code}")
-            if skill.skill_code in seen:
+            if skill.skill_code not in catalog or skill.skill_code in seen:
                 continue
-            if not quote_in_text(skill.quote, text):
-                raise HandlerValidationError(f"技能 {skill.skill_code} 的 quote 不在简历原文中")
+            try:
+                quote = _restore_quote(text, skill.quote, quote_cache)
+            except HandlerValidationError:
+                # Leave the code unseen so catalog matching can recover it from the source.
+                continue
+            located = locate_quote(text, quote)
+            if located is None:
+                continue
             seen.add(skill.skill_code)
             skills.append(
-                skill.model_copy(update={"quote": skill.quote.strip(), "confirmed": False})
+                skill.model_copy(update={"quote": quote, "confirmed": False, "location": located})
             )
+        # 目录补漏：技能目录（含别名）词边界匹配，补回模型遗漏的明确技能。
+        for recovered in recover_catalog_skills(text, payload.skill_catalog, seen):
+            if len(skills) >= 50:
+                break
+            skills.append(SkillFact(
+                skill_code=recovered.skill_code,
+                claim=recovered.claim,
+                quote=recovered.quote,
+                location=recovered.location,
+                confirmed=False,
+            ))
+            seen.add(recovered.skill_code)
         facts.skills = skills
-        facts.internships = self.evidence_facts("internships", facts.internships, text)
-        facts.awards = self.evidence_facts("awards", facts.awards, text)
+        facts.internships = self.evidence_facts("internships", facts.internships, text, quote_cache)
+        facts.awards = self.evidence_facts("awards", facts.awards, text, quote_cache)
+        if not (facts.skills or facts.internships or facts.awards):
+            raise HandlerValidationError("解析结果没有任何有效事实（技能、实习、获奖均为空）")
         facts.warnings = dedupe(facts.warnings, limit=20)
 
         unmapped = dedupe([item for item in output.unmapped_skills if len(item) <= 100], limit=50)
-        return AIParseResult(facts=facts, text_hash=prepared["text_hash"], unmapped_skills=unmapped)
+        # 目录外候选：必须能定位原文依据，否则不作为候选展示。
+        unmapped_details: list[UnmappedSkillDetail] = []
+        for name in unmapped:
+            detail = self._locate_unmapped(text, name)
+            if detail is not None:
+                unmapped_details.append(detail)
+        return AIParseResult(
+            facts=facts,
+            text_hash=prepared["text_hash"],
+            unmapped_skills=[item.name for item in unmapped_details],
+            unmapped_details=unmapped_details,
+        )
+
+    @staticmethod
+    def _locate_unmapped(text: str, name: str) -> UnmappedSkillDetail | None:
+        from .resume_skills import _catalog_needles, _codes_for_match, _index_lines, _needle_pattern, _needle_usable
+        from .schemas import SkillCatalogItem
+
+        mapping = _catalog_needles([SkillCatalogItem(code="_UNMAPPED_", name=name)])
+        for needle, entries in mapping.items():
+            if not _needle_usable(needle):
+                continue
+            for line in _index_lines(text):
+                match = _needle_pattern(needle).search(line.text)
+                if match is None:
+                    continue
+                if not _codes_for_match(entries, match.group(0)) and len(entries) > 1:
+                    continue
+                return UnmappedSkillDetail(
+                    name=name[:100],
+                    quote=line.text[:1000],
+                    location=f"page:{line.page};line:{line.line_no}",
+                )
+        return None
+
+
+class ResumeOcrHandler(BaseHandler):
+    """图片 PDF 的 OCR 识别：纯程序化执行，不调用模型。"""
+
+    operation = RESUME_OCR
+    payload_model = ResumeOcrPayload
+    output_model = AIResumeOcrResult
+    prompt_version = PROMPT_VERSIONS[RESUME_OCR]
+
+    async def execute(self, ctx: ExecutionContext,
+                      prepared: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        import asyncio
+
+        from .ocr import merge_pdf_text, strip_page_markers
+
+        payload: ResumeOcrPayload = ctx.payload  # type: ignore[assignment]
+        await ctx.emit_stage("input_ready", 10)
+        data = await ctx.files.download_bytes(payload.document)
+        await ctx.emit_stage("calling_model", 30)
+
+        total_pages_holder = {"total": 0}
+
+        def report_progress(done: int, total: int) -> None:
+            total_pages_holder["total"] = total
+            # 进度只写日志；阶段推进由主协程统一发出，避免子线程触发异步 IO。
+
+        started = time.monotonic()
+        try:
+            outcome = await asyncio.to_thread(merge_pdf_text, data, ctx.settings, report_progress)
+        except HandlerError:
+            raise
+        except Exception as exc:  # Tesseract/PyMuPDF 等未预期错误
+            raise HandlerError("OCR_ENGINE_FAILED", f"OCR 处理失败: {type(exc).__name__}", retryable=True) from exc
+        duration_ms = int((time.monotonic() - started) * 1000)
+
+        body = strip_page_markers(outcome.text)
+        if not body:
+            raise HandlerError(
+                "FILE_NO_TEXT",
+                "OCR 与文字层提取均未得到有效文本，文件可能为空白或纯图形",
+                retryable=False,
+            )
+        normalized = outcome.text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if len(normalized) > ctx.settings.max_extracted_chars:
+            raise HandlerError(
+                "FILE_TEXT_TOO_LONG",
+                f"OCR 文本超过 {ctx.settings.max_extracted_chars} 字符限制",
+                retryable=False,
+            )
+        await ctx.emit_stage("validating_result", 90)
+        result = AIResumeOcrResult(
+            text=normalized,
+            text_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+            text_layout_version="pdf-ocr-v1",
+            text_source="OCR" if outcome.ocr_pages else "NATIVE",
+            native_pages=outcome.native_pages,
+            ocr_pages=outcome.ocr_pages,
+            empty_pages=outcome.empty_pages,
+            duration_ms=duration_ms,
+        )
+        meta = {
+            "provider": "tesseract",
+            "model": "none",
+            "promptVersion": self.prompt_version,
+            "latencyMs": duration_ms,
+            "attempts": 0,
+            "operation": self.operation,
+            "nativePages": len(outcome.native_pages),
+            "ocrPages": len(outcome.ocr_pages),
+            "emptyPages": len(outcome.empty_pages),
+        }
+        logger.info(
+            "ocr done native=%s ocr=%s empty=%s duration_ms=%s",
+            len(outcome.native_pages), len(outcome.ocr_pages), len(outcome.empty_pages), duration_ms,
+        )
+        return result.model_dump(by_alias=True, mode="json"), meta
+
+    def validate_business(
+        self,
+        ctx: ExecutionContext,
+        output: BaseModel,
+        prepared: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> BaseModel:
+        return output
+
+
+def _restore_quote(text: str, quote: str, source_chars_cache: dict[str, Any]) -> str:
+    """Return a quote that appears verbatim in the task snapshot text.
+
+    FileFetcher normalizes line endings; quotes copied from the normalized text
+    may differ by whitespace only. Match ignoring all whitespace and return the
+    exact snapshot slice so Java's strict ``contains`` check passes.
+    """
+    quote = quote.strip()
+    if quote and quote in text:
+        return quote
+    if source_chars_cache.get("chars") is None:
+        source_chars_cache["chars"] = list(re.finditer(r"\S", text))
+        source_chars_cache["compact"] = "".join(char.group() for char in source_chars_cache["chars"])
+    compact_quote = re.sub(r"\s+", "", quote)
+    start = source_chars_cache["compact"].find(compact_quote) if compact_quote else -1
+    if start < 0:
+        raise HandlerValidationError("引用 quote 必须在简历授权原文中")
+    restored = text[
+        source_chars_cache["chars"][start].start():
+        source_chars_cache["chars"][start + len(compact_quote) - 1].end()
+    ]
+    if len(restored) > 1000:
+        raise HandlerValidationError("引用 quote 原文片段过长，请使用更短的引用")
+    return restored
 
 
 class ResumeDiagnoseHandler(BaseHandler):
@@ -398,7 +619,12 @@ class ResumeDiagnoseHandler(BaseHandler):
 
     async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
         document = await ctx.files.extract(ctx.payload.document)
-        return {"document_text": document.text}
+        return {
+            "document_text": document.text,
+            "diagnosis_date": date.today().isoformat(),
+            "assessment_rules": RESUME_ASSESSMENT_DEFAULT_RULES.model_dump(by_alias=True),
+            "timeline_level": timeline_level(ctx.payload.document.text or document.text),
+        }
 
     def validate_business(
         self,
@@ -407,11 +633,99 @@ class ResumeDiagnoseHandler(BaseHandler):
         prepared: dict[str, Any],
         meta: dict[str, Any],
     ) -> AIResumeDiagnoseResult:
-        text = prepared["document_text"]
+        # FileFetcher normalizes line endings. Return quotes from the original task snapshot.
+        text = ctx.payload.document.text
+        if text is None:
+            raise HandlerValidationError("诊断缺少简历授权原文")
+        payload: ResumeDiagnosePayload = ctx.payload  # type: ignore[assignment]
+        rules = payload.assessment_rules
+        if rules is None or rules.rule_version not in RESUME_ASSESSMENT_SUPPORTED_RULE_VERSIONS:
+            rules = RESUME_ASSESSMENT_DEFAULT_RULES
+        uses_rubric = rules.rule_version == RESUME_ASSESSMENT_RUBRIC_VERSION
+        if not uses_rubric and not output.items:
+            raise HandlerValidationError("诊断结果缺少有效建议")
+        cache: dict[str, Any] = {}
+        assessment = self._validated_assessment(output.assessment, rules, text, cache)
+        levels = {dimension.code: dimension.levels for dimension in assessment.dimensions}
         for item in output.items:
-            if not quote_in_text(item.quote, text):
-                raise HandlerValidationError("诊断项 quote 必须在简历授权原文中")
-        return AIResumeDiagnoseResult(items=output.items)
+            if uses_rubric:
+                item_levels = levels.get(item.dimension_code, {})
+                if item.check_code not in item_levels:
+                    raise HandlerValidationError("诊断建议的 dimensionCode、checkCode 必须对应实际评分点")
+                if item_levels[item.check_code] == 5:
+                    raise HandlerValidationError("诊断建议不能关联满分项")
+                if has_unsupported_timeline_claim(item.title, item.issue, item.rationale, item.impact,
+                                                  item.suggestion, item.example, *item.pending_verification):
+                    raise HandlerValidationError("跨条目同期、跨章节顺序或实习性质不能作为简历问题")
+            item.quote = _restore_quote(text, item.quote, cache)
+            item.quotes = [_restore_quote(text, quote, cache) for quote in item.quotes]
+            if uses_rubric and item.check_code == "timeline" and not quotes_reversed_range(item.quote):
+                raise HandlerValidationError("日期建议必须引用同一条目内确实倒置的起止日期")
+        return AIResumeDiagnoseResult(items=output.items, assessment=assessment)
+
+    def _validated_assessment(
+        self,
+        assessment: Any,
+        rules: ResumeAssessmentRules,
+        text: str,
+        cache: dict[str, Any],
+    ):
+        if assessment is None:
+            raise HandlerValidationError("诊断结果缺少评分 assessment，必须返回五个维度的评分")
+        uses_rubric = rules.rule_version == RESUME_ASSESSMENT_RUBRIC_VERSION
+        if uses_rubric and (assessment.rule_version != rules.rule_version or not assessment.summary):
+            raise HandlerValidationError("诊断结果须使用任务评分规则并提供综合评价 summary")
+        if uses_rubric and has_unsupported_timeline_claim(
+            assessment.summary, *(dimension.rationale for dimension in assessment.dimensions)
+        ):
+            raise HandlerValidationError("评分与综合评价不能因跨条目同期、跨章节顺序或实习性质扣分")
+        dimensions = {dimension.code: dimension for dimension in rules.dimensions}
+        seen: set[str] = set()
+        for dimension in assessment.dimensions:
+            if dimension.code in seen:
+                raise HandlerValidationError(f"评分维度重复: {dimension.code}")
+            seen.add(dimension.code)
+            rule = dimensions[dimension.code]
+            if uses_rubric:
+                checks = {check.code: check.max_score for check in rule.checks}
+                if dimension.levels.keys() != checks.keys():
+                    raise HandlerValidationError(f"评分维度 {dimension.code} 的评分点缺失或未知")
+                if dimension.code == "STRUCTURE_CLARITY" and "timeline" in checks:
+                    verified_level = timeline_level(text)
+                    if verified_level is not None and dimension.levels["timeline"] != verified_level:
+                        raise HandlerValidationError(
+                            f"timeline 档位须等于已核验的 timelineLevel={verified_level}"
+                        )
+                dimension.score = sum(
+                    dimension.levels[code] * max_score // 5 for code, max_score in checks.items()
+                )
+            if dimension.score is None:
+                raise HandlerValidationError(f"评分维度 {dimension.code} 缺少 score")
+            if dimension.score > rule.max_score:
+                raise HandlerValidationError(
+                    f"评分维度 {dimension.code} 超过满分 {rule.max_score}"
+                )
+            if dimension.score > 0:
+                if not dimension.quote or not dimension.quote.strip():
+                    raise HandlerValidationError(
+                        f"评分维度 {dimension.code} 正分必须提供简历原文依据 quote"
+                    )
+                dimension.quote = _restore_quote(text, dimension.quote, cache)
+            else:
+                dimension.quote = None
+            dimension.quotes = [_restore_quote(text, quote, cache) for quote in dimension.quotes]
+        missing = sorted(dimensions.keys() - seen)
+        if missing:
+            raise HandlerValidationError(f"评分维度缺失: {','.join(missing)}")
+        for strength in assessment.strengths:
+            strength.quote = _restore_quote(text, strength.quote, cache)
+            strength.quotes = [_restore_quote(text, quote, cache) for quote in strength.quotes]
+        return ResumeAssessment(
+            rule_version=rules.rule_version,
+            summary=assessment.summary if uses_rubric else None,
+            dimensions=assessment.dimensions,
+            strengths=assessment.strengths,
+        )
 
 
 class ResumeOptimizeHandler(BaseHandler):
@@ -808,7 +1122,8 @@ class LearningQuestionHandler(BaseHandler):
             for item in payload.candidate_questions
             if str(item.id) not in excluded and norm_text(item.stem) not in used_stems
         ]
-        if available:
+        # A shared skill tag alone does not prove relevance to a specific plan goal.
+        if available and not payload.plan_item.objective:
             result = self._from_candidate(available[0], provider=str(getattr(ctx.llm, "name", "")))
             return result.model_dump(by_alias=True, mode="json"), self._meta(True, ctx)
 
@@ -877,10 +1192,15 @@ def _build_evaluation(
     # 回答分类：明确回答"不会"（UNKNOWN）与无效回答（INVALID，过短/乱输入）分开标记。
     # 两者都不伪造分数，但"不会"在 Java 侧会进入错题本待复习路径。
     answer_class: str | None = None
-    if answer.strip().lower() in UNUSABLE_ANSWERS:
+    admission = re.sub(r"[\s，。！？,.!?]", "", answer).lower()
+    explicitly_unknown = admission in UNUSABLE_ANSWERS or re.fullmatch(
+        r"(?:我)?(?:暂时|目前|还)?(?:不会|不知道|不清楚|不懂)(?:这(?:道)?题)?"
+        r"(?:暂时无法给出(?:有效的)?(?:分析方案|答案|解答))?", admission
+    ) is not None
+    if explicitly_unknown:
         status = "INVALID"
         answer_class = "UNKNOWN"
-    elif len(answer.strip()) < 2:
+    elif len(answer.strip()) < 2 or admission in {"asdf", "test"}:
         status = "INVALID"
         answer_class = "INVALID"
 
@@ -971,6 +1291,146 @@ class LearningEvaluateHandler(BaseHandler):
             reference_fallback=payload.question.reference_answer,
         )
         return AIEvaluateResult(evaluation=evaluation, skill_scores=skill_scores)
+
+
+class LearningPracticeQuestionsHandler(BaseHandler):
+    """一次生成一组题目：按配置混合选择题、填空题与主观题。"""
+
+    operation = LEARNING_PRACTICE_QUESTIONS
+    payload_model = LearningPracticeQuestionsPayload
+    output_model = AIPracticeQuestionSet
+    prompt_version = PROMPT_VERSIONS[LEARNING_PRACTICE_QUESTIONS]
+
+    def validate_business(
+        self,
+        ctx: ExecutionContext,
+        output: AIPracticeQuestionSet,
+        prepared: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> AIPracticeQuestionSet:
+        payload: LearningPracticeQuestionsPayload = ctx.payload  # type: ignore[assignment]
+        config = payload.config
+        planned = payload.plan_item.skill_code
+        questions = output.questions
+
+        if len(questions) != config.total_questions:
+            raise HandlerValidationError(
+                f"题目数量必须为 {config.total_questions}，实际 {len(questions)}"
+            )
+        expected = {
+            "CHOICE": config.type_distribution.choice,
+            "FILL": config.type_distribution.fill,
+            "SUBJECTIVE": config.type_distribution.subjective,
+        }
+        actual = {
+            "CHOICE": sum(1 for item in questions if item.type == "CHOICE"),
+            "FILL": sum(1 for item in questions if item.type == "FILL"),
+            "SUBJECTIVE": sum(1 for item in questions if item.type == "SUBJECTIVE"),
+        }
+        if actual != expected:
+            raise HandlerValidationError(
+                "题型分布不符合配置要求：" + "，".join(
+                    f"{key} 需 {expected[key]} 道，实际 {actual[key]} 道" for key in expected
+                )
+            )
+
+        used_stems = {
+            norm_text(str(item)) for item in payload.excluded_question_stems if str(item).strip()
+        }
+        for index, question in enumerate(questions, start=1):
+            if planned not in question.skill_codes:
+                raise HandlerValidationError(
+                    f"第 {index} 题 skillCodes 必须包含 planItem.skillCode: {planned}"
+                )
+            check_fixed_rubric(question.rubric)
+            if not question.reference_answer.strip():
+                raise HandlerValidationError(f"第 {index} 题缺少参考答案")
+            if question.citations and not payload.knowledge_refs:
+                raise HandlerValidationError(f"第 {index} 题包含未授权引用")
+            normalized = norm_text(question.stem)
+            if normalized in used_stems:
+                raise HandlerValidationError(f"第 {index} 题题干与已用题目重复，请更换考查角度")
+            used_stems.add(normalized)
+
+            if question.type == "CHOICE":
+                keys = [option.key.upper() for option in question.options]
+                if len(keys) < 2 or len(set(keys)) != len(keys):
+                    raise HandlerValidationError(f"第 {index} 题选项必须至少 2 个且 key 不重复")
+                if len(question.answer_key) != 1:
+                    raise HandlerValidationError(f"第 {index} 题选择题必须且只能有 1 个正确答案")
+                if question.answer_key[0].upper() not in keys:
+                    raise HandlerValidationError(f"第 {index} 题正确答案不在选项中")
+                if question.blank_count:
+                    raise HandlerValidationError(f"第 {index} 题选择题不得设置空位数")
+            elif question.type == "FILL":
+                if question.blank_count < 1:
+                    raise HandlerValidationError(f"第 {index} 题填空题必须设置 blankCount")
+                if len(question.answer_key) != question.blank_count:
+                    raise HandlerValidationError(
+                        f"第 {index} 题填空题标准答案数量必须等于空位数 {question.blank_count}"
+                    )
+                if question.options:
+                    raise HandlerValidationError(f"第 {index} 题填空题不得包含选项")
+                if not all(str(item).strip() for item in question.answer_key):
+                    raise HandlerValidationError(f"第 {index} 题填空题标准答案不能为空")
+            else:
+                if question.options or question.answer_key or question.blank_count:
+                    raise HandlerValidationError(f"第 {index} 题主观题不得包含选项/答案键/空位")
+
+        return AIPracticeQuestionSet(questions=questions)
+
+
+class LearningPracticeEvaluateHandler(BaseHandler):
+    """整组交卷：逐题评估主观题作答，并汇总整组反馈报告。"""
+
+    operation = LEARNING_PRACTICE_EVALUATE
+    payload_model = LearningPracticeEvaluatePayload
+    output_model = PracticeEvaluateModelOutput
+    prompt_version = PROMPT_VERSIONS[LEARNING_PRACTICE_EVALUATE]
+
+    def validate_business(
+        self,
+        ctx: ExecutionContext,
+        output: PracticeEvaluateModelOutput,
+        prepared: dict[str, Any],
+        meta: dict[str, Any],
+    ) -> AIPracticeEvaluateResult:
+        payload: LearningPracticeEvaluatePayload = ctx.payload  # type: ignore[assignment]
+        by_id = {str(item.answer_id): item for item in payload.answers}
+        seen: set[str] = set()
+        results: list[PracticeEvaluationItem] = []
+        for item in output.evaluations:
+            key = str(item.answer_id)
+            if key not in by_id:
+                raise HandlerValidationError(f"评估结果包含未知 answerId: {key}")
+            if key in seen:
+                raise HandlerValidationError(f"answerId 重复评估: {key}")
+            seen.add(key)
+            answer = by_id[key]
+            evaluation, _ = _build_evaluation(
+                model_output=item.evaluation,
+                skill_score_drafts=item.skill_scores,
+                rubric=answer.rubric,
+                meta=meta,
+                answer=answer.answer,
+                question_skills=answer.skill_codes,
+                source_id=answer.answer_id,
+                reference_fallback=answer.reference_answer,
+            )
+            results.append(
+                PracticeEvaluationItem(
+                    answer_id=answer.answer_id,
+                    evaluation=evaluation,
+                    skill_scores=item.skill_scores,
+                )
+            )
+        missing = [key for key in by_id if key not in seen]
+        if missing:
+            raise HandlerValidationError(f"缺少以下作答的评估结果: {', '.join(missing[:5])}")
+        return AIPracticeEvaluateResult(
+            evaluations=results,
+            report=output.report,
+        )
 
 
 class InterviewTurnHandler(BaseHandler):
@@ -1280,33 +1740,221 @@ class ProjectFallbackHandler(BaseHandler):
         return self.validate_business(ctx, result, {}, meta).model_dump(by_alias=True, mode="json"), meta
 
 
-class ProjectRecommendHandler(ProjectFallbackHandler):
+class ProjectRecommendHandler(BaseHandler):
     operation = PROJECT_RECOMMEND
     payload_model = ProjectRecommendPayload
-    output_model = AIProjectRecommendResult
+    output_model = ProjectRecommendModelOutput
     prompt_version = PROMPT_VERSIONS[PROJECT_RECOMMEND]
-    fallback = staticmethod(recommend_project)
+    model_deadline_seconds = 35.0
+
+    async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
+        payload: ProjectRecommendPayload = ctx.payload  # type: ignore[assignment]
+        cursor, keys = None, []
+        try:
+            client = getattr(ctx, "repository_client", None)
+            if payload.discovery_round is not None and payload.tech_stack_keywords:
+                result, cursor, keys = await discover(
+                    ctx.settings, payload.allowed_skill_codes, payload.query, payload.sources,
+                    payload.tech_stack_keywords, payload.search_cursor, payload.seen_repository_keys, client,
+                )
+            else:
+                result = await search_project_repositories(
+                    ctx.settings, payload.allowed_skill_codes, payload.query, payload.sources,
+                    tech_stack_keywords=payload.tech_stack_keywords, client=client,
+                )
+        except RepositorySourcesUnavailable as exc:
+            raise HandlerError(
+                "PROJECT_SOURCES_UNAVAILABLE",
+                f"所选平台本次均不可用：{exc}",
+                retryable=True,
+            ) from exc
+        return {
+            "source_runs": result.source_runs,
+            "repository_candidates": [self._candidate_input(hit) for hit in result.candidates[:6]],
+            "candidates": result.candidates,
+            "search_cursor": cursor,
+            "discovered_keys": keys,
+            "terms": result.terms,
+            "rejected": result.rejected,
+        }
+
+    async def execute(self, ctx: ExecutionContext) -> tuple[dict[str, Any], dict[str, Any]]:
+        import asyncio
+
+        prepared = await self.prepare(ctx)
+        discovery = prepared.get("search_cursor") is not None
+        if discovery and (ctx.payload.discovery_round > 0 or not prepared["candidates"]):
+            await ctx.emit_stage("validating_result", 90)
+            result = self._repository_hints(ctx.payload, prepared)
+            return result.model_dump(by_alias=True, mode="json"), {
+                "provider": "repository_rules", "promptVersion": self.prompt_version,
+                "operation": self.operation, "candidateCount": len(result.items),
+            }
+        if not prepared["candidates"]:
+            await ctx.emit_stage("validating_result", 90)
+            empty = AIProjectRecommendResult(
+                mode="REPOSITORY",
+                source_runs=self._source_runs(prepared),
+                items=[],
+            )
+            return empty.model_dump(by_alias=True, mode="json"), {
+                "provider": "none",
+                "promptVersion": self.prompt_version,
+                "operation": self.operation,
+                "candidateCount": 0,
+            }
+        try:
+            model_prepared = {**prepared, "candidates": prepared["candidates"][:6]} if discovery else prepared
+            output, meta = await asyncio.wait_for(
+                super().execute(ctx, model_prepared),
+                timeout=self.model_deadline_seconds,
+            )
+            if discovery:
+                suggestions = {item["primarySource"]["url"]: item for item in output["items"]}
+                complete = self._repository_hints(ctx.payload, prepared).model_dump(by_alias=True, mode="json")
+                complete["items"] = [suggestions.get(item["primarySource"]["url"], item) for item in complete["items"]]
+                return complete, meta
+            return output, meta
+        except TimeoutError:
+            reason = "MODEL_TIMEOUT"
+        except HandlerError as exc:
+            if exc.code not in {"MODEL_PROVIDER_ERROR", "MODEL_OUTPUT_INVALID"}:
+                raise
+            reason = exc.code
+            status = getattr(exc.__cause__, "http_status", None)
+            if status is not None:
+                reason = f"MODEL_HTTP_{status}"
+        await ctx.emit_stage("using_repository_hints", 85)
+        result = self._repository_hints(ctx.payload, prepared)
+        meta = {
+            "provider": "repository_rules",
+            "promptVersion": self.prompt_version,
+            "operation": self.operation,
+            "modelDegraded": True,
+            "fallbackReason": reason,
+        }
+        logger.warning("project recommend hints operation=%s reason=%s candidates=%s",
+                       self.operation, reason, len(result.items))
+        await ctx.emit_stage("validating_result", 90)
+        return result.model_dump(by_alias=True, mode="json"), meta
 
     def validate_business(
         self,
         ctx: ExecutionContext,
-        output: AIProjectRecommendResult,
+        output: ProjectRecommendModelOutput,
         prepared: dict[str, Any],
         meta: dict[str, Any],
     ) -> AIProjectRecommendResult:
-        payload = ctx.payload
+        payload: ProjectRecommendPayload = ctx.payload  # type: ignore[assignment]
         allowed = set(payload.allowed_skill_codes)
-        for item in output.items:
-            unknown = set(item.skill_codes) - allowed
+        candidates = {hit.url.strip().lower(): hit for hit in prepared.get("candidates") or []}
+        if not candidates:
+            raise HandlerValidationError("本次没有可用的真实仓库候选")
+        if not output.items:
+            raise HandlerValidationError("存在真实仓库候选时必须至少输出一个推荐项")
+        order = {hit.url.strip().lower(): index for index, hit in enumerate(prepared.get("candidates") or [])}
+        items: list[ProjectRecommendationItem] = []
+        seen: set[str] = set()
+        for suggestion in output.items:
+            key = suggestion.source_url.strip().lower()
+            hit = candidates.get(key)
+            if hit is None:
+                raise HandlerValidationError("推荐来源必须来自本次检索到的真实仓库候选")
+            if key in seen:
+                raise HandlerValidationError("推荐结果不能重复包含同一个仓库")
+            seen.add(key)
+            unknown = set(suggestion.skill_codes) - allowed
             if unknown:
                 raise HandlerValidationError(
                     f"推荐技能不在 allowedSkillCodes 中: {', '.join(sorted(unknown))}"
                 )
-            if item.difficulty != payload.difficulty:
+            if payload.difficulty is not None and suggestion.difficulty != payload.difficulty:
                 raise HandlerValidationError("推荐项目 difficulty 必须与输入难度一致")
-            if item.estimated_weeks > payload.max_duration_weeks:
+            if suggestion.estimated_weeks > payload.max_duration_weeks:
                 raise HandlerValidationError("推荐项目 estimatedWeeks 超出 maxDurationWeeks")
-        return AIProjectRecommendResult(items=output.items)
+            items.append(self._item(hit, suggestion))
+        items.sort(key=lambda item: order.get(
+            (item.primary_source.url if item.primary_source else "").strip().lower(), len(order)))
+        return AIProjectRecommendResult(
+            mode="REPOSITORY",
+            source_runs=self._source_runs(prepared),
+            items=items,
+        )
+
+    def _repository_hints(self, payload: ProjectRecommendPayload,
+                          prepared: dict[str, Any]) -> AIProjectRecommendResult:
+        items: list[ProjectRecommendationItem] = []
+        for hit in prepared.get("candidates") or []:
+            skills = [code for code in hit.matched_skill_codes
+                      if code in payload.allowed_skill_codes][:3]
+            if not skills:
+                skills = payload.allowed_skill_codes[:1]
+            items.append(ProjectRecommendationItem(
+                title=hit.name,
+                summary=hit.description,
+                skill_codes=skills,
+                difficulty=payload.difficulty or "INTERMEDIATE",
+                estimated_weeks=min(payload.max_duration_weeks, 2),
+                reason=("仓库包含请求技术栈的使用证据，可从文档和相关配置开始实战。"
+                        if hit.stack_evidence else "根据仓库公开简介、许可证与你的目标技能匹配推荐；建议先阅读 README，再完成一个小改造。"),
+                getting_started=[
+                    "阅读仓库 README 和目录结构，确认运行方式",
+                    "运行官方示例或最小 demo，记录依赖与启动步骤",
+                    "围绕目标技能完成一个小改造并补充自测记录",
+                ],
+                deliverables=[
+                    "仓库运行说明与关键模块笔记",
+                    "基于仓库完成的小改造及自测记录",
+                ],
+                primary_source=self._source(hit),
+                alternate_sources=[self._source(item) for item in hit.alternate_sources],
+                stack_evidence=hit.stack_evidence,
+            ))
+        return AIProjectRecommendResult(
+            mode="REPOSITORY",
+            source_runs=self._source_runs(prepared),
+            items=items if prepared.get("search_cursor") is not None else items[:6],
+            search_cursor=prepared.get("search_cursor"),
+            discovered_keys=prepared.get("discovered_keys", []),
+        )
+
+    def _item(self, hit: RepoHit, suggestion: Any) -> ProjectRecommendationItem:
+        return ProjectRecommendationItem(
+            title=hit.name,
+            summary=hit.description,
+            skill_codes=suggestion.skill_codes,
+            difficulty=suggestion.difficulty,
+            estimated_weeks=suggestion.estimated_weeks,
+            reason=suggestion.reason,
+            getting_started=suggestion.getting_started,
+            deliverables=suggestion.deliverables,
+            primary_source=self._source(hit),
+            alternate_sources=[self._source(item) for item in hit.alternate_sources],
+            stack_evidence=hit.stack_evidence,
+        )
+
+    @staticmethod
+    def _candidate_input(hit: RepoHit) -> dict[str, Any]:
+        return {
+            "sourceUrl": hit.url,
+            "platform": hit.platform,
+            "path": hit.path,
+            "title": hit.name,
+            "summary": hit.description,
+            "skillCodes": hit.matched_skill_codes,
+            "license": hit.license,
+            "stars": hit.stars,
+            "readmeUrl": hit.readme_url,
+            "stackEvidence": hit.stack_evidence,
+        }
+
+    @staticmethod
+    def _source(hit: RepoHit) -> RepositorySource:
+        return RepositorySource.model_validate(hit.source_dict())
+
+    @staticmethod
+    def _source_runs(prepared: dict[str, Any]) -> list[RepositorySourceRun]:
+        return [RepositorySourceRun.model_validate(item) for item in prepared.get("source_runs") or []]
 
 
 class ProjectPlanHandler(ProjectFallbackHandler):
@@ -1346,6 +1994,7 @@ class ProjectPlanHandler(ProjectFallbackHandler):
 
 HANDLERS: dict[str, BaseHandler] = {
     RESUME_PARSE: ResumeParseHandler(),
+    RESUME_OCR: ResumeOcrHandler(),
     RESUME_DIAGNOSE: ResumeDiagnoseHandler(),
     RESUME_OPTIMIZE: ResumeOptimizeHandler(),
     JD_ANALYZE: JDAnalyzeHandler(),
@@ -1354,6 +2003,8 @@ HANDLERS: dict[str, BaseHandler] = {
     LEARNING_PLAN: LearningPlanHandler(),
     LEARNING_QUESTION: LearningQuestionHandler(),
     LEARNING_EVALUATE: LearningEvaluateHandler(),
+    LEARNING_PRACTICE_QUESTIONS: LearningPracticeQuestionsHandler(),
+    LEARNING_PRACTICE_EVALUATE: LearningPracticeEvaluateHandler(),
     INTERVIEW_TURN: InterviewTurnHandler(),
     INTERVIEW_REPORT: InterviewReportHandler(),
     GROWTH_ANALYZE: GrowthAnalyzeHandler(),

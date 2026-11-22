@@ -15,7 +15,16 @@ from tests.factories import RESUME_VERSION_ID
 
 
 def _settings(**overrides) -> Settings:
-    base = dict(app_env="test", callback_enabled=False, llm_provider="fake")
+    # 显式固定文件白名单与 OCR 路径，避免本机 .env 的运行配置影响测试环境
+    base = dict(
+        app_env="test",
+        callback_enabled=False,
+        llm_provider="fake",
+        allowed_file_hosts="files.example.invalid",
+        file_allowed_schemes="https",
+        tesseract_cmd=None,
+        tessdata_dir=None,
+    )
     base.update(overrides)
     return Settings(**base)
 

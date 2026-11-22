@@ -47,7 +47,13 @@ public class ResumeResultHandler implements TaskResultHandler {
         if (facts == null) {
             throw BusinessException.aiSchema("解析结果缺少 facts");
         }
+        // 空事实拒绝：skills/internships/awards 全为空时不得标记为解析完成（此前空结果被标成 PARSED）。
         List<Map<String, Object>> skills = (List<Map<String, Object>>) facts.getOrDefault("skills", List.of());
+        List<Map<String, Object>> internships = (List<Map<String, Object>>) facts.getOrDefault("internships", List.of());
+        List<Map<String, Object>> awards = (List<Map<String, Object>>) facts.getOrDefault("awards", List.of());
+        if (skills.isEmpty() && internships.isEmpty() && awards.isEmpty()) {
+            throw BusinessException.aiSchema("解析结果没有任何有效事实（技能、实习、获奖均为空）");
+        }
         for (Map<String, Object> skill : skills) {
             skill.put("confirmed", false);
         }
@@ -65,7 +71,14 @@ public class ResumeResultHandler implements TaskResultHandler {
     public void failure(AiTask task, JsonNode error) {
         Map<String, Object> row = mapper.version(task.getResourceId(), task.getUserId());
         if (row != null && Set.of("PARSING", "UPLOADED").contains(String.valueOf(row.get("status")))) {
-            mapper.updateStatus(task.getResourceId(), "FAILED");
+            // 重跑失败保留草稿：已有有效草稿（reparse 场景）时恢复 PARSED，避免丢失原解析结果。
+            String existingFacts = row.get("parsed_facts_json") == null ? null
+                    : String.valueOf(row.get("parsed_facts_json"));
+            if ("PARSING".equals(String.valueOf(row.get("status"))) && existingFacts != null && !existingFacts.isBlank()) {
+                mapper.updateStatus(task.getResourceId(), "PARSED");
+            } else {
+                mapper.updateStatus(task.getResourceId(), "FAILED");
+            }
         }
     }
 

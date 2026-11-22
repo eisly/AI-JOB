@@ -19,6 +19,7 @@ from .schemas import (
     AIQuestionResult,
     AIResumeDiagnoseResult,
     AIResumeOptimizeResult,
+    AIResumeOcrResult,
     GrowthPayload,
     InterviewReportPayload,
     InterviewTurnPayload,
@@ -26,16 +27,22 @@ from .schemas import (
     JobMatchPayload,
     JobSearchPayload,
     LearningEvaluatePayload,
+    AIPracticeEvaluateResult,
+    AIPracticeQuestionSet,
     LearningPlanPayload,
+    LearningPracticeEvaluatePayload,
+    LearningPracticeQuestionsPayload,
     LearningQuestionPayload,
     ProjectPlanPayload,
     ProjectRecommendPayload,
     ResumeDiagnosePayload,
     ResumeOptimizePayload,
+    ResumeOcrPayload,
     ResumeParsePayload,
 )
 
 RESUME_PARSE = "RESUME_PARSE"
+RESUME_OCR = "RESUME_OCR"
 RESUME_DIAGNOSE = "RESUME_DIAGNOSE"
 RESUME_OPTIMIZE = "RESUME_OPTIMIZE"
 JD_ANALYZE = "JD_ANALYZE"
@@ -44,6 +51,8 @@ JOB_SEARCH = "JOB_SEARCH"
 LEARNING_PLAN = "LEARNING_PLAN"
 LEARNING_QUESTION = "LEARNING_QUESTION"
 LEARNING_EVALUATE = "LEARNING_EVALUATE"
+LEARNING_PRACTICE_QUESTIONS = "LEARNING_PRACTICE_QUESTIONS"
+LEARNING_PRACTICE_EVALUATE = "LEARNING_PRACTICE_EVALUATE"
 INTERVIEW_TURN = "INTERVIEW_TURN"
 INTERVIEW_REPORT = "INTERVIEW_REPORT"
 GROWTH_ANALYZE = "GROWTH_ANALYZE"
@@ -52,6 +61,7 @@ PROJECT_PLAN = "PROJECT_PLAN"
 
 OPERATIONS: tuple[str, ...] = (
     RESUME_PARSE,
+    RESUME_OCR,
     RESUME_DIAGNOSE,
     RESUME_OPTIMIZE,
     JD_ANALYZE,
@@ -60,6 +70,8 @@ OPERATIONS: tuple[str, ...] = (
     LEARNING_PLAN,
     LEARNING_QUESTION,
     LEARNING_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
+    LEARNING_PRACTICE_EVALUATE,
     INTERVIEW_TURN,
     INTERVIEW_REPORT,
     GROWTH_ANALYZE,
@@ -69,6 +81,7 @@ OPERATIONS: tuple[str, ...] = (
 
 PAYLOAD_MODELS: dict[str, type] = {
     RESUME_PARSE: ResumeParsePayload,
+    RESUME_OCR: ResumeOcrPayload,
     RESUME_DIAGNOSE: ResumeDiagnosePayload,
     RESUME_OPTIMIZE: ResumeOptimizePayload,
     JD_ANALYZE: JDParsePayload,
@@ -77,6 +90,8 @@ PAYLOAD_MODELS: dict[str, type] = {
     LEARNING_PLAN: LearningPlanPayload,
     LEARNING_QUESTION: LearningQuestionPayload,
     LEARNING_EVALUATE: LearningEvaluatePayload,
+    LEARNING_PRACTICE_QUESTIONS: LearningPracticeQuestionsPayload,
+    LEARNING_PRACTICE_EVALUATE: LearningPracticeEvaluatePayload,
     INTERVIEW_TURN: InterviewTurnPayload,
     INTERVIEW_REPORT: InterviewReportPayload,
     GROWTH_ANALYZE: GrowthPayload,
@@ -86,6 +101,7 @@ PAYLOAD_MODELS: dict[str, type] = {
 
 RESULT_MODELS: dict[str, type] = {
     RESUME_PARSE: AIParseResult,
+    RESUME_OCR: AIResumeOcrResult,
     RESUME_DIAGNOSE: AIResumeDiagnoseResult,
     RESUME_OPTIMIZE: AIResumeOptimizeResult,
     JD_ANALYZE: AIJDResult,
@@ -94,6 +110,8 @@ RESULT_MODELS: dict[str, type] = {
     LEARNING_PLAN: AIPlanResult,
     LEARNING_QUESTION: AIQuestionResult,
     LEARNING_EVALUATE: AIEvaluateResult,
+    LEARNING_PRACTICE_QUESTIONS: AIPracticeQuestionSet,
+    LEARNING_PRACTICE_EVALUATE: AIPracticeEvaluateResult,
     INTERVIEW_TURN: AIInterviewTurnResult,
     INTERVIEW_REPORT: AIInterviewReportResult,
     GROWTH_ANALYZE: AIGrowthResult,
@@ -103,24 +121,28 @@ RESULT_MODELS: dict[str, type] = {
 
 PROMPT_VERSIONS: dict[str, str] = {
     RESUME_PARSE: "resume-parse-v3",
-    RESUME_DIAGNOSE: "resume-diagnose-v1",
+    RESUME_OCR: "resume-ocr-v1",
+    RESUME_DIAGNOSE: "resume-diagnose-v5",
     RESUME_OPTIMIZE: "resume-optimize-v1",
     JD_ANALYZE: "jd-analyze-v3",
     JOB_MATCH: "semantic-v2",
     JOB_SEARCH: "job-search-v1",
     LEARNING_PLAN: "learning-plan-v3",
-    LEARNING_QUESTION: "learning-question-v2",
+    LEARNING_QUESTION: "learning-question-v3",
     LEARNING_EVALUATE: "answer-evaluate-v3",
+    LEARNING_PRACTICE_QUESTIONS: "learning-practice-questions-v1",
+    LEARNING_PRACTICE_EVALUATE: "learning-practice-evaluate-v1",
     INTERVIEW_TURN: "interview-turn-v5",
     INTERVIEW_REPORT: "interview-report-v2",
     GROWTH_ANALYZE: "growth-analyze-v2",
-    PROJECT_RECOMMEND: "project-recommend-v1",
-    PROJECT_PLAN: "project-plan-v1",
+    PROJECT_RECOMMEND: "project-recommend-v2",
+    PROJECT_PLAN: "project-plan-v2",
 }
 
 # Minimum inputVersions keys the Java side must freeze for each operation.
 REQUIRED_VERSION_KEYS: dict[str, tuple[str, ...]] = {
     RESUME_PARSE: ("resumeVersionId",),
+    RESUME_OCR: ("resumeVersionId",),
     RESUME_DIAGNOSE: ("resumeVersionId",),
     RESUME_OPTIMIZE: ("resumeVersionId", "jobVersion"),
     JD_ANALYZE: ("jobVersion",),
@@ -129,6 +151,8 @@ REQUIRED_VERSION_KEYS: dict[str, tuple[str, ...]] = {
     LEARNING_PLAN: ("profileVersion",),
     LEARNING_QUESTION: ("profileVersion",),
     LEARNING_EVALUATE: ("questionVersion",),
+    LEARNING_PRACTICE_QUESTIONS: ("profileVersion",),
+    LEARNING_PRACTICE_EVALUATE: ("practiceSetVersion",),
     INTERVIEW_TURN: ("profileVersion", "interviewVersion"),
     INTERVIEW_REPORT: ("interviewVersion",),
     GROWTH_ANALYZE: ("profileVersion",),
@@ -149,7 +173,7 @@ def _require_versions(operation: str, versions: dict[str, Any]) -> None:
 def validate_version_binding(operation: str, versions: dict[str, Any], payload: Any) -> None:
     _require_versions(operation, versions)
 
-    if operation in (RESUME_PARSE, RESUME_DIAGNOSE, RESUME_OPTIMIZE) and "resumeVersionId" in versions:
+    if operation in (RESUME_PARSE, RESUME_OCR, RESUME_DIAGNOSE, RESUME_OPTIMIZE) and "resumeVersionId" in versions:
         if str(versions["resumeVersionId"]).lower() != str(payload.document.version_id).lower():
             raise validation_error("inputVersions.resumeVersionId 与 payload.document.versionId 不一致")
     if operation == JD_ANALYZE and "jobVersion" in versions:

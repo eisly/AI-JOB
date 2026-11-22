@@ -3,13 +3,15 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '@/api/interviews'
+import { voiceInterviewApi } from '@/api/voiceInterviews'
 import { jobApi } from '@/api/jobs'
 import { resumeApi } from '@/api/resumes'
 import { ApiError } from '@/api/request'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
-import type { InterviewReportVO, InterviewVO, JobVO, ResumeVO, TaskVO } from '@/api/types'
+import type { InterviewReportVO, InterviewVO, JobVO, ResumeVO, TaskVO, VoiceCapabilityVO } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
+import VoiceAnswerPanel from './components/VoiceAnswerPanel.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
 import { commonStatusLabels, errorMessage, formatDate } from '@/utils/format'
 
@@ -18,6 +20,8 @@ interface AnswerAttempt {
   questionMessageId: string
   content: string
   expectedVersion: number
+  answerSource: 'TEXT' | 'VOICE'
+  voiceTranscriptionId?: string
 }
 
 const route = useRoute()
@@ -48,6 +52,13 @@ const submitting = ref(false)
 const ending = ref(false)
 const retrying = ref(false)
 const actionError = ref<unknown>(null)
+const voiceCapability = ref<VoiceCapabilityVO | null>(null)
+let voiceCapabilitySeq = 0
+const voiceAvailable = computed(() => {
+  if (!voiceCapability.value?.asrEnabled) return false
+  if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) return false
+  return typeof window === 'undefined' || window.isSecureContext || ['localhost', '127.0.0.1'].includes(window.location.hostname)
+})
 const createForm = ref({
   jobId: typeof route.query.jobId === 'string' ? route.query.jobId : '',
   resumeVersionId: '',
@@ -200,6 +211,18 @@ async function loadReport(interviewId: string) {
   }
 }
 
+async function loadCapability(interviewId: string) {
+  const run = ++voiceCapabilitySeq
+  voiceCapability.value = null
+  if (!interviewId) return
+  try {
+    const value = await voiceInterviewApi.capability(interviewId)
+    if (run === voiceCapabilitySeq) voiceCapability.value = value
+  } catch {
+    if (run === voiceCapabilitySeq) voiceCapability.value = null
+  }
+}
+
 async function loadInterview(interviewId: string, showReport = false) {
   if (!interviewId) return null
   const run = ++interviewRequestSeq
@@ -223,6 +246,7 @@ async function loadInterview(interviewId: string, showReport = false) {
     selectedInterviewId.value = value.id
     activeTaskId.value = value.pendingTaskId || ''
     taskSnapshot.value = null
+    void loadCapability(value.id)
     const historyIndex = history.value.findIndex((item) => item.id === value.id)
     if (historyIndex >= 0) history.value[historyIndex] = { ...history.value[historyIndex], ...value, messages: history.value[historyIndex].messages }
     if (value.status === 'COMPLETED') await loadReport(value.id)
@@ -311,7 +335,7 @@ async function createInterview() {
   }
 }
 
-async function submitAnswer(content: string) {
+async function submitAnswer(content: string, answerSource: 'TEXT' | 'VOICE' = 'TEXT', voiceTranscriptionId = '') {
   const interview = currentInterview.value
   const question = currentQuestion.value
   if (!interview || !question || interview.status !== 'WAITING_ANSWER') {
@@ -329,6 +353,8 @@ async function submitAnswer(content: string) {
     questionMessageId: question.id,
     content,
     expectedVersion: interview.version,
+    answerSource,
+    ...(answerSource === 'VOICE' ? { voiceTranscriptionId } : {}),
   }
   answerAttempt.value = attempt
   try {
@@ -336,6 +362,7 @@ async function submitAnswer(content: string) {
       questionMessageId: question.id,
       content,
       expectedVersion: interview.version,
+      ...(answerSource === 'VOICE' ? { answerSource, voiceTranscriptionId } : {}),
     })
     answerAttempt.value = { ...attempt, taskId: task.id }
     taskSnapshot.value = task
@@ -358,10 +385,20 @@ async function sendAnswer() {
   await submitAnswer(answerContent.value)
 }
 
+async function handleVoiceSubmit(payload: { content: string; answerSource: 'TEXT' | 'VOICE'; transcriptionId: string }) {
+  answerContent.value = payload.content
+  await submitAnswer(payload.content, payload.answerSource, payload.transcriptionId)
+}
+
+function handleVoiceSwitchText() {
+  ElMessage.info('已切换为文字作答，已识别的文本会保留在当前编辑区')
+}
+
 async function retryAnswerWithSameContent() {
   if (!answerAttempt.value) return
   answerContent.value = answerAttempt.value.content
-  await submitAnswer(answerAttempt.value.content)
+  const attempt = answerAttempt.value
+  await submitAnswer(attempt.content, attempt.answerSource, attempt.voiceTranscriptionId)
 }
 
 async function endInterview() {
@@ -502,29 +539,48 @@ onMounted(async () => {
       </div>
     </header>
 
-    <el-alert class="text-only-alert" title="当前仅支持文字面试" description="请直接输入文字回答；流式题目仅作生成过程预览，最终消息以保存后的面试记录为准。" type="info" :closable="false" show-icon />
+    <el-alert
+      v-if="currentInterview && voiceCapability && !voiceCapability.asrEnabled"
+      class="text-only-alert"
+      title="当前会话暂未开启语音作答"
+      description="可直接输入文字完成面试；语音能力恢复后会在此处展示入口。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-else-if="currentInterview && !voiceAvailable"
+      class="text-only-alert"
+      title="当前浏览器环境不支持录音"
+      description="需要使用 HTTPS 或本机地址，并允许麦克风权限；也可以直接输入文字作答。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-else
+      class="text-only-alert"
+      title="支持文字与语音逐题作答"
+      description="语音回答会先转写为文字，经你确认后提交；播放题目请点击播报按钮，开始录音会自动停止播报。"
+      type="info"
+      :closable="false"
+      show-icon
+    />
 
-    <section v-if="activeTask" class="panel task-panel">
+    <section v-if="activeTaskId" class="panel task-panel">
       <div class="panel__heading">
         <h2>当前异步任务</h2>
-        <el-tag v-if="isTerminalTask(activeTask.status)" type="info" size="small">已结束</el-tag>
-        <el-tag v-else :type="tracker.connected.value ? 'success' : 'info'" size="small">
-          {{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}
-        </el-tag>
       </div>
-      <TaskStatus :task="activeTask" :reasoning="activeReasoning">
+      <TaskStatus :task="activeTask" :reasoning="activeReasoning" :loading="tracker.loading.value" :tracking-error="tracker.error.value" :refreshing="tracker.refreshing.value" @refresh="tracker.refresh">
         <template #actions>
-          <el-button v-if="canRetryTrackedTask(activeTask)" type="primary" :loading="retrying" @click="retryActiveTask">重试失败任务</el-button>
-          <el-button v-if="activeTask.status === 'FAILED' && activeTask.type === 'INTERVIEW_TURN' && answerAttempt" :disabled="submitting || retrying" @click="retryAnswerWithSameContent">使用原内容重新提交</el-button>
+          <el-button v-if="activeTask && canRetryTrackedTask(activeTask)" type="primary" :loading="retrying" @click="retryActiveTask">重试失败任务</el-button>
+          <el-button v-if="activeTask?.status === 'FAILED' && activeTask.type === 'INTERVIEW_TURN' && answerAttempt" :disabled="submitting || retrying" @click="retryAnswerWithSameContent">使用原内容重新提交</el-button>
         </template>
       </TaskStatus>
       <div v-if="pendingDeltaText" class="delta-preview">
         <strong>正在生成，尚未保存</strong>
         <div class="pre-wrap">{{ pendingDeltaText }}</div>
       </div>
-      <el-alert v-if="tracker.error.value" class="task-connection-error" :title="errorMessage(tracker.error.value)" type="warning" :closable="false" show-icon>
-        <el-button size="small" @click="tracker.restart">重新连接并刷新</el-button>
-      </el-alert>
     </section>
 
     <el-alert v-if="actionError" class="action-error" :title="errorMessage(actionError)" type="error" show-icon @close="actionError = null" />
@@ -601,7 +657,7 @@ onMounted(async () => {
                 <div class="message__content pre-wrap">{{ message.content }}</div>
               </article>
             </div>
-            <el-empty v-else-if="activeTask && !isTerminalTask(activeTask.status)" description="首题正在生成，保存后将显示在这里" />
+            <p v-else-if="activeTaskId && !isTerminalTask(activeTask?.status)" class="muted">首题就绪后将在这里显示。</p>
             <el-empty v-else description="暂无已保存的面试消息" />
 
             <div v-if="currentInterview.status === 'WAITING_ANSWER'" class="answer-box">
@@ -609,28 +665,41 @@ onMounted(async () => {
                 <strong>回答当前问题</strong>
                 <span class="muted">使用当前会话版本 {{ currentInterview.version }}</span>
               </div>
-              <el-input
-                v-model="answerContent"
-                type="textarea"
-                :rows="7"
-                maxlength="10000"
-                show-word-limit
-                resize="vertical"
-                placeholder="请输入 1–10000 个字符的回答"
-                :disabled="submitting || (!!activeTask && !isTerminalTask(activeTask.status))"
-                @keydown.ctrl.enter.prevent="canAnswer && sendAnswer()"
+              <VoiceAnswerPanel
+                v-if="voiceAvailable && voiceCapability && currentQuestion"
+                :key="`${currentInterview.id}:${currentQuestion.id}`"
+                :interview="currentInterview"
+                :question="currentQuestion"
+                :capability="voiceCapability"
+                :disabled="!!activeTask && !isTerminalTask(activeTask.status)"
+                :submitting="submitting"
+                @submit="handleVoiceSubmit"
+                @switch-text="handleVoiceSwitchText"
               />
-              <div class="answer-box__actions">
-                <span class="muted">发送失败时保留原内容；遇到版本冲突会先刷新，不会自动重发。</span>
-                <el-button type="primary" :loading="submitting" :disabled="!canAnswer" @click="sendAnswer">提交回答</el-button>
-              </div>
+              <template v-else>
+                <el-input
+                  v-model="answerContent"
+                  type="textarea"
+                  :rows="7"
+                  maxlength="10000"
+                  show-word-limit
+                  resize="vertical"
+                  placeholder="请输入 1–10000 个字符的回答"
+                  :disabled="submitting || (!!activeTask && !isTerminalTask(activeTask.status))"
+                  @keydown.ctrl.enter.prevent="canAnswer && sendAnswer()"
+                />
+                <div class="answer-box__actions">
+                  <span class="muted">发送失败时保留原内容；遇到版本冲突会先刷新，不会自动重发。</span>
+                  <el-button type="primary" :loading="submitting" :disabled="!canAnswer" @click="sendAnswer">提交回答</el-button>
+                </div>
+              </template>
             </div>
             <div class="session-actions">
               <el-button v-if="currentInterview.status === 'WAITING_ANSWER'" type="danger" plain :loading="ending" :disabled="!!activeTask && !isTerminalTask(activeTask.status)" @click="endInterview">结束面试并生成报告</el-button>
               <el-button v-if="currentInterview.status === 'COMPLETED'" type="primary" plain :loading="reportLoading" @click="loadReport(currentInterview.id)">查看 / 刷新报告</el-button>
             </div>
           </template>
-          <el-empty v-else-if="activeTask && !isTerminalTask(activeTask.status)" description="面试已创建，正在等待首题生成" />
+            <p v-else-if="activeTaskId && !isTerminalTask(activeTask?.status)" class="muted">首题就绪后将在这里显示。</p>
         </AsyncState>
       </section>
 
@@ -639,7 +708,7 @@ onMounted(async () => {
           <h2>面试复盘报告</h2>
           <el-tag v-if="report" type="info">报告 v{{ report.reportVersion }}</el-tag>
         </div>
-        <AsyncState :loading="reportLoading" :error="reportError" @retry="loadReport(selectedInterviewId)">
+        <AsyncState :loading="reportLoading" :retain="!!report" :error="reportError" @retry="loadReport(selectedInterviewId)">
           <template v-if="report">
             <div class="report-summary">
               <div class="score-card" :class="{ 'score-card--empty': report.evaluation.overallScore === null }">
@@ -654,6 +723,7 @@ onMounted(async () => {
               </div>
             </div>
             <el-alert v-if="report.completionType === 'NO_VALID_ANSWER'" class="report-notice" title="本次没有有效回答，因此不生成有效评分，也不新增能力证据。" type="info" :closable="false" show-icon />
+            <el-alert v-else-if="!report.evidenceIds.length" class="report-notice" :title="report.skillEvidenceMessage || '本次有有效总评，但没有有效的逐技能评分，因此不新增技能证据或有效样本；总分不会复制为技能分。'" type="info" :closable="false" show-icon />
 
             <div class="report-section">
               <h3>能力维度</h3>
@@ -715,7 +785,7 @@ onMounted(async () => {
         <h2>历史面试</h2>
         <el-button size="small" @click="loadHistory()">刷新记录</el-button>
       </div>
-      <AsyncState :loading="historyLoading" :error="historyError" :empty="!history.length" empty-text="暂无历史面试" @retry="loadHistory()">
+      <AsyncState :loading="historyLoading" :retain="history.length > 0" :error="historyError" :empty="!history.length" empty-text="暂无历史面试" @retry="loadHistory()">
         <div class="history-list">
           <article v-for="item in history" :key="item.id" class="history-item" :class="{ 'history-item--active': item.id === selectedInterviewId }">
             <button class="history-item__main" type="button" @click="openInterview(item.id)">
@@ -723,7 +793,7 @@ onMounted(async () => {
               <el-tag size="small" :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'primary'">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
               <el-tag v-if="item.completionType === 'EARLY_END'" size="small" type="warning">提前结束</el-tag>
               <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER'" size="small" type="info">无有效回答</el-tag>
-              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} / {{ item.questionLimit }} 个主问题</span>
+              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} 次（含追问） · 计划 {{ item.questionLimit }} 个主问题</span>
               <time class="muted">{{ formatDate(item.createdAt) }}</time>
             </button>
             <div class="history-item__actions">
@@ -752,9 +822,7 @@ onMounted(async () => {
 <style scoped lang="scss">
 .interview-page { padding-bottom: 24px; }
 .text-only-alert, .action-error { margin-bottom: 14px; }
-.task-panel { border-color: #cfe0fb; }
-.task-connection-error { margin-top: 12px; }
-.task-connection-error .el-button { margin-top: 8px; }
+.task-panel { border-color: var(--ai-accent-border, #cfe0fb); }
 .delta-preview { display: grid; gap: 8px; margin-top: 12px; padding: 14px; border: 1px dashed $ai-primary; border-radius: $ai-radius; color: $ai-text-secondary; background: $ai-primary-light; }
 .delta-preview strong { color: $ai-primary; }
 .prepare-form { max-width: 920px; }
@@ -763,7 +831,7 @@ onMounted(async () => {
 .session-meta { margin: 6px 0 0; color: $ai-text-secondary; }
 .message-list { display: grid; gap: 14px; max-height: 680px; padding: 4px; overflow-y: auto; }
 .message { width: min(88%, 900px); padding: 14px 16px; border: 1px solid $ai-border; border-radius: $ai-radius-lg; background: $ai-bg-card; }
-.message--user { justify-self: end; border-color: #c9dcfb; background: $ai-primary-light; }
+.message--user { justify-self: end; border-color: var(--ai-accent-border, #c9dcfb); background: $ai-primary-light; }
 .message__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; color: $ai-text-secondary; font-size: 12px; }
 .message__meta strong { color: $ai-text-primary; font-size: 13px; }
 .message__meta time { margin-left: auto; }
@@ -772,7 +840,7 @@ onMounted(async () => {
 .answer-box__heading, .answer-box__actions, .session-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .session-actions { justify-content: flex-end; margin-top: 16px; }
 .report-summary { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
-.score-card { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; padding: 18px; border-radius: $ai-radius-lg; color: #fff; background: linear-gradient(145deg, $ai-primary, #668fec); }
+.score-card { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; padding: 18px; border-radius: $ai-radius-lg; color: #fff; background: linear-gradient(145deg, var(--ai-primary-solid, $ai-primary), var(--ai-primary-solid, #668fec)); }
 .score-card strong { margin: 8px 0; font-size: 44px; line-height: 1.1; }
 .score-card--empty { color: $ai-text-primary; background: $ai-bg-light; }
 .score-card--empty strong { font-size: 25px; }
@@ -782,7 +850,7 @@ onMounted(async () => {
 .report-facts strong { font-size: 18px; }
 .report-notice { margin-top: 16px; }
 .report-section { margin-top: 20px; }
-.report-section h3 { margin: 0 0 12px; color: #101d4b; font-size: 16px; }
+.report-section h3 { margin: 0 0 12px; color: var(--ai-text-primary, #101d4b); font-size: 16px; }
 .dimension-list, .gap-list { display: grid; gap: 12px; }
 .dimension-item, .gap-item { padding: 14px; border: 1px solid $ai-border; border-radius: $ai-radius; }
 .dimension-item__heading, .gap-item__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -792,9 +860,9 @@ onMounted(async () => {
 .report-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .report-list li { position: relative; padding: 12px 12px 12px 32px; border-radius: $ai-radius; line-height: 1.6; }
 .report-list li::before { position: absolute; left: 14px; font-weight: 700; }
-.strengths li { background: #ecfdf5; }
+.strengths li { background: var(--ai-success-bg, #ecfdf5); }
 .strengths li::before { content: '✓'; color: $ai-success; }
-.improvements li { background: #fff7ed; }
+.improvements li { background: var(--ai-warning-bg, #fff7ed); }
 .improvements li::before { content: '↑'; color: $ai-warning; }
 .gap-scores { display: flex; flex-wrap: wrap; gap: 8px 20px; color: $ai-text-secondary; }
 .history-list { display: grid; gap: 10px; }

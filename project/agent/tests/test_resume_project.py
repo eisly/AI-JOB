@@ -1,24 +1,19 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
 from app.errors import ApiError, HandlerValidationError
 from app.fake_model import fake_llm_from_payload
 from app.handlers import (
-    ExecutionContext,
     ProjectPlanHandler,
-    ProjectRecommendHandler,
     ResumeDiagnoseHandler,
     ResumeOptimizeHandler,
 )
-from app.graphs import CareerOrchestrator
-from app.llm import LLMProviderError, LLMRequest
+from app.llm import LLMRequest
 from app.operations import (
     INTERVIEW_TURN,
     PROJECT_PLAN,
@@ -36,7 +31,6 @@ from app.schemas import (
     ProjectPlanMilestone,
     ProjectPlanPayload,
     ProjectPlanTask,
-    ProjectRecommendationItem,
     ProjectRecommendPayload,
     ResumeDiagnosePayload,
     ResumeDiagnosisItem,
@@ -59,7 +53,9 @@ def _ctx(payload):
     return SimpleNamespace(payload=payload)
 
 
-def _diagnosis_output(quote="使用Redis实现缓存"):
+def _diagnosis_output(quote="使用Redis实现缓存", assessment=True, extra_quote="参与Java接口开发"):
+    from app.schemas import ResumeAssessment, ResumeAssessmentDimension, ResumeAssessmentStrength
+
     return AIResumeDiagnoseResult(
         items=[
             ResumeDiagnosisItem(
@@ -67,10 +63,63 @@ def _diagnosis_output(quote="使用Redis实现缓存"):
                 title="补充结果",
                 issue="结果不明确",
                 quote=quote,
+                quotes=[extra_quote],
                 rationale="原文仅描述做法",
+                impact="招聘方难以判断实际贡献",
                 suggestion="只补充可核实结果",
+                example=None,
+                pending_verification=["实际结果与量化指标"],
             )
-        ]
+        ],
+        assessment=ResumeAssessment(
+            rule_version="resume-quality-v2",
+            dimensions=[
+                ResumeAssessmentDimension(
+                    code="EXPERIENCE_PROJECTS",
+                    score=18,
+                    rationale="经历描述了职责，但成果不够明确。",
+                    quote=quote,
+                    quotes=[extra_quote],
+                ),
+                ResumeAssessmentDimension(
+                    code="SKILLS_EVIDENCE",
+                    score=12,
+                    rationale="技能与经历可以对应。",
+                    quote=quote,
+                ),
+                ResumeAssessmentDimension(
+                    code="CONTENT_COMPLETENESS",
+                    score=14,
+                    rationale="教育、经历、技能信息基本齐全。",
+                    quote=quote,
+                ),
+                ResumeAssessmentDimension(
+                    code="STRUCTURE_CLARITY",
+                    score=0,
+                    rationale="原文缺少可辨认的章节与时间线，无法评估结构。",
+                    quote=None,
+                ),
+                ResumeAssessmentDimension(
+                    code="EXPRESSION_PROFESSIONALISM",
+                    score=9,
+                    rationale="表述总体具体。",
+                    quote=quote,
+                ),
+            ],
+            strengths=[
+                ResumeAssessmentStrength(
+                    title="技能与经历可以相互印证",
+                    quote=quote,
+                    quotes=[extra_quote],
+                    description="技能描述在实习经历中有对应实现，属于可核对的优势。",
+                    approach="在实习中使用 Redis 实现缓存",
+                    contribution="参与接口开发并完成缓存实现",
+                    result="原文未给出可核实结果",
+                )
+            ],
+        )
+        if assessment
+        else None,
     )
 
 
@@ -86,22 +135,6 @@ def _optimize_output():
                 sourceQuotes=["参与Java接口开发"],
             )
         ],
-    )
-
-
-def _recommend_output():
-    return AIProjectRecommendResult(
-        items=[
-            ProjectRecommendationItem(
-                title="Redis 实战",
-                summary="完成可自测的学习项目",
-                skillCodes=["redis"],
-                difficulty="BEGINNER",
-                estimatedWeeks=2,
-                reason="依据技能差距生成学习建议",
-                deliverables=["源码与自测记录"],
-            )
-        ]
     )
 
 
@@ -138,10 +171,231 @@ def test_resume_diagnose_requires_inline_text_and_valid_quote():
         _ctx(payload), _diagnosis_output(), {"document_text": RESUME_TEXT}, {}
     )
     assert result.items[0].quote == "使用Redis实现缓存"
+    assert result.items[0].quotes == ["参与Java接口开发"]
+    assert result.assessment is not None
+    assert result.assessment.rule_version == "resume-quality-v2"
+    assert [d.score for d in result.assessment.dimensions] == [18, 12, 14, 0, 9]
+    assert result.assessment.dimensions[0].quotes == ["参与Java接口开发"]
+    assert result.assessment.dimensions[3].quote is None
+    assert result.assessment.strengths[0].approach == "在实习中使用 Redis 实现缓存"
+    assert result.assessment.strengths[0].contribution == "参与接口开发并完成缓存实现"
+    assert result.assessment.strengths[0].result == "原文未给出可核实结果"
     with pytest.raises(HandlerValidationError, match="quote 必须在简历授权原文中"):
         ResumeDiagnoseHandler().validate_business(
             _ctx(payload), _diagnosis_output("原文不存在"), {"document_text": RESUME_TEXT}, {}
         )
+    with pytest.raises(HandlerValidationError, match="quote 必须在简历授权原文中"):
+        ResumeDiagnoseHandler().validate_business(
+            _ctx(payload),
+            _diagnosis_output(extra_quote="原文不存在的补充引用"),
+            {"document_text": RESUME_TEXT},
+            {},
+        )
+
+
+def test_resume_diagnose_assessment_validation_rules():
+    from app.schemas import ResumeAssessment, ResumeAssessmentDimension, ResumeAssessmentStrength
+
+    payload = ResumeDiagnosePayload.model_validate(resume_diagnose_envelope(uuid4())["payload"])
+    handler = ResumeDiagnoseHandler()
+
+    with pytest.raises(HandlerValidationError, match="缺少评分 assessment"):
+        handler.validate_business(_ctx(payload), _diagnosis_output(assessment=False), {}, {})
+
+    output = _diagnosis_output()
+    output.assessment.dimensions = output.assessment.dimensions[:4]
+    with pytest.raises(HandlerValidationError, match="评分维度缺失"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+    output = _diagnosis_output()
+    output.assessment.dimensions[0].score = 31
+    with pytest.raises(HandlerValidationError, match="超过满分"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+    output = _diagnosis_output()
+    output.assessment.dimensions[1] = ResumeAssessmentDimension(
+        code="EXPERIENCE_PROJECTS",
+        score=10,
+        rationale="重复维度",
+        quote="使用Redis实现缓存",
+    )
+    with pytest.raises(HandlerValidationError, match="评分维度重复"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+    output = _diagnosis_output()
+    output.assessment.dimensions[3].score = 5
+    output.assessment.dimensions[3].quote = None
+    with pytest.raises(HandlerValidationError, match="正分必须提供简历原文依据"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+    output = _diagnosis_output()
+    output.assessment.strengths = [
+        ResumeAssessmentStrength(title="伪造优势", quote="简历里不存在的句子", description="伪造描述")
+    ]
+    with pytest.raises(HandlerValidationError, match="quote 必须在简历授权原文中"):
+        handler.validate_business(_ctx(payload), output, {}, {})
+
+
+def test_resume_diagnose_v3_scores_rubric_with_empty_advice_and_rejects_invalid_levels():
+    from app.schemas import AIResumeDiagnoseResult, RESUME_ASSESSMENT_DEFAULT_RULES
+
+    body = resume_diagnose_envelope(uuid4())["payload"]
+    body["document"]["text"] = "负责使用Redis实现缓存\n修复重复查询问题"
+    codes = [
+        ("problemContext", "personalRole", "approach", "outcomes"),
+        ("skillSpecificity", "appliedEvidence"),
+        ("background", "experienceFields", "context"),
+        ("sections", "hierarchy", "timeline"),
+        ("conciseness", "consistency"),
+    ]
+    rules = RESUME_ASSESSMENT_DEFAULT_RULES.model_dump(by_alias=True)
+    rules["ruleVersion"] = "resume-quality-v3"
+    for index, (dimension, names) in enumerate(zip(rules["dimensions"], codes)):
+        weight = 10 if index < 2 else 5
+        dimension["maxScore"] = len(names) * weight
+        dimension["checks"] = [
+            {"code": code, "label": code, "maxScore": weight} for code in names
+        ]
+    body["assessmentRules"] = rules
+    payload = ResumeDiagnosePayload.model_validate(body)
+    output = {
+        "items": [],
+        "assessment": {
+            "ruleVersion": "resume-quality-v3",
+            "summary": "描述了缓存改造的主要贡献。",
+            "dimensions": [
+                {
+                    "code": dimension["code"],
+                    "levels": {check["code"]: 3 for check in dimension["checks"]},
+                    "rationale": "原文描述了职责与结果。",
+                    "quote": "使用Redis实现缓存",
+                } for dimension in rules["dimensions"]
+            ],
+        },
+    }
+    handler = ResumeDiagnoseHandler()
+    result = handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    assert not result.items
+    assert [dimension.score for dimension in result.assessment.dimensions] == [24, 12, 9, 9, 6]
+    levels = output["assessment"]["dimensions"][0]["levels"]
+    del levels["problemContext"]
+    with pytest.raises(HandlerValidationError, match="评分点缺失或未知"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    levels["problemContext"] = 6
+    with pytest.raises(ValidationError):
+        AIResumeDiagnoseResult.model_validate(output)
+    levels["problemContext"] = 3
+
+    advice = _diagnosis_output(quote="负责使用Redis实现缓存", extra_quote="修复重复查询问题").items[0]
+    advice.dimension_code = "EXPERIENCE_PROJECTS"
+    advice.check_code = "outcomes"
+    output["items"] = [advice]
+    result = handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    assert result.items[0].check_code == "outcomes"
+    for code in (None, "timeline", "unknown"):
+        advice.check_code = code
+        with pytest.raises(HandlerValidationError, match="必须对应实际评分点"):
+            handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    advice.check_code = "outcomes"
+    levels["outcomes"] = 5
+    with pytest.raises(HandlerValidationError, match="不能关联满分项"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    levels["outcomes"] = 3
+    advice.quote = "不存在的引用"
+    with pytest.raises(HandlerValidationError, match="quote 必须在简历授权原文中"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+
+    structure = output["assessment"]["dimensions"][3]
+    for dates in ("2025-03 - 2025-06", "2028-07 - 2028-10"):
+        body["document"]["text"] = f"硕士教育 2024-09 - 2028-06\n实习经历 {dates}\n负责使用Redis实现缓存"
+        payload = ResumeDiagnosePayload.model_validate(body)
+        structure["levels"]["timeline"] = 5
+        output["items"] = []
+        result = handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+        assert result.assessment.dimensions[3].score == 11
+        structure["levels"]["timeline"] = 3
+        with pytest.raises(HandlerValidationError, match="已核验的 timelineLevel=5"):
+            handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    structure["levels"]["timeline"] = 5
+    structure["rationale"] = "实习时间与教育经历重叠，可能引起混乱。"
+    with pytest.raises(HandlerValidationError, match="不能因跨条目同期"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    structure["rationale"] = "日期清楚。"
+
+    advice.quote = "负责使用Redis实现缓存"
+    advice.quotes = []
+    advice.title = "项目和实习时间线重叠"
+    output["items"] = [advice]
+    with pytest.raises(HandlerValidationError, match="不能作为简历问题"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+
+    body["document"]["text"] = "实习经历 2025-06 - 2025-03\n另一项目 2025-01 - 2025-02\n负责使用Redis实现缓存"
+    payload = ResumeDiagnosePayload.model_validate(body)
+    structure["levels"]["timeline"] = 2
+    advice.dimension_code = "STRUCTURE_CLARITY"
+    advice.check_code = "timeline"
+    advice.title = "核对实习日期"
+    advice.rationale = "结束日期早于开始日期。"
+    advice.quote = "2025-01 - 2025-02"
+    with pytest.raises(HandlerValidationError, match="确实倒置"):
+        handler.validate_business(_ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {})
+    advice.quote = "2025-06 - 2025-03"
+    assert handler.validate_business(
+        _ctx(payload), AIResumeDiagnoseResult.model_validate(output), {}, {}
+    ).items[0].check_code == "timeline"
+
+
+def test_resume_diagnose_accepts_snapshot_assessment_rules():
+    body = resume_diagnose_envelope(uuid4())["payload"]
+    body["assessmentRules"] = {
+        "ruleVersion": "resume-quality-v1",
+        "dimensions": [
+            {"code": "EXPERIENCE_PROJECTS", "maxScore": 30, "criteria": "经历与项目"},
+            {"code": "SKILLS_EVIDENCE", "maxScore": 20, "criteria": "技能与证据"},
+            {"code": "CONTENT_COMPLETENESS", "maxScore": 20, "criteria": "内容完整性"},
+            {"code": "STRUCTURE_CLARITY", "maxScore": 15, "criteria": "结构清晰度"},
+            {"code": "EXPRESSION_PROFESSIONALISM", "maxScore": 15, "criteria": "表达专业性"},
+        ],
+    }
+    payload = ResumeDiagnosePayload.model_validate(body)
+    result = ResumeDiagnoseHandler().validate_business(
+        _ctx(payload), _diagnosis_output(), {"document_text": RESUME_TEXT}, {}
+    )
+    assert result.assessment.rule_version == "resume-quality-v1"
+
+    duplicate = {
+        "ruleVersion": "x",
+        "dimensions": [
+            {"code": "EXPERIENCE_PROJECTS", "maxScore": 30, "criteria": "经历与项目"},
+            {"code": "SKILLS_EVIDENCE", "maxScore": 20, "criteria": "技能与证据"},
+            {"code": "CONTENT_COMPLETENESS", "maxScore": 20, "criteria": "内容完整性"},
+            {"code": "STRUCTURE_CLARITY", "maxScore": 15, "criteria": "结构清晰度"},
+            {"code": "STRUCTURE_CLARITY", "maxScore": 15, "criteria": "重复"},
+        ],
+    }
+    with pytest.raises(ValidationError, match="不得重复"):
+        ResumeDiagnosePayload.model_validate({**body, "assessmentRules": duplicate})
+
+
+async def test_resume_diagnose_disables_thinking_and_restores_original_quote():
+    source = "项目描述：使用 Redis\r\n实现缓存。"
+    body = resume_diagnose_envelope(uuid4())["payload"]
+    body["document"]["text"] = source
+    payload = ResumeDiagnosePayload.model_validate(body)
+    response_data = _diagnosis_output("使用Redis实现缓存", extra_quote="项目描述").model_dump_json(by_alias=True)
+
+    async def complete(request):
+        assert request.thinking is False
+        return SimpleNamespace(model="test", text=response_data, latency_ms=1, input_tokens=1, output_tokens=1)
+
+    async def emit_stage(*args):
+        pass
+
+    ctx = SimpleNamespace(payload=payload, llm=SimpleNamespace(complete=complete),
+                          emit_stage=emit_stage, emit_reasoning=None)
+    result, _ = await ResumeDiagnoseHandler().execute(ctx, {"document_text": source.replace("\r\n", "\n")})
+
+    assert result["items"][0]["quote"] == "使用 Redis\r\n实现缓存"
 
 
 def test_resume_optimize_validates_references_and_unique_section_keys():
@@ -168,27 +422,6 @@ def test_resume_optimize_validates_references_and_unique_section_keys():
         handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
 
 
-def test_project_recommend_checks_skill_difficulty_and_duration():
-    payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
-    handler = ProjectRecommendHandler()
-    assert handler.validate_business(_ctx(payload), _recommend_output(), {}, {}).items[0].estimated_weeks == 2
-
-    output = _recommend_output()
-    output.items[0].skill_codes = ["python"]
-    with pytest.raises(HandlerValidationError, match="allowedSkillCodes"):
-        handler.validate_business(_ctx(payload), output, {}, {})
-
-    output = _recommend_output()
-    output.items[0].estimated_weeks = 5
-    with pytest.raises(HandlerValidationError, match="maxDurationWeeks"):
-        handler.validate_business(_ctx(payload), output, {}, {})
-
-    output = _recommend_output()
-    output.items[0].difficulty = "ADVANCED"
-    with pytest.raises(HandlerValidationError, match="difficulty"):
-        handler.validate_business(_ctx(payload), output, {}, {})
-
-
 def test_project_plan_checks_sequence_and_hour_budget():
     payload = ProjectPlanPayload.model_validate(project_plan_envelope(uuid4())["payload"])
     handler = ProjectPlanHandler()
@@ -205,74 +438,12 @@ def test_project_plan_checks_sequence_and_hour_budget():
         handler.validate_business(_ctx(payload), output, {}, {})
 
 
-@pytest.mark.asyncio
-async def test_project_recommend_and_plan_degrade_through_result_contract():
-    stages = []
-
-    class BlockedProvider:
-        name = "deepseek"
-        calls = 0
-
-        async def complete(self, request):
-            self.calls += 1
-            assert request.thinking is False
-            raise LLMProviderError("model rejected request", retryable=False, http_status=402)
-
-    async def emit(name, progress):
-        stages.append(name)
-
-    provider = BlockedProvider()
-    recommend = project_recommend_envelope(uuid4())["payload"]
-    recommend.update(allowedSkillCodes=["JAVA"], difficulty="ADVANCED", maxDurationWeeks=1)
-    orchestrator = CareerOrchestrator()
-    settings = Settings(llm_provider="fake")
-    result, meta = await orchestrator.execute(ExecutionContext(
-        SimpleNamespace(operation=PROJECT_RECOMMEND), ProjectRecommendPayload.model_validate(recommend),
-        settings, provider, None, emit,
-    ))
-    item = result["items"][0]
-    assert item["title"] == "Java 投递进度看板"
-    assert (item["skillCodes"], item["difficulty"], item["estimatedWeeks"]) == (["JAVA"], "ADVANCED", 1)
-    assert item["reason"].startswith("本地规则建议")
-    assert (meta["fallbackReason"], meta["resultValidated"], provider.calls) == ("MODEL_HTTP_402", True, 1)
-    result, meta = await orchestrator.execute(ExecutionContext(
-        SimpleNamespace(operation=PROJECT_PLAN),
-        ProjectPlanPayload.model_validate({"recommendation": item, "weeklyHours": 1}),
-        settings, provider, None, emit,
-    ))
-    assert result["summary"].startswith("本地规则计划")
-    assert result["milestones"][0]["tasks"][0]["estimatedHours"] == 1
-    assert len(result["milestones"]) == 1
-    assert (meta["fallbackReason"], meta["resultValidated"], provider.calls) == ("MODEL_HTTP_402", True, 2)
-    assert stages.count("using_local_project_rules") == 2
-
-
-@pytest.mark.asyncio
-async def test_project_model_deadline_returns_local_recommendation():
-    class SlowProvider:
-        async def complete(self, request):
-            await asyncio.sleep(10)
-
-    async def emit(*_):
-        pass
-
-    handler = ProjectRecommendHandler()
-    handler.model_deadline_seconds = 0.05
-    payload = ProjectRecommendPayload.model_validate(project_recommend_envelope(uuid4())["payload"])
-    result, meta = await handler.execute(ExecutionContext(
-        None, payload, Settings(llm_provider="fake"), SlowProvider(), None, emit,
-    ))
-    assert result["items"]
-    assert meta["fallbackReason"] == "MODEL_TIMEOUT"
-
-
 def test_new_result_models_enforce_required_collections():
     with pytest.raises(ValidationError):
         AIResumeDiagnoseResult(items=[])
     with pytest.raises(ValidationError):
         AIResumeOptimizeResult(title="候选", sections=[])
-    with pytest.raises(ValidationError):
-        AIProjectRecommendResult(items=[])
+    assert AIProjectRecommendResult(mode="REPOSITORY").items == []
     with pytest.raises(ValidationError):
         AIProjectPlanResult(title="计划", summary="摘要", milestones=[])
 
@@ -285,6 +456,34 @@ def test_fake_diagnosis_accepts_english_resume_and_preserves_quote():
     )
     output = AIResumeDiagnoseResult.model_validate(fake_llm_from_payload(request))
     assert output.items[0].quote in text
+    assert output.assessment is not None
+    assert output.assessment.rule_version == "resume-quality-v2"
+    assert output.items[0].impact
+    assert output.items[0].pending_verification
+    assert output.assessment.strengths[0].approach
+    assert output.assessment.strengths[0].result
+
+
+def test_resume_diagnose_falls_back_to_v2_rules_when_version_unsupported():
+    body = resume_diagnose_envelope(uuid4())["payload"]
+    body["assessmentRules"] = {
+        "ruleVersion": "resume-quality-v9",
+        "dimensions": [
+            {"code": "EXPERIENCE_PROJECTS", "maxScore": 30, "criteria": "经历与项目"},
+            {"code": "SKILLS_EVIDENCE", "maxScore": 20, "criteria": "技能与证据"},
+            {"code": "CONTENT_COMPLETENESS", "maxScore": 20, "criteria": "内容完整性"},
+            {"code": "STRUCTURE_CLARITY", "maxScore": 15, "criteria": "结构清晰度"},
+            {"code": "EXPRESSION_PROFESSIONALISM", "maxScore": 15, "criteria": "表达专业性"},
+        ],
+    }
+    payload = ResumeDiagnosePayload.model_validate(body)
+    result = ResumeDiagnoseHandler().validate_business(
+        _ctx(payload), _diagnosis_output(), {"document_text": RESUME_TEXT}, {}
+    )
+    assert result.assessment.rule_version == "resume-quality-v2"
+    assert result.assessment.dimensions[0].quotes == ["参与Java接口开发"]
+    assert result.items[0].impact == "招聘方难以判断实际贡献"
+    assert result.items[0].pending_verification == ["实际结果与量化指标"]
 
 
 def test_new_operation_version_bindings_and_interview_expected_version():
@@ -339,7 +538,6 @@ def test_new_operation_version_bindings_and_interview_expected_version():
     [
         (RESUME_DIAGNOSE, resume_diagnose_envelope, "不得编造诊断项"),
         (RESUME_OPTIMIZE, resume_optimize_envelope, "只能改写用户已经提供"),
-        (PROJECT_RECOMMEND, project_recommend_envelope, "不得声称用户已经做过"),
         (PROJECT_PLAN, project_plan_envelope, "不输出 status、progress"),
     ],
 )

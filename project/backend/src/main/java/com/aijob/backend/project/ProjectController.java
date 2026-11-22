@@ -46,6 +46,15 @@ public class ProjectController {
                 Data.uuid(recommendationId, "recommendationId")));
     }
 
+    @PostMapping("/recommendations/{recommendationId}/more")
+    public ResponseEntity<CommonResult<Object>> more(@PathVariable String recommendationId,
+                                                      @RequestHeader("Idempotency-Key") String key,
+                                                      @RequestBody Map<String, Object> body,
+                                                      HttpServletRequest request) {
+        return projects.more(users.resolveCurrentUserId(), Data.uuid(recommendationId, "recommendationId"),
+                request.getRequestURI(), Data.idempotencyKey(key), body);
+    }
+
     @PostMapping("/plans")
     public ResponseEntity<CommonResult<Object>> createPlan(@RequestHeader("Idempotency-Key") String key,
                                                             @RequestBody Map<String, Object> body,

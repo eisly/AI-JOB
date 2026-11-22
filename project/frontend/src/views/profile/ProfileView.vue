@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -164,12 +165,11 @@ const load = async () => {
       profile.value = profileResult.value
       fillForm(profileResult.value)
     } else {
-      profile.value = null
       const reason = profileResult.reason
       error.value = reason instanceof Error ? reason.message : '画像加载失败'
     }
 
-    skills.value = skillsResult.status === 'fulfilled' ? skillsResult.value : []
+    if (skillsResult.status === 'fulfilled') skills.value = skillsResult.value
   } finally {
     loading.value = false
   }
@@ -242,7 +242,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="profile-page" v-loading="loading">
+  <div class="profile-page">
     <div class="profile-page__meta">
       <span class="profile-page__date">{{ todayText }}</span>
       <el-tag v-if="isDemoMode" type="danger" effect="light" size="small">演示数据</el-tag>
@@ -262,7 +262,8 @@ onMounted(load)
       </template>
     </el-alert>
 
-    <div v-if="profile" class="profile-page__grid">
+    <LoadingSkeleton v-if="loading && !profile" :rows="5" label="正在加载求职画像" />
+    <div v-else-if="profile" class="profile-page__grid">
       <section class="panel">
         <div class="panel__header">
           <h2>求职偏好设置</h2>
@@ -278,6 +279,7 @@ onMounted(load)
           ref="formRef"
           :model="form"
           :rules="rules"
+          :disabled="loading"
           label-position="left"
           label-width="88px"
           class="preferences-form"
@@ -339,7 +341,7 @@ onMounted(load)
           <div class="preferences-form__footer">
             <span class="preferences-form__version">当前画像版本：{{ profile.profileVersion }}</span>
             <div class="preferences-form__actions">
-              <el-button type="primary" :loading="saving" @click="handleSave">保存求职偏好</el-button>
+              <el-button type="primary" :loading="saving" @click="handleSave">{{ saving ? '保存中…' : '保存求职偏好' }}</el-button>
               <el-button @click="handleReset">重置</el-button>
             </div>
           </div>
@@ -526,7 +528,7 @@ onMounted(load)
   margin-bottom: 18px;
   border-radius: $ai-radius;
   background-color: $ai-primary-light;
-  color: #3b5b8c;
+  color: var(--ai-text-secondary, #3b5b8c);
   font-size: 13px;
   line-height: 1.6;
 
@@ -683,7 +685,7 @@ onMounted(load)
 
 @media (max-width: 1100px) {
   .profile-page__grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -694,10 +696,38 @@ onMounted(load)
 
   .panel {
     padding: 18px;
+    min-width: 0;
+  }
+
+  .preferences-form :deep(.el-form-item) {
+    display: block;
+  }
+
+  .preferences-form :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    width: auto !important;
+  }
+
+  .preferences-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+    min-width: 0;
+  }
+
+  .salary-range {
+    flex-wrap: wrap;
   }
 
   .salary-range__input {
-    width: 100px;
+    width: 96px;
+    min-width: 0;
+  }
+
+  .preferences-form__actions {
+    flex-wrap: wrap;
+  }
+
+  .preferences-form__actions :deep(.el-button + .el-button) {
+    margin-left: 0;
   }
 }
 </style>

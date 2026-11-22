@@ -56,7 +56,7 @@ public interface ProfileMapper {
     @Update("UPDATE user_profile SET profile_version=profile_version+1,updated_at=UTC_TIMESTAMP(3) WHERE user_id=#{userId}")
     int touch(@Param("userId") String userId);
 
-    @Select("SELECT code,name,parent_code,enabled,normalization_status FROM skill_catalog WHERE enabled=1 AND (owner_user_id IS NULL OR owner_user_id=#{userId}) ORDER BY code")
+    @Select("SELECT code,name,parent_code,enabled,normalization_status,aliases FROM skill_catalog WHERE enabled=1 AND (owner_user_id IS NULL OR owner_user_id=#{userId}) ORDER BY code")
     List<Map<String,Object>> skills(@Param("userId") String userId);
 
     @Select("SELECT COUNT(*) FROM skill_catalog WHERE enabled=1 AND code=#{code} AND (owner_user_id IS NULL OR owner_user_id=#{userId})")

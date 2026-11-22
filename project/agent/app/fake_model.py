@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import re
@@ -298,16 +297,19 @@ def _question(request: LLMRequest) -> dict[str, Any]:
     ][:2]
     # T02：确定性题干变体——优先选择未在已用题干中出现过的考查角度，
     # 避免同技能连续生成等价题干被去重校验拒绝，保证普通练习路径可持续
-    used_stems = [str(item) for item in payload.get("excludedQuestionStems") or []]
+    used_stems = {re.sub(r"\s+", "", str(item)).lower()
+                  for item in payload.get("excludedQuestionStems") or []}
     angle = ""
     for candidate in _QUESTION_ANGLES:
-        if f"请结合一个可验证的场景，说明 {skill} 的{candidate}。" not in used_stems:
+        stem = f"请结合一个可验证的场景，说明 {skill} 的{candidate}。"
+        if re.sub(r"\s+", "", stem).lower() not in used_stems:
             angle = candidate
             break
     if not angle:
-        session_id = str(payload.get("sessionId") or "")
-        digest = hashlib.sha256(f"{skill}:{session_id}".encode("utf-8")).hexdigest()
-        angle = _QUESTION_ANGLES[int(digest, 16) % len(_QUESTION_ANGLES)]
+        raise LLMProviderError(
+            "当前技能的模拟题已练完，请到历史训练或错题本复习，或切换真实模型生成新题。",
+            retryable=False,
+        )
     return {
         "stem": f"请结合一个可验证的场景，说明 {skill} 的{angle}。",
         "skillCodes": [skill],
@@ -536,27 +538,91 @@ def _resume_diagnose(request: LLMRequest) -> dict[str, Any]:
         "简历", "教育", "经历", "项目", "技能", "工作", "实习",
         "resume", "education", "experience", "project", "skill", "developer", "internship",
     )):
-        return {"items": []}
-    quote = next(
-        (
-            line
-            for line in lines
-            if any(keyword in line for keyword in ("经历", "项目", "实习", "工作", "技能"))
-        ),
-        lines[0],
-    )[:1000]
-    return {
+        return {"items": [], "assessment": None}
+    quote_lines = [
+        line
+        for line in lines
+        if any(keyword in line for keyword in ("经历", "项目", "实习", "工作", "技能"))
+    ]
+    quote = (quote_lines[0] if quote_lines else lines[0])[:1000]
+    extra_quotes = [line[:1000] for line in quote_lines[1:3] if line[:1000] != quote]
+    assessment = {
+        "ruleVersion": "resume-quality-v2",
+        "dimensions": [
+            {
+                "code": "EXPERIENCE_PROJECTS",
+                "score": 18,
+                "rationale": "原文包含经历描述，但成果与个人贡献不够明确。",
+                "quote": quote,
+            },
+            {
+                "code": "SKILLS_EVIDENCE",
+                "score": 12,
+                "rationale": "技能描述较具体，且能在经历描述中找到部分支撑。",
+                "quote": quote,
+                "quotes": extra_quotes[:1],
+            },
+            {
+                "code": "CONTENT_COMPLETENESS",
+                "score": 14,
+                "rationale": "教育、经历、技能信息基本齐全，可理解候选人背景。",
+                "quote": quote,
+            },
+            {
+                "code": "STRUCTURE_CLARITY",
+                "score": 10,
+                "rationale": "章节与时间线基本清楚，层级稍显混乱。",
+                "quote": quote,
+            },
+            {
+                "code": "EXPRESSION_PROFESSIONALISM",
+                "score": 9,
+                "rationale": "表述总体具体，个别术语使用不一致。",
+                "quote": quote,
+            },
+        ],
+        "strengths": [
+            {
+                "title": "具备相关经历描述",
+                "quote": quote,
+                "quotes": extra_quotes[:1],
+                "approach": "在项目中使用该技能完成对应实现",
+                "contribution": "原文描述由本人完成该段工作",
+                "result": "原文未给出可核实结果",
+                "description": "原文包含与目标方向相关的经历描述，可作为面试追问的基础。",
+            }
+        ],
+    }
+    result = {
         "items": [
             {
                 "priority": "SUGGESTION",
                 "title": "补充可核实的经历结果",
                 "issue": "该段主要呈现经历或技能描述，结果信息不够明确",
                 "quote": quote,
+                "quotes": extra_quotes[:1],
                 "rationale": "原文没有为该段提供清晰的结果说明，阅读者难以核对实际贡献",
+                "impact": "招聘方难以判断该段经历的实际贡献与成效",
                 "suggestion": "仅补充本人能够核实的实际结果；没有可靠结果时保留原表述，不添加量化数据",
+                "example": None,
+                "pendingVerification": ["实际结果与量化指标"],
             }
-        ]
+        ],
+        "assessment": assessment,
     }
+    rules = _payload(request).get("assessmentRules") or {}
+    assessment["ruleVersion"] = rules.get("ruleVersion", "resume-quality-v2")
+    if assessment["ruleVersion"] == "resume-quality-v3":
+        assessment["summary"] = "简历已列出主要经历。优先补足个人职责与可核实成果。"
+        checks_by_code = {rule["code"]: rule["checks"] for rule in rules["dimensions"]}
+        for dimension in assessment["dimensions"]:
+            dimension["levels"] = {check["code"]: 3 for check in checks_by_code[dimension["code"]]}
+            timeline = request.context.get("timeline_level")
+            if timeline is not None and "timeline" in dimension["levels"]:
+                dimension["levels"]["timeline"] = timeline
+        result["items"][0]["dimensionCode"] = "EXPERIENCE_PROJECTS"
+        result["items"][0]["checkCode"] = "outcomes"
+    return result
 
 
 def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
@@ -593,23 +659,25 @@ def _project_recommend(request: LLMRequest) -> dict[str, Any]:
         for item in gaps
         if isinstance(item, dict) and item.get("skillCode") in allowed
     ]
-    selected = gap_skills[:1] or allowed[:1]
-    skill = selected[0] if selected else "general"
     max_weeks = int(payload.get("maxDurationWeeks") or 12)
     difficulty = str(payload.get("difficulty") or "INTERMEDIATE")
-    return {
-        "items": [
-            {
-                "title": f"{skill} 核心功能实战",
-                "summary": f"围绕 {skill} 完成一个边界清晰、可演示和可自测的学习项目",
-                "skillCodes": selected,
-                "difficulty": difficulty,
-                "estimatedWeeks": min(2, max_weeks),
-                "reason": "依据确认画像、授权技能目录和已提供的匹配差距形成学习建议，不代表用户已有项目经验",
-                "deliverables": ["项目说明与核心功能演示", "实现源码与自测记录"],
-            }
-        ]
-    }
+    items = []
+    for candidate in (payload.get("repositoryCandidates") or [])[:2]:
+        matched = [str(code) for code in candidate.get("skillCodes") or [] if str(code) in allowed]
+        selected = matched[:1] or gap_skills[:1] or allowed[:1]
+        items.append({
+            "sourceUrl": candidate.get("sourceUrl"),
+            "skillCodes": selected or ["general"],
+            "difficulty": difficulty,
+            "estimatedWeeks": min(2, max_weeks),
+            "reason": "依据真实仓库资料与目标技能形成入门学习建议，不代表用户已有项目经验",
+            "gettingStarted": [
+                "阅读仓库 README 和目录结构，确认运行方式",
+                "运行官方示例或最小 demo，记录依赖与启动步骤",
+            ],
+            "deliverables": ["项目说明与核心功能演示", "实现源码与自测记录"],
+        })
+    return {"items": items}
 
 
 def _job_search(request: LLMRequest) -> dict[str, Any]:
@@ -650,6 +718,149 @@ def _project_plan(request: LLMRequest) -> dict[str, Any]:
     }
 
 
+def _practice_questions(request: LLMRequest) -> dict[str, Any]:
+    """按配置生成一组混合题型题目（本地无凭据/测试用确定性输出）。"""
+    payload = _payload(request)
+    plan_item = payload.get("planItem") or {}
+    config = payload.get("config") or {}
+    skill = str(plan_item.get("skillCode") or "general")
+    difficulty = str(config.get("difficulty") or plan_item.get("difficulty") or "MEDIUM")
+    if difficulty == "MIXED":
+        difficulty = "MEDIUM"
+    dist = config.get("typeDistribution") or {}
+    choice = int(dist.get("choice") or 0)
+    fill = int(dist.get("fill") or 0)
+    subjective = int(dist.get("subjective") or 0)
+    total = int(config.get("totalQuestions") or (choice + fill + subjective))
+    if total != choice + fill + subjective:
+        subjective = max(0, total - choice - fill)
+    used_stems = {
+        re.sub(r"\s+", "", str(item)).lower()
+        for item in payload.get("excludedQuestionStems") or []
+    }
+    citations = [
+        {
+            "documentId": item.get("documentId"),
+            "documentVersion": item.get("documentVersion"),
+            "chunkId": item.get("chunkId"),
+            "quote": item.get("quote"),
+        }
+        for item in payload.get("knowledgeRefs") or []
+        if isinstance(item, dict)
+    ][:2]
+
+    questions: list[dict[str, Any]] = []
+    index = 0
+
+    def next_angle(prefix: str) -> str:
+        nonlocal index
+        for offset in range(0, len(_QUESTION_ANGLES) + index + 1):
+            angle = _QUESTION_ANGLES[(index + offset) % len(_QUESTION_ANGLES)]
+            stem = f"{prefix}{skill} 的{angle}（第 {index + 1} 题）。"
+            if re.sub(r"\s+", "", stem).lower() not in used_stems:
+                index += 1
+                used_stems.add(re.sub(r"\s+", "", stem).lower())
+                return stem
+        index += 1
+        return f"{prefix}{skill} 的综合应用（第 {index} 题）。"
+
+    for _ in range(choice):
+        questions.append(
+            {
+                "stem": next_angle("关于 "),
+                "type": "CHOICE",
+                "skillCodes": [skill],
+                "difficulty": difficulty,
+                "options": [
+                    {"key": "A", "content": f"{skill} 的核心机制说明"},
+                    {"key": "B", "content": "与该机制无关的描述"},
+                    {"key": "C", "content": "只在高版本成立的特例"},
+                    {"key": "D", "content": "常见误用方式"},
+                ],
+                "answerKey": ["A"],
+                "blankCount": 0,
+                "score": 10,
+                "referenceAnswer": f"{skill} 的核心机制是 A，其余选项分别属于无关描述、特例与误用。",
+                "rubric": RUBRIC,
+                "citations": citations,
+            }
+        )
+    for _ in range(fill):
+        fill_stem = next_angle("补全 ").rstrip("。") + "：____ 与 ____。"
+        questions.append(
+            {
+                "stem": fill_stem,
+                "type": "FILL",
+                "skillCodes": [skill],
+                "difficulty": difficulty,
+                "options": [],
+                "answerKey": [skill, "边界条件"],
+                "blankCount": 2,
+                "score": 10,
+                "referenceAnswer": f"第一空填 {skill}，第二空虚填边界条件。",
+                "rubric": RUBRIC,
+                "citations": citations,
+            }
+        )
+    for _ in range(subjective):
+        questions.append(
+            {
+                "stem": next_angle("请结合一个可验证的场景，说明 "),
+                "type": "SUBJECTIVE",
+                "skillCodes": [skill],
+                "difficulty": difficulty,
+                "options": [],
+                "answerKey": [],
+                "blankCount": 0,
+                "score": 10,
+                "referenceAnswer": f"围绕 {skill} 说明问题背景、核心方案、失败边界与验证方式。",
+                "rubric": RUBRIC,
+                "citations": citations,
+            }
+        )
+    return {"questions": questions}
+
+
+def _practice_evaluate(request: LLMRequest) -> dict[str, Any]:
+    """整组主观题评估（确定性替身，逐题复用单题评估逻辑）。"""
+    payload = _payload(request)
+    evaluations = []
+    for item in payload.get("answers") or []:
+        single = dict(payload)
+        single["answer"] = item.get("answer")
+        single["question"] = {
+            "id": item.get("questionId") or item.get("answerId"),
+            "questionVersion": item.get("questionVersion") or 1,
+            "stem": item.get("stem"),
+            "skillCodes": item.get("skillCodes") or [],
+            "referenceAnswer": item.get("referenceAnswer") or "",
+            "rubric": item.get("rubric") or RUBRIC,
+        }
+        result = _evaluate(
+            LLMRequest(
+                operation="LEARNING_EVALUATE",
+                system_prompt=request.system_prompt,
+                user_prompt=request.user_prompt,
+                schema_hint=request.schema_hint,
+                context={**request.context, "payload": single},
+            )
+        )
+        evaluation = result["evaluation"]
+        evaluations.append(
+            {
+                "answerId": item.get("answerId"),
+                "evaluation": evaluation,
+                "skillScores": result.get("skillScores") or [],
+            }
+        )
+    report = {
+        "summary": f"本次共完成 {len(evaluations)} 道主观题，整体表现稳定，仍有细节可加强。",
+        "strengths": ["能围绕问题给出结构化分析", "覆盖了主要方案与验证思路"],
+        "improvements": ["补充边界条件与失败场景", "补充可核对的验证步骤"],
+    }
+    return {"evaluations": evaluations, "report": report}
+
+
 RESPONDERS: dict[str, Callable[[LLMRequest], dict[str, Any]]] = {
     "RESUME_PARSE": _resume,
     "RESUME_DIAGNOSE": _resume_diagnose,
@@ -660,6 +871,8 @@ RESPONDERS: dict[str, Callable[[LLMRequest], dict[str, Any]]] = {
     "LEARNING_PLAN": _plan,
     "LEARNING_QUESTION": _question,
     "LEARNING_EVALUATE": _evaluate,
+    "LEARNING_PRACTICE_QUESTIONS": _practice_questions,
+    "LEARNING_PRACTICE_EVALUATE": _practice_evaluate,
     "GROWTH_ANALYZE": _growth,
     "INTERVIEW_TURN": _turn,
     "INTERVIEW_REPORT": _report,

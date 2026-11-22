@@ -28,16 +28,22 @@ from .operations import (
     JOB_SEARCH,
     LEARNING_EVALUATE,
     LEARNING_PLAN,
+    LEARNING_PRACTICE_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
     LEARNING_QUESTION,
     PROJECT_PLAN,
     PROJECT_RECOMMEND,
     RESUME_DIAGNOSE,
     RESUME_OPTIMIZE,
+    RESUME_OCR,
     RESUME_PARSE,
 )
 from .runner import RunService
 from .schemas import AIRequestEnvelope, AIRunVO
 from .security import Principal, verify_internal_token
+from .speech.router import build_speech_router
+from .speech.qwen import QwenAsrProvider
+from .speech.service import SpeechService
 from .storage import RunRecord, RunRepository, build_repository, utcnow
 
 logger = logging.getLogger("agent.api")
@@ -93,14 +99,21 @@ def create_app(
     llm_client = llm_client or create_llm(settings)
     callbacks = CallbackDispatcher(repository, settings, callback_transport)
     service = RunService(settings, repository, llm_client, callbacks, FileFetcher(settings))
+    speech_service = None
+    if settings.effective_asr_provider != "disabled":
+        speech_asr = QwenAsrProvider(settings) if settings.effective_asr_provider == "qwen" else None
+        speech_service = SpeechService(settings, asr=speech_asr)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await service.start()
+        logger.info("speech configuration sources=%s", settings.speech_config_origins)
         logger.info(
-            "agent started provider=%s model=%s storage=%s callback=%s auth=%s",
+            "agent started provider=%s model=%s asr=%s tts=%s storage=%s callback=%s auth=%s",
             settings.effective_llm_provider,
             settings.effective_model_name,
+            settings.effective_asr_provider,
+            settings.effective_tts_provider,
             settings.storage_backend,
             settings.callback_enabled,
             settings.auth_mode,
@@ -108,6 +121,8 @@ def create_app(
         try:
             yield
         finally:
+            if speech_service is not None:
+                await speech_service.close()
             await service.stop()
             logger.info("agent stopped")
 
@@ -210,6 +225,17 @@ def create_app(
         token = authorization.split(" ", 1)[1].strip()
         return verify_internal_token(token, settings, settings.run_scope)
 
+    async def speech_principal_dependency(
+        request: Request,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+    ) -> Principal:
+        if settings.auth_mode == "disabled":
+            return Principal(subject="auth-disabled", scopes={settings.speech_scope}, task_ids=set())
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise unauthorized("缺少内部服务 Bearer 凭证")
+        token = authorization.split(" ", 1)[1].strip()
+        return verify_internal_token(token, settings, settings.speech_scope)
+
     async def submit(
         request: Request,
         operation: str,
@@ -276,6 +302,15 @@ def create_app(
         principal: Principal = Depends(principal_dependency),
     ) -> JSONResponse:
         return await submit(request, RESUME_PARSE, body, idempotency_key, principal)
+
+    @app.post("/internal/ai/v1/resumes/ocr", status_code=202)
+    async def resume_ocr(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, RESUME_OCR, body, idempotency_key, principal)
 
     @app.post("/internal/ai/v1/resumes/diagnose", status_code=202)
     async def resume_diagnose(
@@ -348,6 +383,24 @@ def create_app(
         principal: Principal = Depends(principal_dependency),
     ) -> JSONResponse:
         return await submit(request, LEARNING_EVALUATE, body, idempotency_key, principal)
+
+    @app.post("/internal/ai/v1/learning/practice/questions", status_code=202)
+    async def learning_practice_questions(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, LEARNING_PRACTICE_QUESTIONS, body, idempotency_key, principal)
+
+    @app.post("/internal/ai/v1/learning/practice/evaluate", status_code=202)
+    async def learning_practice_evaluate(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, LEARNING_PRACTICE_EVALUATE, body, idempotency_key, principal)
 
     @app.post("/internal/ai/v1/interviews/turn", status_code=202)
     async def interview_turn(
@@ -533,5 +586,9 @@ def create_app(
                 "Connection": "keep-alive",
             },
         )
+
+    if speech_service is not None:
+        app.state.speech = speech_service
+        app.include_router(build_speech_router(settings, speech_service, speech_principal_dependency))
 
     return app

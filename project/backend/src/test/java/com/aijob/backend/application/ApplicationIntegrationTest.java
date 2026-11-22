@@ -823,6 +823,8 @@ class ApplicationIntegrationTest {
             Integer version = jdbcTemplate.queryForObject(
                     "SELECT version FROM application_record WHERE id = ?", Integer.class, id);
             assertEquals(2, version, "版本只递增一次");
+            // Each round tests editing, so remove its fixture before duplicate-create validation runs again.
+            jdbcTemplate.update("DELETE FROM application_record WHERE id = ? AND user_id = ?", id, USER_A);
         }
     }
 

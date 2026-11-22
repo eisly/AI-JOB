@@ -12,7 +12,13 @@ export const interviewApi = {
   get(interviewId: string) {
     return request<InterviewVO>(`/api/v1/interviews/${interviewId}`)
   },
-  answer(interviewId: string, body: { questionMessageId: string; content: string; expectedVersion: number }) {
+  answer(interviewId: string, body: {
+    questionMessageId: string
+    content: string
+    expectedVersion: number
+    answerSource?: 'TEXT' | 'VOICE'
+    voiceTranscriptionId?: string
+  }) {
     return submitTrackedTask(`/api/v1/interviews/${interviewId}/answers`, body, `/interview?interviewId=${interviewId}`)
   },
   end(interviewId: string, expectedVersion: number) {

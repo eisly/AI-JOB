@@ -27,7 +27,7 @@ class ResumeServiceCorrectionTest {
         ProfileService profiles = mock(ProfileService.class);
         AbilityService ability = mock(AbilityService.class);
         JsonService json = new JsonService(JsonMapper.builder().build());
-        ResumeService service = new ResumeService(mapper, null, json, new ApiView(json), null, null, null, profiles, ability);
+        ResumeService service = new ResumeService(mapper, null, json, new ApiView(json), null, null, null, profiles, ability, "http://127.0.0.1:8080");
         Map<String, Object> version = new HashMap<>();
         version.put("status", "CONFIRMED");
         version.put("confirmed_facts_json", json.stringify(Map.of("experienceMonths", 0, "skills", List.of())));
@@ -58,7 +58,7 @@ class ResumeServiceCorrectionTest {
         ResumeMapper mapper = mock(ResumeMapper.class);
         ProfileService profiles = mock(ProfileService.class);
         JsonService json = new JsonService(JsonMapper.builder().build());
-        ResumeService service = new ResumeService(mapper, null, json, new ApiView(json), null, null, null, profiles, mock(AbilityService.class));
+        ResumeService service = new ResumeService(mapper, null, json, new ApiView(json), null, null, null, profiles, mock(AbilityService.class), "http://127.0.0.1:8080");
         when(mapper.lockVersion("old", "user")).thenReturn(Map.of(
                 "status", "CONFIRMED", "confirmed_facts_json", "{\"experienceMonths\":0}"));
         when(profiles.locked("user")).thenReturn(Map.of("profile_version", 5L, "active_resume_version_id", "new"));

@@ -160,6 +160,7 @@ public class TaskService {
         result.put("result", task.getResultRefJson() == null ? null : json.convert(json.parse(task.getResultRefJson()), Object.class));
         result.put("error", task.getErrorJson() == null ? null : json.convert(json.parse(task.getErrorJson()), Object.class));
         result.put("inputVersions", json.map(task.getInputVersionsJson()));
+        result.put("retryOfTaskId", task.getRetryOfTaskId());
         result.put("lastEventId", task.getLastEventSeq());
         result.put("createdAt", task.getCreatedAt() == null ? null : task.getCreatedAt().toInstant(java.time.ZoneOffset.UTC));
         result.put("finishedAt", task.getFinishedAt() == null ? null : task.getFinishedAt().toInstant(java.time.ZoneOffset.UTC));

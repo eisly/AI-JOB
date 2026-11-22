@@ -18,7 +18,6 @@ import com.aijob.backend.common.JsonService;
 @Service
 public class ProfileService {
 
-    private static final Set<String> ROLES = Set.of("JAVA_BACKEND", "FRONTEND", "ALGORITHM", "TEST", "DATA");
     private static final Set<String> CANDIDATES = Set.of("INTERNSHIP", "CAMPUS", "EXPERIENCED");
 
     private final ProfileMapper mapper;
@@ -55,6 +54,9 @@ public class ProfileService {
         }
         String role = Data.text(body, "targetRole", true, 32);
         String candidate = Data.text(body, "candidateType", true, 32);
+        if (!JobRoleCatalog.supports(role)) {
+            throw BusinessException.validation("targetRole", "目标求职方向不在支持范围内");
+        }
         if (!CANDIDATES.contains(candidate)) {
             throw BusinessException.validation("body", "岗位方向或求职类型非法");
         }
@@ -80,7 +82,7 @@ public class ProfileService {
     }
 
     public Set<String> roles() {
-        return ROLES;
+        return JobRoleCatalog.values();
     }
 
     public List<Map<String, Object>> skillCatalog() {
@@ -108,6 +110,15 @@ public class ProfileService {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("code", row.get("code"));
             item.put("name", row.get("name"));
+            String aliases = row.get("aliases") == null ? "" : String.valueOf(row.get("aliases"));
+            List<String> aliasList = new ArrayList<>();
+            for (String alias : aliases.split(";")) {
+                String trimmed = alias.strip();
+                if (!trimmed.isEmpty() && !aliasList.contains(trimmed)) {
+                    aliasList.add(trimmed);
+                }
+            }
+            item.put("aliases", aliasList);
             return item;
         }).toList();
     }
@@ -127,6 +138,10 @@ public class ProfileService {
         String name = Data.text(body, "name", true, 100);
         if (name.chars().anyMatch(Character::isISOControl)) {
             throw BusinessException.validation("name", "技能名称不能包含控制字符");
+        }
+        if (name.indexOf('<') >= 0 || name.indexOf('>') >= 0
+                || name.codePoints().noneMatch(Character::isLetterOrDigit)) {
+            throw BusinessException.validation("name", "请填写技术名称，不能包含标记代码或仅由符号组成");
         }
         Map<String, Object> existing = mapper.skillByName(userId, name);
         if (existing != null) return view.map(existing);

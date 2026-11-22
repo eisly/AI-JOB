@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from .speech_config import FIELDS, resolve_speech_config
 
 AGENT_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -13,6 +14,26 @@ DEFAULT_JWT_SECRET = "dev-only-internal-jwt-secret-change-me"
 
 
 class Settings(BaseSettings):
+    speech_config_origins: dict[str, str] = Field(default_factory=dict, exclude=True, repr=False)
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        def speech_source():
+            explicit = init_settings.init_kwargs
+            paths = dotenv_settings.env_file
+            if isinstance(paths, (str, Path)):
+                paths = (paths,)
+            values, origins = resolve_speech_config(
+                paths, overrides=explicit,
+                app_env=explicit.get("app_env"),
+            )
+            values["speech_config_origins"] = origins
+            return values
+        speech_keys = set(FIELDS) | {key for aliases in FIELDS.values() for key in aliases}
+        def other_settings(source):
+            return lambda: {key: value for key, value in source().items() if key not in speech_keys}
+        return (init_settings, speech_source, other_settings(env_settings),
+                other_settings(dotenv_settings), other_settings(file_secret_settings))
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
         env_file=(str(PROJECT_ROOT / ".env"), str(AGENT_DIR / ".env")),
@@ -81,6 +102,43 @@ class Settings(BaseSettings):
     llm_trust_env: bool = False
     llm_provider_max_retries: int = 1
 
+    # 语音能力（首版逐题整段录音）：密钥只允许存在于 Agent 进程环境变量。
+    # speech_provider 为兼容旧配置的总开关；asr/tts 可按能力独立选择，具体项优先于总开关。
+    speech_provider: Literal["auto", "disabled", "fake", "qwen"] = "auto"
+    speech_asr_provider: Literal["auto", "fake", "qwen"] = "auto"
+    speech_tts_provider: Literal["auto", "fake", "qwen"] = "auto"
+    speech_api_key: str | None = Field(
+        default=None,
+        repr=False,
+        validation_alias=AliasChoices("AI_BAILIAN_API_KEY", "SPEECH_API_KEY"),
+    )
+    speech_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com",
+        validation_alias=AliasChoices("AI_BAILIAN_BASE_URL", "SPEECH_BASE_URL"),
+    )
+    speech_asr_model: str = Field(
+        default="qwen-audio-3.1-asr-flash",
+        validation_alias=AliasChoices("SPEECH_ASR_MODEL", "AGENT_SPEECH_ASR_MODEL"),
+    )
+    speech_tts_model: str = Field(
+        default="cosyvoice-v1",
+        validation_alias=AliasChoices("SPEECH_TTS_MODEL", "AGENT_SPEECH_TTS_MODEL"),
+    )
+    speech_tts_voice: str = Field(
+        default="longxiaochun",
+        validation_alias=AliasChoices("SPEECH_TTS_VOICE", "AGENT_SPEECH_TTS_VOICE"),
+    )
+    speech_timeout_seconds: float = Field(default=8.0, gt=0)
+    speech_tts_timeout_seconds: float = Field(default=6.0, gt=0)
+    speech_trust_env: bool = False
+    speech_max_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
+    speech_min_audio_ms: int = Field(default=2000, gt=0)
+    speech_max_audio_ms: int = Field(default=180_000, gt=0)
+    speech_max_tts_chars: int = Field(default=500, gt=0)
+    speech_concurrency: int = Field(default=4, gt=0)
+    speech_scope: str = "ai:speech"
+    speech_vad_silence_ms: int = 400
+
     reasoning_display_enabled: bool = True
     reasoning_max_chars: int = 4000
 
@@ -105,6 +163,24 @@ class Settings(BaseSettings):
     allowed_file_hosts: str = "files.example.invalid"
     file_allowed_schemes: str = "https"
     file_download_timeout_seconds: float = 10.0
+
+    # 图片 PDF OCR：本机 Tesseract 5（含 chi_sim+eng 语言包）。
+    tesseract_cmd: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TESSERACT_CMD", "AGENT_TESSERACT_CMD"),
+    )
+    tessdata_dir: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TESSDATA_DIR", "AGENT_TESSDATA_DIR"),
+    )
+    ocr_langs: str = Field(
+        default="chi_sim+eng",
+        validation_alias=AliasChoices("AGENT_OCR_LANGS", "OCR_LANGS"),
+    )
+    ocr_dpi: int = Field(default=200, ge=72, le=400)
+    ocr_max_pages: int = Field(default=30, ge=1, le=100)
+    ocr_max_seconds: float = Field(default=240.0, gt=0)
+    ocr_page_timeout_seconds: float = Field(default=60.0, gt=0)
 
     tavily_api_key: str | None = Field(default=None, repr=False, validation_alias="TAVILY_API_KEY")
     brave_search_api_key: str | None = Field(default=None, repr=False, validation_alias="BRAVE_SEARCH_API_KEY")
@@ -160,6 +236,15 @@ class Settings(BaseSettings):
     github_search_trust_env: bool = False
     github_search_user_agent: str = "AI-JOB-Agent/1.0 (+learning-plan; contact: local-agent)"
 
+    # 项目实战推荐：GitHub / Gitee / GitCode 公开仓库检索。
+    repository_search_timeout_seconds: float = Field(default=12.0, gt=0)
+    repository_search_per_page: int = Field(default=10, ge=1, le=20)
+    repository_search_max_candidates: int = Field(default=6, ge=1, le=6)
+    repository_search_trust_env: bool = False
+    repository_search_user_agent: str = "AI-JOB-Agent/1.0 (+project-recommend; contact: local-agent)"
+    gitee_token: str | None = Field(default=None, repr=False, validation_alias="GITEE_TOKEN")
+    gitcode_token: str | None = Field(default=None, repr=False, validation_alias="GITCODE_TOKEN")
+
     @field_validator("log_level")
     @classmethod
     def _upper_level(cls, value: str) -> str:
@@ -192,6 +277,31 @@ class Settings(BaseSettings):
             return self.deepseek_model
         return "fake-llm"
 
+    def _resolve_speech_provider(self, specific: str) -> str:
+        if self.speech_provider == "disabled":
+            return "disabled"
+        if specific != "auto":
+            return specific
+        if self.speech_provider != "auto":
+            return self.speech_provider
+        # Keep existing deployments opt-in for external audio processing.
+        return "disabled" if self.app_env == "prod" else "fake"
+
+    @property
+    def effective_asr_provider(self) -> str:
+        return self._resolve_speech_provider(self.speech_asr_provider)
+
+    @property
+    def effective_tts_provider(self) -> str:
+        if self.speech_tts_provider == "auto" and self.effective_asr_provider == "qwen":
+            return "fake"
+        return self._resolve_speech_provider(self.speech_tts_provider)
+
+    @property
+    def effective_speech_provider(self) -> str:
+        """兼容旧字段：历史上该值同时代表 ASR/TTS，现在返回 ASR 的选择结果。"""
+        return self.effective_asr_provider
+
     def validate_runtime_security(self) -> None:
         if self.app_env != "prod":
             return
@@ -201,3 +311,12 @@ class Settings(BaseSettings):
             raise RuntimeError("AGENT_JWT_SECRET must be a strong secret in prod")
         if self.effective_llm_provider == "deepseek" and not self.deepseek_api_key:
             raise RuntimeError("DEEPSEEK_API_KEY is required when the deepseek provider is used")
+        if self.effective_asr_provider == "fake":
+            raise RuntimeError(
+                "AGENT_SPEECH_ASR_PROVIDER=fake is forbidden in prod; configure qwen and AI_BAILIAN_API_KEY"
+            )
+
+        if self.effective_asr_provider == "qwen" and not self.speech_api_key:
+            raise RuntimeError("SPEECH_API_KEY is required when the qwen ASR provider is used")
+        if self.effective_tts_provider == "qwen" and not self.speech_api_key:
+            raise RuntimeError("SPEECH_API_KEY is required when the qwen TTS provider is used")

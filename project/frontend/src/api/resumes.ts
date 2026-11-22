@@ -19,8 +19,8 @@ export const resumeApi = {
     if (resumeId) body.append('resumeId', resumeId)
     return request<ResumeVO>('/api/v1/resumes/upload', { method: 'POST', body, idempotency: true })
   },
-  parse(versionId: string) {
-    return submitTrackedTask(`/api/v1/resume-versions/${versionId}/parse`, {}, `/resume?versionId=${versionId}`)
+  parse(versionId: string, reparse = false) {
+    return submitTrackedTask(`/api/v1/resume-versions/${versionId}/parse`, reparse ? { reparse: true } : {}, `/resume?versionId=${versionId}`)
   },
   confirm(versionId: string, expectedProfileVersion: number, facts: ResumeFacts) {
     return request<ProfileVO>(`/api/v1/resume-versions/${versionId}/confirm`, {

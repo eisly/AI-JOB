@@ -28,12 +28,24 @@ class LearningResultHandlerTest {
     private final JsonService json = new JsonService(JsonMapper.builder().build());
     private final LearningMapper mapper = mock(LearningMapper.class);
     private final LearningService learning = mock(LearningService.class);
+    private final PracticeService practice = mock(PracticeService.class);
     private final EvaluationService evaluations = mock(EvaluationService.class);
     private final AbilityService ability = mock(AbilityService.class);
     private final ProfileService profiles = mock(ProfileService.class);
 
-    private final LearningResultHandler handler = new LearningResultHandler(mapper, learning, evaluations,
+    private final LearningResultHandler handler = new LearningResultHandler(mapper, learning, practice, evaluations,
             ability, profiles, json);
+
+    @Test
+    void practiceEvaluationRetryUpdatesTheTaskTrackedByTheSet() {
+        AiTask task = task("LEARNING_PRACTICE_EVALUATE", "practice-set");
+        when(mapper.practiceEvaluationRetried("practice-set", "new-task")).thenReturn(1, 0);
+
+        handler.prepareRetry(task, "new-task");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> handler.prepareRetry(task, "new-task"));
+        assertEquals("INVALID_STATE", error.getErrorKey());
+    }
 
     @Test
     void insufficientEvaluationDoesNotCompletePlanItem() {

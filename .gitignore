@@ -12,3 +12,8 @@ __pycache__/
 .coverage
 htmlcov/
 .testdeps/
+
+# Local credentials and runtime data
+/docs/AITO-apiKey-*.csv
+/project/backend/data/private-files/
+/project/agent/data/*.db*

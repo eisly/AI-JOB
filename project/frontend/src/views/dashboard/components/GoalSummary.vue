@@ -73,15 +73,15 @@ function go(): void {
 <style scoped lang="scss">
 .goal-summary { padding: 0 14px; }
 .goals { display: flex; flex-wrap: wrap; gap: 0; margin-top: 20px; }
-.goals__item { display: flex; gap: 10px; align-items: center; padding: 0 28px; border: 0; border-right: 1px solid #dce6f5; background: transparent; color: #61749b; cursor: pointer; font-size: 16px; }
+.goals__item { display: flex; gap: 10px; align-items: center; padding: 0 28px; border: 0; border-right: 1px solid var(--ai-accent-border, #dce6f5); background: transparent; color: var(--ai-text-secondary, #61749b); cursor: pointer; font-size: 16px; }
 .goals__item:first-child { padding-left: 0; }
 .goals__item:last-child { border-right: 0; }
-.goals__item:hover strong { color: #0c5cf5; }
-.goals .el-icon { font-size: 21px; color: #122357; }
-.goals strong { color: #101d4b; }
-.goal-summary__guide { display: flex; align-items: center; gap: 14px; margin-top: 14px; color: #7184a6; font-size: 14px; }
-.goal-summary__guide-button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #0c5cf5; cursor: pointer; font-weight: 600; padding: 0; }
-.goal-summary__refresh { height: 2px; margin-top: 12px; border-radius: 2px; background: linear-gradient(90deg, transparent, #0c5cf5, transparent); background-size: 50% 100%; animation: goal-refresh 1.1s linear infinite; }
+.goals__item:hover strong { color: var(--ai-primary, #0c5cf5); }
+.goals .el-icon { font-size: 21px; color: var(--ai-text-primary, #122357); }
+.goals strong { color: var(--ai-text-primary, #101d4b); }
+.goal-summary__guide { display: flex; align-items: center; gap: 14px; margin-top: 14px; color: var(--ai-text-secondary, #7184a6); font-size: 14px; }
+.goal-summary__guide-button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ai-primary, #0c5cf5); cursor: pointer; font-weight: 600; padding: 0; }
+.goal-summary__refresh { height: 2px; margin-top: 12px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--ai-primary-solid, #0c5cf5), transparent); background-size: 50% 100%; animation: goal-refresh 1.1s linear infinite; }
 @keyframes goal-refresh { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
 @media (max-width: 700px) {
   .goal-summary { padding-left: 0; }

@@ -1,0 +1,100 @@
+html.dark {
+  --ai-bg-page: #11151d;
+  --ai-bg-card: #1a202b;
+  --ai-bg-light: #242d3c;
+  --ai-border: #3a4659;
+  --ai-border-light: #303b4d;
+  --ai-text-primary: #edf1f7;
+  --ai-text-secondary: #b7c4d7;
+  --ai-text-tertiary: #a0afc5;
+
+  --ai-primary: #8eabff;
+  --ai-primary-hover: #adc0ff;
+  --ai-primary-light: #25334d;
+  --ai-primary-solid: #3458c2;
+  --ai-primary-solid-hover: #3b61cf;
+  --ai-success: #74d5ad;
+  --ai-success-bg: #1c382e;
+  --ai-success-border: #356a58;
+  --ai-warning: #f6bd86;
+  --ai-warning-bg: #3c2e23;
+  --ai-warning-border: #705039;
+  --ai-danger: #ffa4a6;
+  --ai-danger-bg: #3d272f;
+  --ai-danger-border: #774553;
+  --ai-accent-alt-bg: #332c48;
+  --ai-accent-alt: #c8b4fa;
+  --ai-accent-border: #536d9e;
+  --ai-auth-wave-top: #91a9ff12;
+  --ai-auth-wave-bottom: #799afb14;
+  --ai-on-status: #11151d;
+  --ai-shadow-card: 0 1px 3px #0005;
+  --ai-shadow-hover: 0 4px 12px #0006;
+
+  --el-bg-color-page: var(--ai-bg-page);
+  --el-bg-color: var(--ai-bg-card);
+  --el-bg-color-overlay: #222b3a;
+  --el-fill-color-blank: var(--ai-bg-card);
+  --el-fill-color: var(--ai-bg-light);
+  --el-fill-color-light: #283345;
+  --el-fill-color-lighter: var(--ai-bg-light);
+  --el-fill-color-extra-light: #202837;
+  --el-text-color-primary: var(--ai-text-primary);
+  --el-text-color-regular: var(--ai-text-secondary);
+  --el-text-color-secondary: var(--ai-text-tertiary);
+  --el-text-color-placeholder: #9ba8bc;
+  --el-border-color: var(--ai-border);
+  --el-border-color-light: var(--ai-border-light);
+  --el-border-color-lighter: var(--ai-border-light);
+  --el-border-color-extra-light: #2a3445;
+  --el-color-primary: var(--ai-primary);
+  --el-color-primary-dark-2: var(--ai-primary-hover);
+  --el-color-primary-light-3: #6b84c1;
+  --el-color-primary-light-5: #50628d;
+  --el-color-primary-light-7: #3d4d72;
+  --el-color-primary-light-8: #313f60;
+  --el-color-success: var(--ai-success);
+  --el-color-success-light-9: var(--ai-success-bg);
+  --el-color-warning: var(--ai-warning);
+  --el-color-warning-light-9: var(--ai-warning-bg);
+  --el-color-danger: var(--ai-danger);
+  --el-color-danger-light-9: var(--ai-danger-bg);
+  --el-color-error: var(--ai-danger);
+  --el-color-error-light-9: var(--ai-danger-bg);
+}
+
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+}
+
+html.dark .el-button--primary:not(.is-plain, .is-link, .is-text) {
+  --el-button-bg-color: var(--ai-primary-solid);
+  --el-button-border-color: var(--ai-primary-solid);
+  --el-button-hover-bg-color: var(--ai-primary-solid-hover);
+  --el-button-hover-border-color: var(--ai-primary-solid-hover);
+  --el-button-active-bg-color: var(--ai-primary-solid);
+  --el-button-active-border-color: var(--ai-primary-solid);
+}
+
+html.dark :is(.el-button--success, .el-button--warning, .el-button--danger):not(.is-plain, .is-link, .is-text, .is-disabled) {
+  --el-button-text-color: var(--ai-on-status);
+  --el-button-hover-text-color: var(--ai-on-status);
+  --el-button-active-text-color: var(--ai-on-status);
+}
+
+html.dark .el-radio-button {
+  --el-radio-button-checked-bg-color: var(--ai-primary-solid);
+  --el-radio-button-checked-border-color: var(--ai-primary-solid);
+}
+
+html.dark .el-checkbox {
+  --el-checkbox-checked-bg-color: var(--ai-primary-solid);
+  --el-checkbox-checked-input-border-color: var(--ai-primary-solid);
+}
+
+html.dark .el-pagination.is-background .el-pager li.is-active {
+  color: #fff;
+  background-color: var(--ai-primary-solid);
+}

@@ -71,15 +71,22 @@ public interface InterviewMapper {
     int complete(@Param("id") String id, @Param("taskId") String taskId);
 
     @Insert("""
-            INSERT INTO interview_message (id,interview_id,seq,role,content,question_no,follow_up_no,question_message_id,
-              skill_codes_json,task_id)
-            VALUES (#{id},#{interviewId},#{seq},#{role},#{content},#{questionNo},#{followUpNo},#{questionMessageId},
-              #{skillCodesJson},#{taskId})
+            INSERT INTO interview_message (id,interview_id,seq,role,answer_source,content,question_no,follow_up_no,
+              question_message_id,skill_codes_json,task_id)
+            VALUES (#{id},#{interviewId},#{seq},#{role},#{answerSource},#{content},#{questionNo},#{followUpNo},
+              #{questionMessageId},#{skillCodesJson},#{taskId})
             """)
     int insertMessage(@Param("id") String id, @Param("interviewId") String interviewId, @Param("seq") int seq,
-                      @Param("role") String role, @Param("content") String content, @Param("questionNo") int questionNo,
+                      @Param("role") String role, @Param("answerSource") String answerSource,
+                      @Param("content") String content, @Param("questionNo") int questionNo,
                       @Param("followUpNo") int followUpNo, @Param("questionMessageId") String questionMessageId,
                       @Param("skillCodesJson") String skillCodesJson, @Param("taskId") String taskId);
+
+    @Update("""
+            UPDATE interview_session SET mode='VOICE',updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND mode='TEXT'
+            """)
+    int markVoiceMode(@Param("id") String id);
 
     @Select("SELECT * FROM interview_message WHERE interview_id=#{interviewId} ORDER BY seq")
     List<Map<String,Object>> messages(@Param("interviewId") String interviewId);

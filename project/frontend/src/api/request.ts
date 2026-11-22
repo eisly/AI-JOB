@@ -46,11 +46,11 @@ export function newIdempotencyKey() {
 
 export function apiUrl(path: string, query?: RequestOptions['query']) {
   const url = new URL(`${apiOrigin}${path}`, window.location.origin)
-  ;(Object.entries(query || {}) as [string, string | number | boolean | null | undefined][]).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== '') {
-      url.searchParams.set(key, String(value))
-    }
-  })
+    ; (Object.entries(query || {}) as [string, string | number | boolean | null | undefined][]).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        url.searchParams.set(key, String(value))
+      }
+    })
   return url.toString()
 }
 
@@ -175,6 +175,41 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     })
   }
   return payload.data as T
+}
+
+export async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const { query, auth = true, headers: inputHeaders, body, idempotency = false, retryAuth = true, ...init } = options
+  const headers = new Headers(inputHeaders)
+  if (auth) Object.entries(createAuthHeaders()).forEach(([key, value]) => headers.set(key, value))
+  if (idempotency) {
+    headers.set('Idempotency-Key', typeof idempotency === 'string' ? idempotency : newIdempotencyKey())
+  }
+  if (getCsrfToken() && init.method && init.method !== 'GET') {
+    headers.set('X-CSRF-Token', getCsrfToken())
+  }
+  let requestBody: BodyInit | undefined
+  if (body instanceof FormData || body instanceof Blob || typeof body === 'string' || body instanceof URLSearchParams) {
+    requestBody = body
+  } else if (body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+    requestBody = JSON.stringify(body)
+  }
+  let response: Response
+  try {
+    response = await fetch(apiUrl(path, query), { ...init, body: requestBody, headers, credentials: 'include' })
+  } catch {
+    throw new ApiError('音频获取失败，请检查网络后重试', { key: 'AUDIO_NETWORK_ERROR', retryable: true })
+  }
+  if (response.status === 401 && auth && retryAuth && getAccessToken()) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) return requestBlob(path, { ...options, retryAuth: false })
+  }
+  if (!response.ok) throw await toApiError(response)
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) throw await toApiError(response)
+  const blob = await response.blob()
+  if (!blob.size) throw new ApiError('题目语音为空，请改用文字阅读', { key: 'EMPTY_AUDIO', retryable: true })
+  return blob
 }
 
 export async function downloadBinary(path: string, options: RequestOptions & { fallbackName?: string } = {}): Promise<BinaryDownload> {

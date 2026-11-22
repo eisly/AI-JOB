@@ -1,5 +1,6 @@
 package com.aijob.backend;
 
+import com.aijob.backend.learning.LearningMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,14 @@ class DatabaseQueryTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private LearningMapper learningMapper;
+
+    @Test
+    void practiceHistoryQueryWorksWhenBothTablesHaveQuestionId() {
+        assertTrue(learningMapper.usedSessionQuestionIds("00000000-0000-4000-8000-000000000000").isEmpty());
+    }
 
     @Test
     void appUserTableQuery() {

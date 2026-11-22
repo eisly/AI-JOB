@@ -21,6 +21,18 @@ from app.skills.registry import (
 from app.skills.tools import build_model_input, validate_result_contract
 
 
+@pytest.mark.parametrize("operation", ["INTERVIEW_TURN", "INTERVIEW_REPORT"])
+def test_interview_model_receives_question_skill_codes(operation):
+    messages = [
+        {"id": "question", "seq": 1, "role": "ASSISTANT", "content": "Java事务问题",
+         "questionNo": 1, "followUpNo": 0, "skillCodes": ["JAVA", "SPRING_BOOT"]},
+        {"id": "answer", "seq": 2, "role": "USER", "content": "事务回答"},
+    ]
+    model_input = build_model_input(operation, {"messages": messages}, {})
+    assert model_input["messages"][0]["skillCodes"] == ["JAVA", "SPRING_BOOT"]
+    assert model_input["messages"][1]["skillCodes"] == []
+
+
 def test_registry_loads_all_skills_with_normalized_metadata():
     registry = get_registry()
     skills = registry.all()

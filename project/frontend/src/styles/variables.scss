@@ -1,27 +1,27 @@
 // AI-JOB 设计规范变量
 // 品牌色
-$ai-primary: #2563EB;
-$ai-primary-hover: #1D4ED8;
-$ai-primary-light: #EFF6FF;
+$ai-primary: var(--ai-primary, #2563eb);
+$ai-primary-hover: var(--ai-primary-hover, #1d4ed8);
+$ai-primary-light: var(--ai-primary-light, #eff6ff);
 
 // 功能色
-$ai-success: #10B981;
-$ai-warning: #F59E0B;
-$ai-danger: #EF4444;
+$ai-success: var(--ai-success, #10b981);
+$ai-warning: var(--ai-warning, #f59e0b);
+$ai-danger: var(--ai-danger, #ef4444);
 
 // 文字色
-$ai-text-primary: #111827;
-$ai-text-secondary: #6B7280;
-$ai-text-tertiary: #9CA3AF;
+$ai-text-primary: var(--ai-text-primary, #111827);
+$ai-text-secondary: var(--ai-text-secondary, #6b7280);
+$ai-text-tertiary: var(--ai-text-tertiary, #9ca3af);
 
 // 背景色
-$ai-bg-page: #F8FAFC;
-$ai-bg-card: #FFFFFF;
-$ai-bg-light: #F3F4F6;
+$ai-bg-page: var(--ai-bg-page, #f8fafc);
+$ai-bg-card: var(--ai-bg-card, #fff);
+$ai-bg-light: var(--ai-bg-light, #f3f4f6);
 
 // 边框
-$ai-border: #E5E7EB;
-$ai-border-light: #F3F4F6;
+$ai-border: var(--ai-border, #e5e7eb);
+$ai-border-light: var(--ai-border-light, #f3f4f6);
 
 // 圆角
 $ai-radius-sm: 6px;
@@ -29,8 +29,8 @@ $ai-radius: 8px;
 $ai-radius-lg: 12px;
 
 // 阴影
-$ai-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
-$ai-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+$ai-shadow-card: var(--ai-shadow-card, 0 1px 3px rgba(0, 0, 0, 0.08));
+$ai-shadow-hover: var(--ai-shadow-hover, 0 4px 12px rgba(0, 0, 0, 0.1));
 
 // 布局尺寸
 $sidebar-width: 220px;

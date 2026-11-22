@@ -31,6 +31,25 @@ import tools.jackson.databind.ObjectMapper;
 
 class JobSearchResultHandlerTest {
 
+    @Test
+    void taskSummaryRecognizesPipelineWarningsAndSourceFailures() {
+        Harness harness = new Harness(10);
+        AiTask task = new AiTask();
+        task.setResourceId("search");
+        task.setUserId("user");
+        for (String warning : List.of("SOME_SOURCES_PARTIAL_FAILURE", "SOME_SOURCES_UNAVAILABLE", "SOURCE_PARTIAL")) {
+            when(harness.mapper.search("search", "user")).thenReturn(Map.of("summary_json",
+                    harness.json.stringify(Map.of("uniqueCount", 1, "warnings", List.of(warning)))));
+            assertEquals("PARTIAL", harness.handler.resultSummary(task).get("outcome"), warning);
+        }
+        when(harness.mapper.search("search", "user")).thenReturn(Map.of("summary_json",
+                harness.json.stringify(Map.of("uniqueCount", 0, "warnings", List.of("SOME_SOURCES_PARTIAL_FAILURE")))));
+        assertEquals("NO_RESULTS_SOURCE_FAILED", harness.handler.resultSummary(task).get("outcome"));
+        when(harness.mapper.search("search", "user")).thenReturn(Map.of("summary_json",
+                harness.json.stringify(Map.of("uniqueCount", 0, "warnings", List.of()))));
+        assertEquals("EMPTY", harness.handler.resultSummary(task).get("outcome"));
+    }
+
     private record Ranked(int rank, String eligibility, String title, Integer score, String legacyStatus,
                           String verificationStatus, String reason) {
     }

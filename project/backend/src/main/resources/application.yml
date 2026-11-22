@@ -55,8 +55,6 @@ app:
     same-site: ${APP_COOKIE_SAME_SITE:Lax}
   security:
     frontend-origin: "${APP_FRONTEND_ORIGIN:http://localhost:5173,http://127.0.0.1:5173}"
-    login-rate-limit: ${APP_LOGIN_RATE_LIMIT:5}
-    login-rate-window-seconds: ${APP_LOGIN_RATE_WINDOW:60}
   mail:
     from: ${MAIL_FROM:no-reply@ai-job.local}
     expose-code-in-response: ${APP_MAIL_EXPOSE_CODE:false}
@@ -80,9 +78,21 @@ app:
     storage-dir: ${APP_FILES_STORAGE_DIR:./data/private-files}
     download-signing-secret: ${APP_FILES_DOWNLOAD_SIGNING_SECRET:dev-only-file-signing-secret}
     pdf-font-path: ${APP_PDF_FONT_PATH:}
+    # 内部服务（Agent）下载简历原件使用的基础地址；OCR 任务通过签名 URL 下载原文件
+    internal-base-url: ${APP_FILES_INTERNAL_BASE_URL:http://127.0.0.1:8080}
   tasks:
     deadline-seconds: ${AI_TASK_DEADLINE_SECONDS:300}
     sse-heartbeat-seconds: ${AI_TASK_SSE_HEARTBEAT_SECONDS:15}
+  voice:
+    asr-enabled: ${APP_VOICE_ASR_ENABLED:true}
+    # 本次仅接入真实 ASR；TTS 仍为 Fake，默认关闭入口，避免把模拟音频当成真实语音服务。
+    tts-enabled: ${APP_VOICE_TTS_ENABLED:false}
+    consent-required: ${APP_VOICE_CONSENT_REQUIRED:true}
+    transcribe-timeout: ${APP_VOICE_TRANSCRIBE_TIMEOUT:12s}
+    synthesize-timeout: ${APP_VOICE_SYNTHESIZE_TIMEOUT:10s}
+    max-audio-bytes: ${APP_VOICE_MAX_AUDIO_BYTES:8388608}
+    max-duration-ms: ${APP_VOICE_MAX_DURATION_MS:180000}
+    transcription-ttl-seconds: ${APP_VOICE_TRANSCRIPTION_TTL_SECONDS:1800}
   job-search:
     sources: ${JOB_SEARCH_SOURCES:company_official,web,baidu,tencent,greenhouse}
     per-source: ${JOB_SEARCH_PER_SOURCE:20}

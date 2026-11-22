@@ -51,9 +51,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<CommonResult<TokenVO>> login(@Valid @RequestBody LoginRequest request,
-                                                       HttpServletRequest httpRequest) {
-        AuthService.LoginOutcome outcome = authService.login(request, clientIp(httpRequest));
+    public ResponseEntity<CommonResult<TokenVO>> login(@Valid @RequestBody LoginRequest request) {
+        AuthService.LoginOutcome outcome = authService.login(request);
         return tokenResponse(outcome);
     }
 
@@ -130,13 +129,5 @@ public class AuthController {
             }
         }
         return null;
-    }
-
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }

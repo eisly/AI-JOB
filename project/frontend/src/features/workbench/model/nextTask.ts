@@ -7,6 +7,7 @@ import type {
   ProfileVO,
   TaskVO,
 } from '@/types/workbench'
+import { taskStageText } from '@/utils/format'
 import { MAX_GOAL_CITIES } from '../constants'
 import { PLAN_ITEM_KIND_LABELS, TASK_TYPE_LABELS, translate } from './dictionaries'
 
@@ -84,16 +85,11 @@ function taskAction(task: TaskVO): NavigationTarget {
 
 function buildTaskSuggestion(task: TaskVO): NextTaskSuggestion {
   const typeLabel = translate(TASK_TYPE_LABELS, task.type, '求职任务')
-  const progress =
-    typeof task.progress === 'number' && Number.isInteger(task.progress) && task.progress >= 0 && task.progress <= 100
-      ? task.progress
-      : undefined
   return {
     kind: 'TASK',
     title: typeLabel,
     typeLabel,
-    stage: task.stage ?? undefined,
-    progress,
+    stage: taskStageText(task),
     action: taskAction(task),
   }
 }

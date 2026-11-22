@@ -101,6 +101,12 @@ export interface ResumeFacts {
   warnings: string[]
 }
 
+export interface UnmappedSkillDetail {
+  name: string
+  quote: string
+  location: string
+}
+
 export interface ResumeVersionVO {
   id: string
   resumeId: string
@@ -111,6 +117,9 @@ export interface ResumeVersionVO {
   status: 'UPLOADED' | 'PARSING' | 'PARSED' | 'CONFIRMED' | 'FAILED' | 'DELETED'
   facts: ResumeFacts | null
   parsedFacts: ResumeFacts | null
+  textLayoutVersion?: string | null
+  ocrPages?: number[] | null
+  parseMeta?: { unmappedDetails?: UnmappedSkillDetail[]; [key: string]: unknown } | null
   createdAt: string
 }
 
@@ -166,18 +175,60 @@ export interface SkillVO {
 export interface DiagnosisItem {
   id: string
   priority: 'IMPORTANT' | 'SUGGESTION' | 'NOTICE'
+  dimensionCode?: AssessmentDimensionCode | null
+  checkCode?: string | null
   title: string
   issue: string
   quote: string
+  quotes?: string[]
   rationale: string
+  impact?: string | null
   suggestion: string
+  example?: string | null
+  pendingVerification?: string[]
+}
+
+export type AssessmentDimensionCode = 'EXPERIENCE_PROJECTS' | 'SKILLS_EVIDENCE' | 'CONTENT_COMPLETENESS' | 'STRUCTURE_CLARITY' | 'EXPRESSION_PROFESSIONALISM'
+
+export interface AssessmentDimension {
+  code: AssessmentDimensionCode
+  label?: string
+  score: number
+  maxScore?: number
+  rationale: string
+  quote: string | null
+  quotes?: string[]
+  criteria?: { code: string; label: string; score: number; maxScore: number }[]
+}
+
+export interface AssessmentStrength {
+  title: string
+  quote: string
+  quotes?: string[]
+  description: string
+  approach?: string | null
+  contribution?: string | null
+  result?: string | null
+}
+
+export interface ResumeAssessmentVO {
+  ruleVersion: string
+  summary?: string | null
+  totalScore: number
+  dimensions: AssessmentDimension[]
+  strengths: AssessmentStrength[]
+  assessedAt: string
 }
 
 export interface ResumeDiagnosisVO {
   id: string
+  taskId?: string | null
   resumeVersionId: string
   status: 'GENERATING' | 'READY' | 'FAILED'
   items: DiagnosisItem[]
+  assessment: ResumeAssessmentVO | null
+  readOrderVerified?: boolean
+  textLayoutVersion?: string | null
   createdAt: string
 }
 
@@ -238,6 +289,7 @@ export interface JobVO {
   verifiedAt: string | null
   requirements: RequirementVO | null
   fieldEvidence?: { city?: string; confirmedQuote?: string; correctionReason?: string }
+  revisions?: { versionNo: number; cityCode: string | null; createdAt: string; requirements: RequirementVO | null; reason: string; sourceQuote: string | null }[]
   isFavorite: boolean
 }
 
@@ -478,6 +530,7 @@ export interface PlanItemVO {
   estimatedMinutes: number
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
   resourceRefs: ResourceRef[]
+  completedAt?: string | null
 }
 
 export interface PlanGithubBasisVO {
@@ -536,6 +589,7 @@ export interface QuestionVO {
   type: 'TEXT_SCENARIO' | 'TEXT_KNOWLEDGE'
   stem: string
   sourceType: 'CURATED' | 'GENERATED'
+  generationEnv?: 'PROD' | 'FAKE' | 'LEGACY' | null
   sourceTitle: string | null
   questionVersion: number
 }
@@ -588,6 +642,158 @@ export interface MistakeVO {
   cause?: 'UNKNOWN' | 'WRONG_ANSWER' | null
 }
 
+// ===== 专项训练 V2：一次生成一组题目（练习集）契约 =====
+// 说明：以下结构为改版后前端与后端的预留字段约定。
+// 后端按此契约实现 /api/v1/learning/practice-sets 系列接口前，
+// 前端会自动降级为旧版"单题会话"（TEXT_SCENARIO/TEXT_KNOWLEDGE 映射为 SUBJECTIVE）。
+
+/** 新版题型：选择题 / 填空题 / 主观题 */
+export type PracticeQuestionType = 'CHOICE' | 'FILL' | 'SUBJECTIVE'
+
+/** 旧版题型 → 新版题型映射（降级兼容用） */
+export type LegacyQuestionType = 'TEXT_SCENARIO' | 'TEXT_KNOWLEDGE'
+
+export interface PracticeOptionVO {
+  /** 选项标识，如 A / B / C / D */
+  key: string
+  content: string
+}
+
+export interface PracticeQuestionVO {
+  id: string
+  /** 题目在本组中的序号（1 开始） */
+  index: number
+  type: PracticeQuestionType
+  skillCodes: string[]
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD'
+  stem: string
+  /** 选择题选项；填空/主观题为空数组 */
+  options: PracticeOptionVO[]
+  /** 填空题空位数量（默认 1） */
+  blankCount: number
+  /** 建议作答时长（分钟） */
+  estimatedMinutes: number
+  /** 分值 */
+  score: number
+  questionVersion: number
+  sourceType?: 'CURATED' | 'GENERATED'
+  sourceTitle?: string | null
+}
+
+export interface PracticeTypeDistributionVO {
+  /** 选择题数量 */
+  choice: number
+  /** 填空题数量 */
+  fill: number
+  /** 主观题数量 */
+  subjective: number
+}
+
+/** 用户自定义出题配置（生成练习集的入参，也是练习集快照） */
+export interface PracticeConfigVO {
+  /** 题目总数：5 / 10 / 15 / 20 */
+  totalQuestions: number
+  /** 题型分布 */
+  typeDistribution: PracticeTypeDistributionVO
+  /** 难度：EASY/MEDIUM/HARD/MIXED */
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'MIXED'
+  /** 训练方向，如 JAVA_BACKEND / MYSQL / ALGORITHM */
+  direction: string
+  planId?: string
+  planItemId?: string
+}
+
+export type PracticeSetStatus =
+  | 'GENERATING' | 'READY' | 'IN_PROGRESS'
+  | 'SUBMITTED' | 'EVALUATING' | 'EVALUATED' | 'FAILED'
+
+/** 一组预生成的题目（练习集） */
+export interface PracticeSetVO {
+  id: string
+  planId: string | null
+  planItemId: string | null
+  title: string
+  status: PracticeSetStatus
+  config: PracticeConfigVO | null
+  questions: PracticeQuestionVO[]
+  /** 本组预计总时长（分钟） */
+  totalMinutes: number
+  /** 乐观锁版本号 */
+  version: number
+  generatedAt?: string
+  evaluationTaskId?: string | null
+  lastAnswerId?: string | null
+}
+
+/** 单题作答载荷 */
+export interface PracticeAnswerPayload {
+  questionId: string
+  type: PracticeQuestionType
+  /** 选择题所选选项 key */
+  choiceKey?: string
+  /** 填空题各空答案（按下标对应） */
+  blanks?: string[]
+  /** 主观题回答内容 */
+  content?: string
+}
+
+/** 交卷载荷 */
+export interface PracticeSubmissionVO {
+  answers: PracticeAnswerPayload[]
+  /** 实际用时（秒） */
+  durationSeconds: number
+  /** 乐观锁版本号 */
+  expectedVersion: number
+}
+
+/** 单题评估结果 */
+export interface PracticeQuestionResultVO {
+  questionId: string
+  /** 客观题判定对错；主观题为 null（走 evaluation） */
+  correct: boolean | null
+  /** 得分（主观题为 0-100，客观题对=满分/错=0） */
+  score: number | null
+  /** 客观题正确答案 */
+  correctKeys?: string[]
+  /** 简要点评 */
+  comment?: string
+  /** 主观题完整评估（复用旧评估结构） */
+  evaluation?: EvaluationVO | null
+}
+
+/** 整组训练评估结果（训练反馈报告） */
+export interface PracticeSetResultVO {
+  id: string
+  status: 'EVALUATED'
+  /** 综合得分 */
+  overallScore: number | null
+  /** 客观题正确数 */
+  objectiveCorrectCount: number
+  /** 客观题总数 */
+  objectiveTotalCount: number
+  /** 报告摘要 */
+  summary: string
+  strengths: string[]
+  improvements: string[]
+  questionResults: PracticeQuestionResultVO[]
+}
+
+export type RepoPlatform = 'GITHUB' | 'GITEE' | 'GITCODE'
+
+export interface RepositorySourceVO {
+  platform: RepoPlatform
+  path: string
+  url: string
+  license: string
+  readmeUrl: string | null
+}
+
+export interface RepositorySourceRunVO {
+  platform: RepoPlatform
+  status: 'SUCCEEDED' | 'FAILED'
+  reason: string | null
+}
+
 export interface ProjectRecommendationItem {
   id: string
   title: string
@@ -596,14 +802,29 @@ export interface ProjectRecommendationItem {
   difficulty: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'
   estimatedWeeks: number
   reason: string
+  gettingStarted: string[]
   deliverables: string[]
+  primarySource: RepositorySourceVO | null
+  alternateSources: RepositorySourceVO[]
+  stackEvidence?: Array<{
+    keyword: string
+    status: 'VERIFIED' | 'DOCUMENTED'
+    path: string
+    url: string
+  }>
 }
 
 export interface ProjectRecommendationVO {
   id: string
+  mode: 'REPOSITORY' | 'LEGACY_IDEA'
   status: 'GENERATING' | 'READY' | 'FAILED'
+  sourceRuns: RepositorySourceRunVO[]
   items: ProjectRecommendationItem[]
   createdAt: string
+  afterBatchId?: string
+  hasMore?: boolean
+  searchLimitReached?: boolean
+  continuationTaskId?: string
 }
 
 export interface ProjectTaskVO {
@@ -637,6 +858,7 @@ export interface ProjectVO {
   taskId: string
   title: string | null
   summary: string | null
+  primarySource: RepositorySourceVO | null
   status: 'GENERATING' | 'ACTIVE' | 'COMPLETED' | 'FAILED'
   progress: number
   weeklyHours: number
@@ -658,6 +880,8 @@ export interface MessageVO {
   questionNo: number
   followUpNo: number
   createdAt: string
+  /** 语音面试：USER 消息的来源；历史数据为 null，按 TEXT 处理 */
+  answerSource?: 'TEXT' | 'VOICE' | null
 }
 
 export interface InterviewVO {
@@ -665,6 +889,8 @@ export interface InterviewVO {
   jobId: string
   resumeVersionId: string
   status: 'PREPARING' | 'WAITING_ANSWER' | 'GENERATING' | 'ENDING' | 'COMPLETED' | 'FAILED'
+  /** 语音面试：会话作答模式；历史数据为 TEXT */
+  mode?: 'TEXT' | 'VOICE'
   questionLimit: number
   version: number
   pendingTaskId: string | null
@@ -676,12 +902,55 @@ export interface InterviewVO {
   answeredCount?: number | null
 }
 
+export type VoiceTranscriptionStatus = 'PENDING' | 'SUCCEEDED' | 'EMPTY' | 'FAILED' | 'DISCARDED' | 'EXPIRED'
+
+export interface VoiceCapabilityVO {
+  asrEnabled: boolean
+  ttsEnabled: boolean
+  consentRequired: boolean
+  consentVersion: string
+  consented: boolean
+  maxDurationSeconds: number
+  maxAudioBytes: number
+  allowedMimeTypes: string[]
+  transcriptionTtlSeconds: number
+}
+
+export interface VoiceTranscriptionVO {
+  id: string
+  status: VoiceTranscriptionStatus
+  text: string | null
+  questionMessageId: string
+  interviewVersion: number
+  durationMs: number
+  attempt?: number
+  expiresAt: string
+  reused?: boolean
+}
+
+/** 与后端 VoiceReasons 保持一致：失效原因固定为这组值，禁止由状态拼接。 */
+export type VoiceTranscriptionReason =
+  | 'QUESTION_CHANGED'
+  | 'TRANSCRIPTION_NOT_FOUND'
+  | 'TRANSCRIPTION_CONSUMED'
+  | 'TRANSCRIPTION_DISCARDED'
+  | 'TRANSCRIPTION_EXPIRED'
+  | 'SUPERSEDED'
+
+export interface VoiceConsentVO {
+  agreed: boolean
+  policyVersion: string
+  agreedAt: string | null
+}
+
 export interface InterviewReportVO {
   interviewId: string
   reportVersion: number
   evaluation: EvaluationVO
   gaps: GapVO[]
   evidenceIds: string[]
+  skillEvidenceStatus?: 'AVAILABLE' | 'NO_SKILL_SCORES' | 'NO_VALID_ANSWER'
+  skillEvidenceMessage?: string
   answeredQuestionCount: number
   completionType: 'NORMAL' | 'EARLY_END' | 'NO_VALID_ANSWER'
 }

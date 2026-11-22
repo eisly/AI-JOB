@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ApiError } from '@/api/request'
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 
 const props = withDefaults(defineProps<{
   loading?: boolean
   error?: unknown
   empty?: boolean
   loadingText?: string
+  retain?: boolean
+  skeletonRows?: number
   emptyText?: string
   emptyDescription?: string
 }>(), {
@@ -31,9 +34,15 @@ const traceId = computed(() => props.error instanceof ApiError ? props.error.tra
 
 <template>
   <div class="async-state">
-    <div v-if="loading" class="async-state__loading" v-loading="true" :element-loading-text="loadingText">
-      <el-skeleton :rows="4" animated />
-    </div>
+    <template v-if="retain">
+      <div v-if="loading" class="async-state__refresh" role="status">{{ loadingText }}…</div>
+      <div v-else-if="error" class="async-state__refresh async-state__refresh--error" role="status">
+        <span>刷新失败。{{ message }}</span>
+        <el-button size="small" @click="$emit('retry')">重新加载</el-button>
+      </div>
+      <slot />
+    </template>
+    <LoadingSkeleton v-else-if="loading" :label="loadingText" :rows="skeletonRows" />
     <el-result v-else-if="error" icon="error" title="加载失败" :sub-title="message">
       <template #extra>
         <p v-if="traceId" class="async-state__trace">traceId：{{ traceId }}</p>
@@ -50,7 +59,8 @@ const traceId = computed(() => props.error instanceof ApiError ? props.error.tra
 </template>
 
 <style scoped lang="scss">
-.async-state__loading { min-height: 180px; padding: 28px 12px; }
+.async-state__refresh { margin: 0 0 8px; color: $ai-text-secondary; font-size: 13px; }
+.async-state__refresh--error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: $ai-danger; }
 .async-state__trace { margin: 0 0 14px; color: $ai-text-tertiary; font-size: 12px; word-break: break-all; }
 .async-state__empty-description { margin: -12px 0 16px; color: $ai-text-secondary; }
 </style>

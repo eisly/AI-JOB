@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WaitStatus from '@/components/WaitStatus.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -11,6 +12,7 @@ import type { JobVO, ResumeDiagnosisVO, ResumeOptimizationVO, ResumeVO, ResumeVe
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
+import ResumeDiagnosticReport from './ResumeDiagnosticReport.vue'
 import { addReference } from '@/utils/references'
 import { commonStatusLabels, errorMessage, formatDate } from '@/utils/format'
 
@@ -30,6 +32,10 @@ const route = useRoute()
 const router = useRouter()
 const resumeRecords = ref<ResumeVO[]>([])
 const resumeVersions = ref<ResumeVersionVO[]>([])
+function diagnosisTitle(versionId: string) {
+  const version = resumeVersions.value.find(item => item.id === versionId)
+  return version ? `${versionLabel(version)} · 诊断` : '简历诊断（历史版本）'
+}
 const resumeOptionsLoading = ref(false)
 const resumeOptionsError = ref<unknown>(null)
 const resumeOptionsWarning = ref('')
@@ -45,6 +51,9 @@ const diagnosisSize = ref(5)
 const diagnosisTotal = ref(0)
 const diagnosisHistoryLoading = ref(false)
 const diagnosisHistoryError = ref<unknown>(null)
+const diagnosisHistoryOpen = ref(false)
+let diagnosisHistoryRequest = 0
+let diagnosisDetailRequest = 0
 const selectedDiagnosisId = ref('')
 const currentDiagnosis = ref<ResumeDiagnosisVO | null>(null)
 const diagnosisDetailLoading = ref(false)
@@ -81,7 +90,24 @@ const taskRetryError = ref<unknown>(null)
 const taskActionLoading = ref(false)
 const initialized = ref(false)
 
-const priorityLabels: Record<string, string> = { IMPORTANT: '重要', SUGGESTION: '建议', NOTICE: '提示' }
+const assessmentExporting = ref(false)
+const assessmentExportError = ref<unknown>(null)
+const activeTab = computed(() => {
+  const tab = queryValue(route.query.tab)
+  if (tab === 'analysis' || tab === 'optimization') return tab
+  if (queryValue(route.query.optimizationId)) return 'optimization'
+  if (queryValue(route.query.diagnosisId)) return 'analysis'
+  return queryValue(route.query.jobId) ? 'optimization' : 'analysis'
+})
+const canExportAssessment = computed(() =>
+  !!currentDiagnosis.value
+  && currentDiagnosis.value.status === 'READY'
+  && !!currentDiagnosis.value.assessment
+  && !diagnosisDetailLoading.value
+  && !diagnosisDetailError.value
+  && !diagnoseSubmitting.value
+  && !assessmentExporting.value,
+)
 const selectedResumeVersion = computed(() => resumeVersions.value.find(item => item.id === selectedResumeVersionId.value) || null)
 const confirmedVersions = computed(() => resumeVersions.value.filter(item => item.status === 'CONFIRMED').sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
 const analyzedJobs = computed(() => jobs.value.filter(item => item.status === 'ACTIVE' && item.requirements !== null))
@@ -93,9 +119,10 @@ const optimizationDirty = computed(() => {
   return currentOptimization.value.sections.some((section, index) => (draftSections.value[index]?.content ?? section.content ?? section.suggestedText) !== (section.content ?? section.suggestedText))
 })
 const canEditOptimization = computed(() => !!currentOptimization.value && ['READY', 'ACCEPTED'].includes(currentOptimization.value.status))
-const canExport = computed(() => currentOptimization.value?.status === 'ACCEPTED' && !optimizationDirty.value && !exporting.value)
+const canExport = computed(() => currentOptimization.value?.status === 'ACCEPTED'
+  && currentOptimization.value.resumeVersionId === selectedResumeVersionId.value && !optimizationDirty.value && !exporting.value)
 
-const { task, deltaText, reasoningText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
+const { task, deltaText, reasoningText, error: taskError, loading: taskLoading, refreshing: taskRefreshing, refresh: refreshTask, restart: restartTask } = useTask(activeTaskId, {
   onDone: async currentTask => {
     const id = currentTask.result?.resourceId || currentTask.resourceId
     if (!id) {
@@ -104,9 +131,7 @@ const { task, deltaText, reasoningText, error: taskError, restart: restartTask }
     }
     try {
       if (currentTask.type === 'RESUME_DIAGNOSE' || activeTaskKind.value === 'diagnosis') {
-        const detail = await optimizationApi.getDiagnosis(id)
-        await ensureResumeVersion(detail.resumeVersionId)
-        applyDiagnosis(detail)
+        await loadDiagnosis(id, true)
         await loadDiagnoses()
         ElMessage.success('简历诊断已完成')
       } else {
@@ -133,12 +158,6 @@ function statusTagType(status?: string): 'primary' | 'success' | 'info' | 'warni
   if (status === 'READY' || status === 'ACCEPTED' || status === 'ACTIVE') return 'success'
   if (status === 'FAILED' || status === 'CLOSED') return 'danger'
   if (status === 'GENERATING' || status === 'ANALYZING') return 'warning'
-  return 'info'
-}
-
-function priorityTagType(priority: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' {
-  if (priority === 'IMPORTANT') return 'danger'
-  if (priority === 'SUGGESTION') return 'warning'
   return 'info'
 }
 
@@ -183,6 +202,9 @@ async function loadResumeOptions() {
     const groups = await Promise.all(records.map(resume => resumeApi.versions(resume.id)))
     resumeVersions.value = groups.flat()
     resumeVersions.value.forEach(detail => addReference('resume-versions', detail.id, detail.resumeId))
+    if (initialized.value && !selectedResumeVersionId.value) {
+      selectedResumeVersionId.value = confirmedVersions.value[0]?.id || ''
+    }
   } catch (reason) {
     resumeOptionsError.value = reason
     resumeVersions.value = []
@@ -200,7 +222,10 @@ async function ensureResumeVersion(versionId: string, select = true) {
 
 function versionLabel(version: ResumeVersionVO) {
   const resume = resumeRecords.value.find(item => item.id === version.resumeId)
-  return `${resume?.title || version.fileName} · v${version.versionNo} · ${version.fileName}`
+  const title = resume?.title
+  const name = version.fileName
+  const displayName = title && title !== name && title !== name.replace(/\.[^.]+$/, '') ? `${title} · ${name}` : name
+  return `${displayName} · v${version.versionNo}`
 }
 
 async function loadJobs() {
@@ -249,6 +274,7 @@ async function bindTask(taskId: string, kind: 'diagnosis' | 'optimization', inpu
 async function submitDiagnosis(resumeVersionId: string) {
   const submitted = await optimizationApi.diagnose(resumeVersionId)
   await bindTask(submitted.id, 'diagnosis', { resumeVersionId })
+  if (submitted.resourceId) await loadDiagnosis(submitted.resourceId)
   await loadDiagnoses()
 }
 
@@ -302,8 +328,10 @@ async function retryFailedTask() {
   try {
     const retried = await retryTrackedTask(task.value)
     await bindTask(retried.id, activeTaskKind.value, activeTaskInput.value)
-    if (activeTaskKind.value === 'diagnosis') await loadDiagnoses()
-    else await loadOptimizations()
+    if (activeTaskKind.value === 'diagnosis') {
+      if (retried.resourceId) await loadDiagnosis(retried.resourceId)
+      await loadDiagnoses()
+    } else await loadOptimizations()
   } catch (reason) {
     taskRetryError.value = reason
   } finally {
@@ -318,7 +346,7 @@ async function retryTaskAuthority() {
   if (!id) return
   taskAuthorityError.value = null
   try {
-    if (currentTask.type === 'RESUME_DIAGNOSE' || activeTaskKind.value === 'diagnosis') await loadDiagnosis(id)
+    if (currentTask.type === 'RESUME_DIAGNOSE' || activeTaskKind.value === 'diagnosis') await loadDiagnosis(id, true)
     else await loadOptimization(id, { preserveDraft: true })
     await refreshHistories()
   } catch (reason) {
@@ -326,17 +354,31 @@ async function retryTaskAuthority() {
   }
 }
 
-async function loadDiagnoses() {
+async function loadDiagnoses(openLatest = false) {
+  const request = ++diagnosisHistoryRequest
+  const versionId = selectedResumeVersionId.value
+  if (!versionId) {
+    diagnoses.value = []
+    diagnosisTotal.value = 0
+    diagnosisHistoryLoading.value = false
+    return
+  }
   diagnosisHistoryLoading.value = true
   diagnosisHistoryError.value = null
   try {
-    const data = await optimizationApi.listDiagnoses({ resumeVersionId: selectedResumeVersionId.value || undefined, current: diagnosisPage.value, size: diagnosisSize.value })
+    const data = await optimizationApi.listDiagnoses({ resumeVersionId: versionId, current: diagnosisPage.value, size: diagnosisSize.value })
+    if (request !== diagnosisHistoryRequest || versionId !== selectedResumeVersionId.value) return
     diagnoses.value = data.records
     diagnosisTotal.value = data.total
+    const latest = data.records[0]
+    if (openLatest && latest && !currentDiagnosis.value && !diagnosisDetailLoading.value) {
+      applyDiagnosis(latest)
+      await trackHistoricalDiagnosis(latest)
+    }
   } catch (reason) {
-    diagnosisHistoryError.value = reason
+    if (request === diagnosisHistoryRequest) diagnosisHistoryError.value = reason
   } finally {
-    diagnosisHistoryLoading.value = false
+    if (request === diagnosisHistoryRequest) diagnosisHistoryLoading.value = false
   }
 }
 
@@ -344,21 +386,38 @@ function applyDiagnosis(detail: ResumeDiagnosisVO) {
   currentDiagnosis.value = detail
   selectedDiagnosisId.value = detail.id
   linkDiagnosis.value = detail.status === 'READY'
+  assessmentExportError.value = null
   syncQuery({ diagnosisId: detail.id, resumeVersionId: detail.resumeVersionId })
 }
 
-async function loadDiagnosis(diagnosisId: string) {
+async function trackHistoricalDiagnosis(detail: ResumeDiagnosisVO) {
+  if (detail.status !== 'READY' && detail.taskId && detail.taskId !== activeTaskId.value && !taskRunning.value) {
+    await bindTask(detail.taskId, 'diagnosis', { resumeVersionId: detail.resumeVersionId })
+  }
+}
+
+async function loadDiagnosis(diagnosisId: string, propagateError = false) {
   if (!diagnosisId) return
+  const request = ++diagnosisDetailRequest
+  if (currentDiagnosis.value?.id !== diagnosisId) currentDiagnosis.value = null
+  selectedDiagnosisId.value = diagnosisId
   diagnosisDetailLoading.value = true
   diagnosisDetailError.value = null
   try {
     const detail = await optimizationApi.getDiagnosis(diagnosisId)
-    await ensureResumeVersion(detail.resumeVersionId)
+    if (!resumeVersions.value.some(version => version.id === detail.resumeVersionId)) {
+      await ensureResumeVersion(detail.resumeVersionId, false)
+    }
+    if (request !== diagnosisDetailRequest) return
+    selectedResumeVersionId.value = detail.resumeVersionId
     applyDiagnosis(detail)
+    diagnosisHistoryOpen.value = false
+    await trackHistoricalDiagnosis(detail)
   } catch (reason) {
-    diagnosisDetailError.value = reason
+    if (request === diagnosisDetailRequest) diagnosisDetailError.value = reason
+    if (propagateError) throw reason
   } finally {
-    diagnosisDetailLoading.value = false
+    if (request === diagnosisDetailRequest) diagnosisDetailLoading.value = false
   }
 }
 
@@ -498,6 +557,26 @@ async function refreshCurrentOptimization() {
   else await loadOptimization(currentOptimization.value.id, { skipDirtyPrompt: true })
 }
 
+async function exportAssessmentReport() {
+  const diagnosis = currentDiagnosis.value
+  if (!diagnosis || assessmentExporting.value) return
+  assessmentExportError.value = null
+  if (diagnosis.status !== 'READY' || !diagnosis.assessment) {
+    assessmentExportError.value = new Error('诊断尚未就绪或没有评分结果，暂不能下载报告')
+    return
+  }
+  assessmentExporting.value = true
+  try {
+    const binary = await optimizationApi.exportDiagnosis(diagnosis.id)
+    saveBinary(binary)
+    ElMessage.success('评分报告下载已开始')
+  } catch (reason) {
+    assessmentExportError.value = reason
+  } finally {
+    assessmentExporting.value = false
+  }
+}
+
 async function exportOptimization(format: 'PDF' | 'DOCX') {
   const optimization = currentOptimization.value
   if (!optimization || exporting.value) return
@@ -531,8 +610,8 @@ const exportErrorHint = computed(() => {
   return '请确认优化稿已采纳且服务端文件生成可用后重试。'
 })
 
-async function refreshHistories() {
-  await Promise.all([loadDiagnoses(), loadOptimizations()])
+async function refreshHistories(openLatest = false) {
+  await Promise.all([loadDiagnoses(openLatest), loadOptimizations()])
 }
 
 async function initialize() {
@@ -546,19 +625,36 @@ async function initialize() {
     try { await ensureJob(jobId) } catch (reason) { optimizeError.value = reason }
   }
   const diagnosisId = queryValue(route.query.diagnosisId)
-  if (diagnosisId) await loadDiagnosis(diagnosisId)
   const optimizationId = queryValue(route.query.optimizationId)
-  if (optimizationId) await loadOptimization(optimizationId, { skipDirtyPrompt: true })
+  const tab = activeTab.value
+  if (tab === 'optimization' && optimizationId) {
+    await loadOptimization(optimizationId, { skipDirtyPrompt: true })
+    if (diagnosisId && currentOptimization.value?.diagnosisId === diagnosisId) await loadDiagnosis(diagnosisId)
+  } else if (diagnosisId) await loadDiagnosis(diagnosisId)
+  if (!selectedResumeVersionId.value) selectedResumeVersionId.value = confirmedVersions.value[0]?.id || ''
+  if (!queryValue(route.query.tab)) syncQuery({ tab })
   initialized.value = true
-  await refreshHistories()
+  await refreshHistories(!diagnosisId)
 }
 
-watch(selectedResumeVersionId, () => {
+watch(selectedResumeVersionId, id => {
   if (!initialized.value) return
   diagnosisPage.value = 1
   optimizationPage.value = 1
-  syncQuery({ resumeVersionId: selectedResumeVersionId.value || undefined })
-  void refreshHistories()
+  if (currentDiagnosis.value?.resumeVersionId !== id) {
+    diagnosisDetailRequest++
+    currentDiagnosis.value = null
+    selectedDiagnosisId.value = ''
+    diagnosisDetailError.value = null
+    diagnosisDetailLoading.value = false
+  }
+  syncQuery({
+    tab: activeTab.value,
+    resumeVersionId: id || undefined,
+    diagnosisId: selectedDiagnosisId.value || undefined,
+    optimizationId: currentOptimization.value?.resumeVersionId === id ? selectedOptimizationId.value : undefined,
+  })
+  void refreshHistories(true)
 })
 
 watch(selectedJobId, () => {
@@ -598,33 +694,82 @@ onMounted(() => {
     <header class="page-header">
       <div>
         <h1>智能简历优化</h1>
-        <p>基于已确认事实进行诊断和岗位定向优化，逐段核对后再采纳与导出。</p>
+        <p>查看简历表现，或结合目标岗位调整简历内容。</p>
       </div>
       <router-link to="/resume"><el-button>管理简历版本</el-button></router-link>
     </header>
 
-    <el-alert class="truth-alert" type="warning" title="AI 建议不是事实，所有新增或改写内容都必须由本人核对；不得把未经历的项目、雇主、技能或指标写入最终简历。" :closable="false" show-icon />
+    <nav class="report-tabs" aria-label="简历评估与优化">
+      <button type="button" :aria-pressed="activeTab === 'analysis'" @click="syncQuery({ tab: 'analysis' })">简历分析</button>
+      <button type="button" :aria-pressed="activeTab === 'optimization'" @click="syncQuery({ tab: 'optimization' })">定向优化</button>
+    </nav>
 
-    <div class="setup-grid">
-      <section class="panel">
-        <div class="panel__heading"><h2>1. 选择已确认版本并诊断</h2><el-button text type="primary" @click="loadResumeOptions">刷新版本</el-button></div>
-        <AsyncState :loading="resumeOptionsLoading" :error="resumeOptionsError" :empty="!confirmedVersions.length" empty-text="暂无已确认简历版本" empty-description="请先在简历中心上传、解析并确认事实。" @retry="loadResumeOptions">
-          <template #empty><router-link to="/resume"><el-button type="primary">前往简历中心</el-button></router-link></template>
-          <el-select v-model="selectedResumeVersionId" class="full-width" filterable placeholder="选择已确认简历版本">
-            <el-option v-for="version in confirmedVersions" :key="version.id" :value="version.id" :label="versionLabel(version)" />
-          </el-select>
-          <div v-if="selectedResumeVersion" class="selected-meta">
-            <el-tag type="success">{{ statusLabel(selectedResumeVersion.status) }}</el-tag>
-            <span>上传于 {{ formatDate(selectedResumeVersion.createdAt) }}</span>
+    <section class="panel report-toolbar" aria-label="简历版本与分析操作">
+      <AsyncState :loading="resumeOptionsLoading" :error="resumeOptionsError" :empty="!confirmedVersions.length && !selectedResumeVersion" empty-text="暂无已确认简历版本" empty-description="在简历中心上传并确认后即可开始分析。" @retry="loadResumeOptions">
+        <template #empty><router-link to="/resume"><el-button type="primary">前往简历中心</el-button></router-link></template>
+        <div class="report-toolbar__row">
+          <div class="report-version">
+            <label for="analysis-resume-select">简历版本</label>
+            <el-select id="analysis-resume-select" v-model="selectedResumeVersionId" filterable :disabled="taskRunning || diagnoseSubmitting || optimizeSubmitting" placeholder="选择已确认的简历">
+              <el-option v-if="selectedResumeVersion && selectedResumeVersion.status !== 'CONFIRMED'" :value="selectedResumeVersion.id" :label="versionLabel(selectedResumeVersion)" disabled />
+              <el-option v-for="version in confirmedVersions" :key="version.id" :value="version.id" :label="versionLabel(version)" />
+            </el-select>
           </div>
-          <el-alert v-if="resumeOptionsWarning" class="inline-alert" type="warning" :title="resumeOptionsWarning" :closable="false" show-icon />
-          <el-alert v-if="diagnoseError" class="inline-alert" type="error" :title="errorMessage(diagnoseError)" :closable="false" show-icon />
-          <el-button class="setup-action" type="primary" :disabled="selectedResumeVersion?.status !== 'CONFIRMED' || taskRunning" :loading="diagnoseSubmitting" @click="startDiagnosis">发起简历诊断</el-button>
-        </AsyncState>
-      </section>
+          <div v-if="activeTab === 'analysis'" class="report-actions">
+            <el-button @click="diagnosisHistoryOpen = true">历史记录</el-button>
+            <el-button :disabled="!canExportAssessment" :loading="assessmentExporting" @click="exportAssessmentReport">下载 PDF</el-button>
+            <el-button type="primary" :disabled="selectedResumeVersion?.status !== 'CONFIRMED' || taskRunning || optimizeSubmitting" :loading="diagnoseSubmitting" @click="startDiagnosis">{{ currentDiagnosis?.status === 'READY' ? '重新分析' : '发起分析' }}</el-button>
+          </div>
+        </div>
+      </AsyncState>
+      <el-alert v-if="activeTab === 'analysis' && diagnoseError" class="inline-alert" type="error" :title="errorMessage(diagnoseError)" :closable="false" show-icon />
+      <el-alert v-if="activeTab === 'analysis' && assessmentExportError" class="inline-alert" type="error" :title="errorMessage(assessmentExportError)" :closable="false" show-icon />
+    </section>
 
+    <section v-if="(task && task.status !== 'SUCCEEDED') || taskLoading || taskError || taskAuthorityError || taskRetryError" class="panel task-panel">
+      <div class="panel__heading"><h2>当前 AI 任务</h2></div>
+      <TaskStatus :task="task" :reasoning="reasoningText" :loading="taskLoading" :tracking-error="taskError" :refreshing="taskRefreshing" @refresh="refreshTask" compact>
+        <template #actions>
+          <el-button v-if="(task?.status === 'FAILED' || task?.status === 'EXPIRED') && task.error?.retryable" type="primary" :loading="taskActionLoading" @click="retryFailedTask">按原参数重试任务</el-button>
+        </template>
+      </TaskStatus>
+      <pre v-if="deltaText" class="task-delta pre-wrap">{{ deltaText }}</pre>
+      <el-alert v-if="taskRetryError" class="inline-alert" type="error" :title="`重试失败：${errorMessage(taskRetryError)}`" description="可使用上方业务按钮按当前选择重新提交。" :closable="false" show-icon />
+      <el-alert v-if="taskAuthorityError" class="inline-alert" type="error" :title="`任务完成，但业务详情加载失败：${errorMessage(taskAuthorityError)}`" :closable="false" show-icon>
+        <template #default><el-button text type="primary" @click="retryTaskAuthority">重新加载权威详情</el-button></template>
+      </el-alert>
+    </section>
+
+
+    <div v-show="activeTab === 'analysis'" class="analysis-pane">
+      <AsyncState :loading="diagnosisDetailLoading || (!currentDiagnosis && diagnosisHistoryLoading)" :retain="currentDiagnosis?.id === selectedDiagnosisId && !!currentDiagnosis" :error="diagnosisDetailError || (!currentDiagnosis && diagnosisHistoryError) || null" :empty="!currentDiagnosis" empty-text="还没有分析报告" empty-description="选择简历版本并发起分析，即可查看评分与改进建议。" @retry="selectedDiagnosisId ? loadDiagnosis(selectedDiagnosisId) : loadDiagnoses(true)">
+        <template v-if="currentDiagnosis">
+          <ResumeDiagnosticReport v-if="currentDiagnosis.status === 'READY'" :key="currentDiagnosis.id" :diagnosis="currentDiagnosis" />
+          <WaitStatus v-else-if="currentDiagnosis.status === 'FAILED' && !task?.error" title="简历分析失败" description="可重新发起本版本的简历分析。" state="error" />
+          <WaitStatus v-else-if="currentDiagnosis.status === 'GENERATING' && !taskRunning && !taskLoading && !taskError && !task?.error" title="正在分析简历">
+            <template #actions><el-button size="small" :loading="diagnosisDetailLoading" @click="loadDiagnosis(currentDiagnosis.id)">刷新状态</el-button></template>
+          </WaitStatus>
+        </template>
+      </AsyncState>
+    </div>
+
+    <el-drawer v-model="diagnosisHistoryOpen" title="简历分析历史" size="min(450px, 100vw)">
+      <AsyncState :loading="diagnosisHistoryLoading" :retain="diagnoses.length > 0" :error="diagnosisHistoryError" :empty="!diagnoses.length" empty-text="此版本暂无历史分析" @retry="loadDiagnoses()">
+        <div class="history-list">
+          <button v-for="item in diagnoses" :key="item.id" type="button" class="history-item" :class="{ 'history-item--active': item.id === selectedDiagnosisId }" @click="loadDiagnosis(item.id)">
+            <span><strong>{{ formatDate(item.createdAt) }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
+            <small v-if="item.assessment">{{ item.assessment.totalScore }} / 100 · {{ item.assessment.ruleVersion }}</small>
+          </button>
+        </div>
+        <el-pagination v-if="diagnosisTotal > diagnosisSize" class="pagination" layout="prev, pager, next" size="small" :total="diagnosisTotal" :current-page="diagnosisPage" :page-size="diagnosisSize" @current-change="diagnosisPage = $event; loadDiagnoses()" />
+      </AsyncState>
+    </el-drawer>
+
+    <div v-show="activeTab === 'optimization'" class="optimization-pane">
+      <el-alert class="truth-alert" type="warning" title="请核对所有新增或改写的内容，只采纳本人能确认的经历和成果。" :closable="false" show-icon />
+      <div class="setup-grid">
       <section class="panel">
-        <div class="panel__heading"><h2>2. 选择已分析岗位并优化</h2><el-button text type="primary" @click="loadJobs">刷新岗位</el-button></div>
+        <div class="panel__heading"><h2>目标岗位</h2><el-button text type="primary" @click="loadJobs">刷新岗位</el-button></div>
         <AsyncState :loading="jobsLoading" :error="jobsError" :empty="!analyzedJobs.length" empty-text="暂无已分析岗位" empty-description="请先导入或选择已完成 JD 分析的岗位。" @retry="loadJobs">
           <template #empty><router-link to="/jobs?tab=trusted"><el-button type="primary">前往岗位推荐</el-button></router-link></template>
           <el-select v-model="selectedJobId" class="full-width" filterable placeholder="选择目标岗位">
@@ -635,178 +780,132 @@ onMounted(() => {
             <span>岗位版本 {{ selectedJob.jobVersion }} · {{ selectedJob.requirements ? '已完成分析' : '未完成分析' }}</span>
           </div>
           <el-alert v-if="jobsWarning" class="inline-alert" type="warning" :title="jobsWarning" :closable="false" show-icon />
-          <el-checkbox class="diagnosis-link" v-model="linkDiagnosis" :disabled="!canLinkDiagnosis">关联当前诊断{{ currentDiagnosis && canLinkDiagnosis ? `（${currentDiagnosis.id}）` : '' }}</el-checkbox>
+          <el-checkbox class="diagnosis-link" v-model="linkDiagnosis" :disabled="!canLinkDiagnosis">关联同版本的当前诊断</el-checkbox>
           <el-alert v-if="optimizeError" class="inline-alert" type="error" :title="errorMessage(optimizeError)" :closable="false" show-icon />
-          <el-button class="setup-action" type="primary" :disabled="selectedResumeVersion?.status !== 'CONFIRMED' || !selectedJob || selectedJob.status !== 'ACTIVE' || !selectedJob.requirements || taskRunning" :loading="optimizeSubmitting" @click="startOptimization">发起定向优化</el-button>
+          <el-button class="setup-action" type="primary" :disabled="selectedResumeVersion?.status !== 'CONFIRMED' || !selectedJob || selectedJob.status !== 'ACTIVE' || !selectedJob.requirements || taskRunning || diagnoseSubmitting" :loading="optimizeSubmitting" @click="startOptimization">发起定向优化</el-button>
         </AsyncState>
       </section>
-    </div>
-
-    <section v-if="task || taskError || taskAuthorityError || taskRetryError" class="panel">
-      <div class="panel__heading"><h2>当前 AI 任务</h2><el-tag v-if="taskRunning" type="warning">任务处理中</el-tag></div>
-      <TaskStatus :task="task" :reasoning="reasoningText">
-        <template #actions>
-          <el-button v-if="task?.status === 'FAILED'" type="primary" :loading="taskActionLoading" @click="retryFailedTask">按原参数重试任务</el-button>
-        </template>
-      </TaskStatus>
-      <pre v-if="deltaText" class="task-delta pre-wrap">{{ deltaText }}</pre>
-      <el-alert v-if="taskRetryError" class="inline-alert" type="error" :title="`重试失败：${errorMessage(taskRetryError)}`" description="可使用上方业务按钮按当前选择重新提交。" :closable="false" show-icon />
-      <el-alert v-if="taskAuthorityError" class="inline-alert" type="error" :title="`任务完成，但业务详情加载失败：${errorMessage(taskAuthorityError)}`" :closable="false" show-icon>
-        <template #default><el-button text type="primary" @click="retryTaskAuthority">重新加载权威详情</el-button></template>
-      </el-alert>
-      <el-alert v-if="taskError" class="inline-alert" type="warning" :title="`任务状态连接异常：${errorMessage(taskError)}`" description="后端任务可能仍在执行，可重新连接并恢复轮询。" :closable="false" show-icon>
-        <template #default><el-button text type="primary" @click="restartTask">重新连接</el-button></template>
-      </el-alert>
-    </section>
-
-    <div class="history-grid">
-      <section class="panel">
-        <div class="panel__heading"><h2>历史诊断</h2><el-button text type="primary" :loading="diagnosisHistoryLoading" @click="loadDiagnoses">刷新</el-button></div>
-        <AsyncState :loading="diagnosisHistoryLoading" :error="diagnosisHistoryError" :empty="!diagnoses.length" empty-text="暂无历史诊断" @retry="loadDiagnoses">
-          <div class="history-list">
-            <button v-for="item in diagnoses" :key="item.id" type="button" class="history-item" :class="{ 'history-item--active': item.id === selectedDiagnosisId }" @click="loadDiagnosis(item.id)">
-              <span><strong>{{ item.resumeVersionId }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
-              <small>{{ formatDate(item.createdAt) }} · {{ item.id }}</small>
-            </button>
-          </div>
-          <el-pagination v-if="diagnosisTotal > diagnosisSize" class="pagination" layout="prev, pager, next" small :total="diagnosisTotal" :current-page="diagnosisPage" :page-size="diagnosisSize" @current-change="diagnosisPage = $event; loadDiagnoses()" />
-        </AsyncState>
-      </section>
-
       <section class="panel">
         <div class="panel__heading"><h2>历史优化稿</h2><el-button text type="primary" :loading="optimizationHistoryLoading" @click="loadOptimizations">刷新</el-button></div>
-        <AsyncState :loading="optimizationHistoryLoading" :error="optimizationHistoryError" :empty="!optimizations.length" empty-text="暂无历史优化稿" @retry="loadOptimizations">
+        <AsyncState :loading="optimizationHistoryLoading" :retain="optimizations.length > 0" :error="optimizationHistoryError" :empty="!optimizations.length" empty-text="暂无历史优化稿" @retry="loadOptimizations">
           <div class="history-list">
             <button v-for="item in optimizations" :key="item.id" type="button" class="history-item" :class="{ 'history-item--active': item.id === selectedOptimizationId }" @click="loadOptimization(item.id)">
               <span><strong>{{ item.title }}</strong><el-tag size="small" :type="statusTagType(item.status)">{{ statusLabel(item.status) }}</el-tag></span>
-              <small>{{ formatDate(item.createdAt) }} · {{ item.id }}</small>
+              <small>{{ formatDate(item.createdAt) }}</small>
             </button>
           </div>
-          <el-pagination v-if="optimizationTotal > optimizationSize" class="pagination" layout="prev, pager, next" small :total="optimizationTotal" :current-page="optimizationPage" :page-size="optimizationSize" @current-change="optimizationPage = $event; loadOptimizations()" />
+          <el-pagination v-if="optimizationTotal > optimizationSize" class="pagination" layout="prev, pager, next" size="small" :total="optimizationTotal" :current-page="optimizationPage" :page-size="optimizationSize" @current-change="optimizationPage = $event; loadOptimizations()" />
+        </AsyncState>
+      </section>
+      </div>
+
+      <section class="panel optimization-detail">
+        <div class="panel__heading">
+          <div><h2>优化稿核对与预览</h2><p v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ formatDate(currentOptimization.createdAt) }}</p><details v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId"><summary>优化稿记录编号</summary>{{ currentOptimization.id }}</details></div>
+          <div class="actions">
+            <el-button v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId" :loading="optimizationDetailLoading" @click="refreshCurrentOptimization">刷新详情</el-button>
+            <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">导出 PDF</el-button>
+            <el-button :disabled="!canExport" :loading="exporting === 'DOCX'" @click="exportOptimization('DOCX')">导出 DOCX</el-button>
+          </div>
+        </div>
+        <el-alert v-if="currentOptimization?.status === 'ACCEPTED' && optimizationDirty" class="inline-alert" type="warning" title="当前编辑尚未提交，导出按钮已禁用；请先采纳保存最终文本。" :closable="false" show-icon />
+        <el-alert v-if="exportError" class="inline-alert" type="error" :title="`导出失败：${errorMessage(exportError)}`" :description="exportErrorHint" :closable="false" show-icon />
+        <AsyncState :loading="optimizationDetailLoading" :error="optimizationDetailError" :empty="!currentOptimization || currentOptimization.resumeVersionId !== selectedResumeVersionId" empty-text="选择历史优化稿或发起定向优化" @retry="loadOptimization(selectedOptimizationId)">
+          <template v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId">
+            <div class="detail-summary">
+              <div>
+                <el-tag :type="statusTagType(currentOptimization.status)">{{ statusLabel(currentOptimization.status) }}</el-tag>
+                <span class="muted detail-dates">创建于 {{ formatDate(currentOptimization.createdAt) }}<template v-if="currentOptimization.acceptedAt"> · 采纳于 {{ formatDate(currentOptimization.acceptedAt) }}</template></span>
+              </div>
+              <span class="muted">岗位：{{ selectedJob ? jobLabel(selectedJob) : currentOptimization.jobId }}</span>
+            </div>
+            <WaitStatus v-if="currentOptimization.status === 'GENERATING' && !taskRunning && !taskLoading && !taskError" title="正在生成优化稿" />
+            <el-alert v-if="currentOptimization.status === 'FAILED'" class="inline-alert" type="error" title="优化稿生成失败，请使用原简历版本和岗位重新发起。" :closable="false" show-icon />
+            <el-alert v-if="conflictMessage" class="inline-alert" type="error" title="优化稿版本冲突" :description="conflictMessage" :closable="false" show-icon>
+              <template #default>
+                <div class="actions conflict-actions">
+                  <el-button type="primary" :loading="conflictLoading" @click="refreshConflict(true)">刷新并保留我的编辑</el-button>
+                  <el-button :disabled="conflictLoading" @click="refreshConflict(false)">放弃编辑并加载服务器稿</el-button>
+                </div>
+              </template>
+            </el-alert>
+            <el-alert v-if="acceptError" class="inline-alert" type="error" :title="`采纳失败：${errorMessage(acceptError)}`" :closable="false" show-icon />
+
+            <template v-if="currentOptimization.sections.length">
+              <div class="review-toolbar">
+                <el-alert title="左侧为原文，右侧为 AI 建议；最终文本必须由本人核对。接受单段只会复制建议，提交采纳后才保存。" type="info" :closable="false" show-icon />
+                <div class="actions" v-if="canEditOptimization">
+                  <el-button @click="fillAllSuggestions">将全部建议填入最终文本</el-button>
+                  <el-button type="primary" :loading="accepting" @click="acceptAllAndSubmit">全部采纳并提交</el-button>
+                  <el-button type="success" :disabled="currentOptimization.status === 'ACCEPTED' && !optimizationDirty" :loading="accepting" @click="submitAcceptance">提交最终文本</el-button>
+                </div>
+              </div>
+              <el-tabs type="border-card" class="review-tabs">
+                <el-tab-pane label="逐段对比与编辑">
+                  <div class="section-list">
+                    <article v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey" class="section-card">
+                      <div class="section-card__heading"><h3>{{ section.title }}</h3><el-button v-if="canEditOptimization" size="small" @click="acceptSection(index)">接受此段建议</el-button></div>
+                      <div class="section-compare">
+                        <div class="text-column original"><h4>原文 originalText</h4><p class="pre-wrap">{{ section.originalText || '无原文' }}</p></div>
+                        <div class="text-column suggested"><h4>AI 建议 suggestedText · 非事实，待核对</h4><p class="pre-wrap">{{ section.suggestedText || '无建议文本' }}</p></div>
+                      </div>
+                      <div class="source-quotes">
+                        <strong>sourceQuotes 原文依据</strong>
+                        <blockquote v-for="quote in section.sourceQuotes" :key="quote" class="pre-wrap">{{ quote }}</blockquote>
+                        <p v-if="!section.sourceQuotes.length" class="muted">未返回原文引用，请谨慎核对。</p>
+                      </div>
+                      <label class="final-editor">
+                        <span>最终文本 content</span>
+                        <el-input v-if="draftSections[index]" v-model="draftSections[index].content" type="textarea" :rows="7" maxlength="10000" show-word-limit resize="vertical" :disabled="!canEditOptimization" placeholder="请输入本人核对后的最终文本" />
+                      </label>
+                    </article>
+                  </div>
+                </el-tab-pane>
+                <el-tab-pane label="A4 样式预览">
+                  <div class="preview-stage">
+                    <div class="a4-page">
+                      <header><h2>{{ currentOptimization.title }}</h2><p>最终文本预览 · {{ statusLabel(currentOptimization.status) }}</p></header>
+                      <section v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey">
+                        <h3>{{ section.title }}</h3>
+                        <p class="pre-wrap">{{ draftSections[index]?.content ?? section.content ?? section.suggestedText }}</p>
+                      </section>
+                    </div>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
+            </template>
+            <el-empty v-else-if="!['GENERATING', 'FAILED'].includes(currentOptimization.status)" description="优化稿没有段落内容" />
+          </template>
         </AsyncState>
       </section>
     </div>
-
-    <section class="panel">
-      <div class="panel__heading">
-        <h2>诊断详情</h2>
-        <el-button v-if="currentDiagnosis" text type="primary" :loading="diagnosisDetailLoading" @click="loadDiagnosis(currentDiagnosis.id)">刷新详情</el-button>
-      </div>
-      <AsyncState :loading="diagnosisDetailLoading" :error="diagnosisDetailError" :empty="!currentDiagnosis" empty-text="选择历史诊断或发起新诊断" @retry="loadDiagnosis(selectedDiagnosisId)">
-        <template v-if="currentDiagnosis">
-          <div class="detail-summary">
-            <div><strong>{{ currentDiagnosis.id }}</strong><p class="muted">简历版本：{{ currentDiagnosis.resumeVersionId }} · {{ formatDate(currentDiagnosis.createdAt) }}</p></div>
-            <el-tag :type="statusTagType(currentDiagnosis.status)">{{ statusLabel(currentDiagnosis.status) }}</el-tag>
-          </div>
-          <div v-if="currentDiagnosis.items.length" class="diagnosis-items">
-            <article v-for="item in currentDiagnosis.items" :key="item.id" class="diagnosis-card">
-              <div class="diagnosis-card__heading"><el-tag :type="priorityTagType(item.priority)">{{ priorityLabels[item.priority] || item.priority }}</el-tag><h3>{{ item.title }}</h3></div>
-              <div class="diagnosis-field"><strong>问题</strong><p>{{ item.issue }}</p></div>
-              <blockquote><strong>原文 quote</strong><p class="pre-wrap">{{ item.quote || '未返回原文引用' }}</p></blockquote>
-              <div class="diagnosis-field"><strong>原因</strong><p class="pre-wrap">{{ item.rationale }}</p></div>
-              <div class="diagnosis-field suggestion"><strong>建议（待本人核对）</strong><p class="pre-wrap">{{ item.suggestion }}</p></div>
-            </article>
-          </div>
-          <el-empty v-else :description="currentDiagnosis.status === 'GENERATING' ? '诊断正在生成，请稍后刷新' : currentDiagnosis.status === 'FAILED' ? '诊断生成失败，请按原版本重新发起' : '诊断未返回问题项'" />
-        </template>
-      </AsyncState>
-    </section>
-
-    <section class="panel optimization-detail">
-      <div class="panel__heading">
-        <div><h2>优化稿核对与预览</h2><p v-if="currentOptimization" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ currentOptimization.id }}</p></div>
-        <div class="actions">
-          <el-button v-if="currentOptimization" :loading="optimizationDetailLoading" @click="refreshCurrentOptimization">刷新详情</el-button>
-          <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">导出 PDF</el-button>
-          <el-button :disabled="!canExport" :loading="exporting === 'DOCX'" @click="exportOptimization('DOCX')">导出 DOCX</el-button>
-        </div>
-      </div>
-      <el-alert v-if="currentOptimization?.status === 'ACCEPTED' && optimizationDirty" class="inline-alert" type="warning" title="当前编辑尚未提交，导出按钮已禁用；请先采纳保存最终文本。" :closable="false" show-icon />
-      <el-alert v-if="exportError" class="inline-alert" type="error" :title="`导出失败：${errorMessage(exportError)}`" :description="exportErrorHint" :closable="false" show-icon />
-      <AsyncState :loading="optimizationDetailLoading" :error="optimizationDetailError" :empty="!currentOptimization" empty-text="选择历史优化稿或发起定向优化" @retry="loadOptimization(selectedOptimizationId)">
-        <template v-if="currentOptimization">
-          <div class="detail-summary">
-            <div>
-              <el-tag :type="statusTagType(currentOptimization.status)">{{ statusLabel(currentOptimization.status) }}</el-tag>
-              <span class="muted detail-dates">创建于 {{ formatDate(currentOptimization.createdAt) }}<template v-if="currentOptimization.acceptedAt"> · 采纳于 {{ formatDate(currentOptimization.acceptedAt) }}</template></span>
-            </div>
-            <span class="muted">岗位：{{ selectedJob ? jobLabel(selectedJob) : currentOptimization.jobId }}</span>
-          </div>
-          <el-alert v-if="currentOptimization.status === 'GENERATING'" class="inline-alert" type="warning" title="优化稿正在生成，任务完成后会加载权威详情。" :closable="false" show-icon />
-          <el-alert v-if="currentOptimization.status === 'FAILED'" class="inline-alert" type="error" title="优化稿生成失败，请使用原简历版本和岗位重新发起。" :closable="false" show-icon />
-          <el-alert v-if="conflictMessage" class="inline-alert" type="error" title="优化稿版本冲突" :description="conflictMessage" :closable="false" show-icon>
-            <template #default>
-              <div class="actions conflict-actions">
-                <el-button type="primary" :loading="conflictLoading" @click="refreshConflict(true)">刷新并保留我的编辑</el-button>
-                <el-button :disabled="conflictLoading" @click="refreshConflict(false)">放弃编辑并加载服务器稿</el-button>
-              </div>
-            </template>
-          </el-alert>
-          <el-alert v-if="acceptError" class="inline-alert" type="error" :title="`采纳失败：${errorMessage(acceptError)}`" :closable="false" show-icon />
-
-          <template v-if="currentOptimization.sections.length">
-            <div class="review-toolbar">
-              <el-alert title="左侧为原文，右侧为 AI 建议；最终文本必须由本人核对。接受单段只会复制建议，提交采纳后才保存。" type="info" :closable="false" show-icon />
-              <div class="actions" v-if="canEditOptimization">
-                <el-button @click="fillAllSuggestions">将全部建议填入最终文本</el-button>
-                <el-button type="primary" :loading="accepting" @click="acceptAllAndSubmit">全部采纳并提交</el-button>
-                <el-button type="success" :disabled="currentOptimization.status === 'ACCEPTED' && !optimizationDirty" :loading="accepting" @click="submitAcceptance">提交最终文本</el-button>
-              </div>
-            </div>
-            <el-tabs type="border-card" class="review-tabs">
-              <el-tab-pane label="逐段对比与编辑">
-                <div class="section-list">
-                  <article v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey" class="section-card">
-                    <div class="section-card__heading"><h3>{{ section.title }}</h3><el-button v-if="canEditOptimization" size="small" @click="acceptSection(index)">接受此段建议</el-button></div>
-                    <div class="section-compare">
-                      <div class="text-column original"><h4>原文 originalText</h4><p class="pre-wrap">{{ section.originalText || '无原文' }}</p></div>
-                      <div class="text-column suggested"><h4>AI 建议 suggestedText · 非事实，待核对</h4><p class="pre-wrap">{{ section.suggestedText || '无建议文本' }}</p></div>
-                    </div>
-                    <div class="source-quotes">
-                      <strong>sourceQuotes 原文依据</strong>
-                      <blockquote v-for="quote in section.sourceQuotes" :key="quote" class="pre-wrap">{{ quote }}</blockquote>
-                      <p v-if="!section.sourceQuotes.length" class="muted">未返回原文引用，请谨慎核对。</p>
-                    </div>
-                    <label class="final-editor">
-                      <span>最终文本 content</span>
-                      <el-input v-if="draftSections[index]" v-model="draftSections[index].content" type="textarea" :rows="7" maxlength="10000" show-word-limit resize="vertical" :disabled="!canEditOptimization" placeholder="请输入本人核对后的最终文本" />
-                    </label>
-                  </article>
-                </div>
-              </el-tab-pane>
-              <el-tab-pane label="A4 样式预览">
-                <div class="preview-stage">
-                  <div class="a4-page">
-                    <header><h2>{{ currentOptimization.title }}</h2><p>最终文本预览 · {{ statusLabel(currentOptimization.status) }}</p></header>
-                    <section v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey">
-                      <h3>{{ section.title }}</h3>
-                      <p class="pre-wrap">{{ draftSections[index]?.content ?? section.content ?? section.suggestedText }}</p>
-                    </section>
-                  </div>
-                </div>
-              </el-tab-pane>
-            </el-tabs>
-          </template>
-          <el-empty v-else-if="!['GENERATING', 'FAILED'].includes(currentOptimization.status)" description="优化稿没有段落内容" />
-        </template>
-      </AsyncState>
-    </section>
   </div>
 </template>
 
 <style scoped lang="scss">
 .optimization-page { padding-bottom: 28px; }
 .truth-alert { margin-bottom: 14px; }
-.setup-grid, .history-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.report-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.report-tabs button { padding: 9px 16px; border: 1px solid var(--ai-accent-border, #dce7f4); border-radius: 8px; background: var(--ai-bg-card, #fff); color: var(--ai-text-secondary, #365173); font-weight: 600; font-size: 14px; cursor: pointer; }
+.report-tabs button[aria-pressed="true"] { background: var(--ai-primary-light, #eaf2ff); border-color: var(--ai-accent-border, #b6cff6); color: var(--ai-primary, #235cbe); }
+.report-toolbar { margin-bottom: 14px; padding: 14px 18px; }
+.report-toolbar__row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 16px; }
+.report-version { display: grid; flex: 1 1 260px; gap: 6px; min-width: 0; max-width: 580px; }
+.report-version label { color: $ai-text-secondary; font-size: 12px; font-weight: 600; }
+.report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.report-actions .el-button { margin: 0; }
+.task-panel, .setup-grid { margin-bottom: 14px; }
+.history-list + .pagination { margin-top: 14px; }
+.setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .selected-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; color: $ai-text-secondary; font-size: 12px; }
 .setup-action { width: 100%; margin-top: 14px; }
 .diagnosis-link { margin-top: 14px; white-space: normal; }
 .inline-alert { margin-top: 14px; }
-.task-delta { max-height: 180px; margin: 12px 0; padding: 12px; overflow: auto; border-radius: 8px; background: #f5f8fc; }
+.task-delta { max-height: 180px; margin: 12px 0; padding: 12px; overflow: auto; border-radius: 8px; background: var(--ai-bg-light, #f5f8fc); }
 .history-list { display: grid; gap: 9px; }
-.history-item { display: grid; gap: 7px; width: 100%; padding: 12px; border: 1px solid #e4ecf7; border-radius: 8px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
-.history-item:hover { border-color: #9dbff5; }
-.history-item--active { border-color: #2d72ec; background: #f2f7ff; }
+.history-item { display: grid; gap: 7px; width: 100%; padding: 12px; border: 1px solid var(--ai-border-light, #e4ecf7); border-radius: 8px; background: var(--ai-bg-card, #fff); color: inherit; text-align: left; cursor: pointer; }
+.history-item:hover { border-color: var(--ai-accent-border, #9dbff5); }
+.history-item--active { border-color: var(--ai-accent-border, #2d72ec); background: var(--ai-bg-light, #f2f7ff); }
 .history-item > span { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .history-item strong { min-width: 0; overflow-wrap: anywhere; }
 .history-item small { color: $ai-text-tertiary; overflow-wrap: anywhere; }
@@ -814,43 +913,34 @@ onMounted(() => {
 .detail-summary strong { overflow-wrap: anywhere; }
 .detail-summary p { margin: 6px 0 0; }
 .detail-dates { margin-left: 10px; }
-.diagnosis-items { display: grid; gap: 14px; }
-.diagnosis-card { padding: 16px; border: 1px solid #e5edf8; border-radius: 10px; background: #fbfdff; }
-.diagnosis-card__heading { display: flex; align-items: center; gap: 10px; }
-.diagnosis-card__heading h3 { margin: 0; color: #152653; }
-.diagnosis-field { margin-top: 13px; }
-.diagnosis-field strong, .source-quotes > strong { color: #4d6185; font-size: 13px; }
-.diagnosis-field p { margin: 5px 0 0; line-height: 1.7; white-space: pre-wrap; }
-.diagnosis-card blockquote, .source-quotes blockquote { margin: 13px 0 0; padding: 11px 13px; border-left: 3px solid #8ca9d4; background: #f1f5fb; color: #4c5e7e; }
-.diagnosis-card blockquote p { margin: 6px 0 0; }
-.diagnosis-field.suggestion { padding: 12px; border-radius: 8px; background: #fff8e9; }
+.source-quotes blockquote { margin: 13px 0 0; padding: 11px 13px; border-left: 3px solid var(--ai-accent-border, #8ca9d4); background: var(--ai-bg-light, #f1f5fb); color: var(--ai-text-secondary, #4c5e7e); }
 .optimization-subtitle { margin: 5px 0 0; font-size: 12px; overflow-wrap: anywhere; }
 .conflict-actions { margin-top: 12px; }
 .review-toolbar { display: grid; gap: 12px; margin-bottom: 14px; }
 .review-toolbar > .actions { justify-content: flex-end; }
 .review-tabs { margin-top: 14px; }
 .section-list { display: grid; gap: 16px; }
-.section-card { padding: 16px; border: 1px solid #e3ebf6; border-radius: 10px; }
+.section-card { padding: 16px; border: 1px solid var(--ai-border-light, #e3ebf6); border-radius: 10px; }
 .section-card__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
-.section-card__heading h3 { margin: 0; color: #13244f; font-size: 17px; }
+.section-card__heading h3 { margin: 0; color: var(--ai-text-primary, #13244f); font-size: 17px; }
 .section-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .text-column { min-width: 0; padding: 14px; border-radius: 8px; }
 .text-column h4 { margin: 0 0 10px; font-size: 13px; }
 .text-column p { margin: 0; min-height: 80px; }
-.text-column.original { background: #f5f7fa; }
-.text-column.suggested { background: #fff7e8; }
-.text-column.suggested h4 { color: #936411; }
+.text-column.original { background: var(--ai-bg-light, #f5f7fa); }
+.text-column.suggested { background: var(--ai-warning-bg, #fff7e8); }
+.text-column.suggested h4 { color: var(--ai-warning, #936411); }
 .source-quotes { margin-top: 13px; }
 .source-quotes p { margin: 8px 0 0; }
-.final-editor { display: grid; gap: 8px; margin-top: 15px; color: #253c68; font-weight: 600; }
-.preview-stage { padding: 24px; overflow: auto; background: #e9edf3; }
-.a4-page { width: 794px; max-width: 100%; min-height: 1123px; margin: 0 auto; padding: 64px 68px; box-sizing: border-box; background: #fff; box-shadow: 0 5px 24px rgb(29 46 78 / 16%); color: #222; font-family: 'Times New Roman', 'SimSun', serif; }
-.a4-page header { margin-bottom: 28px; padding-bottom: 18px; border-bottom: 2px solid #26364d; text-align: center; }
+.final-editor { display: grid; gap: 8px; margin-top: 15px; color: var(--ai-text-secondary, #253c68); font-weight: 600; }
+.preview-stage { padding: 24px; overflow: auto; background: var(--ai-bg-light, #e9edf3); }
+.a4-page { width: 794px; max-width: 100%; min-height: 1123px; margin: 0 auto; padding: 64px 68px; box-sizing: border-box; background: var(--ai-bg-card, #fff); box-shadow: 0 5px 24px rgb(29 46 78 / 16%); color: var(--ai-text-primary, #222); font-family: 'Times New Roman', 'SimSun', serif; }
+.a4-page header { margin-bottom: 28px; padding-bottom: 18px; border-bottom: 2px solid var(--ai-accent-border, #26364d); text-align: center; }
 .a4-page header h2 { margin: 0; font-size: 25px; }
-.a4-page header p { margin: 8px 0 0; color: #6c7280; font-size: 12px; }
+.a4-page header p { margin: 8px 0 0; color: var(--ai-text-secondary, #6c7280); font-size: 12px; }
 .a4-page section { margin-top: 22px; }
-.a4-page section h3 { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #ccd1d8; font-size: 17px; }
+.a4-page section h3 { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--ai-accent-border, #ccd1d8); font-size: 17px; }
 .a4-page section p { margin: 0; font-size: 13px; line-height: 1.85; }
-@media (max-width: 1000px) { .setup-grid, .history-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .setup-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .section-compare { grid-template-columns: 1fr; } .detail-summary, .section-card__heading { flex-direction: column; } .review-toolbar > .actions { align-items: stretch; flex-direction: column; } .review-toolbar .actions .el-button { width: 100%; margin: 0; } .optimization-detail .panel__heading { align-items: stretch; flex-direction: column; } .optimization-detail .panel__heading .actions .el-button { flex: 1; margin: 0; } .preview-stage { padding: 10px; } .a4-page { min-height: 900px; padding: 36px 28px; } }
 </style>

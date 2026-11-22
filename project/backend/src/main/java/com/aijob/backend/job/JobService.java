@@ -28,6 +28,7 @@ public class JobService {
 
     private static final Pattern INTERNSHIP_WORD = Pattern.compile("\\bintern(ship)?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern GRADUATION_YEAR = Pattern.compile("\\d{4}\\s*届");
+    private static final Pattern AI_WORD = Pattern.compile("\\bai\\b", Pattern.CASE_INSENSITIVE);
     private static final Map<String, String> CITY_CODES = Map.of(
             "北京", "110100", "上海", "310100", "杭州", "330100", "广州", "440100",
             "深圳", "440300", "南京", "320100", "成都", "510100", "武汉", "420100");
@@ -82,7 +83,21 @@ public class JobService {
         if (row == null) {
             throw BusinessException.notFound();
         }
-        return jobVo(row, userId);
+        Map<String, Object> detail = jobVo(row, userId);
+        detail.put("revisions", mapper.revisions(jobId, userId).stream().map(revision -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("versionNo", revision.get("version_no"));
+            result.put("cityCode", revision.get("city_code"));
+            result.put("createdAt", view.value(revision.get("created_at")));
+            result.put("requirements", revision.get("requirements_json") == null ? null
+                    : json.map(String.valueOf(revision.get("requirements_json"))));
+            Map<String, Object> meta = revision.get("analysis_meta_json") == null ? Map.of()
+                    : json.map(String.valueOf(revision.get("analysis_meta_json")));
+            result.put("reason", meta.getOrDefault("reason", "原始自动分析"));
+            result.put("sourceQuote", meta.get("sourceQuote"));
+            return result;
+        }).toList());
+        return detail;
     }
 
     @Transactional
@@ -126,7 +141,9 @@ public class JobService {
             for (String code : skills) if (levels.containsKey(code)) retained.put(code, levels.get(code));
             requirements.put("requiredSkillLevels", retained);
         }
-        if (row.get("requirements_json") != null && java.util.Objects.equals(cityCode, row.get("city_code"))
+        boolean alreadyConfirmed = row.get("analysis_meta_json") != null
+                && Boolean.TRUE.equals(json.map(String.valueOf(row.get("analysis_meta_json"))).get("confirmedByUser"));
+        if (alreadyConfirmed && row.get("requirements_json") != null && java.util.Objects.equals(cityCode, row.get("city_code"))
                 && json.canonical(requirements).equals(json.canonical(json.map(String.valueOf(row.get("requirements_json")))))) {
             throw BusinessException.validation("body", "提取字段没有变化");
         }
@@ -348,7 +365,38 @@ public class JobService {
 
     public String roleCode(String text) {
         String value = text.toLowerCase();
+        boolean ai = value.contains("人工智能") || AI_WORD.matcher(value).find();
+        if (value.contains("agent") || value.contains("智能体")) return "AI_AGENT_DEVELOPER";
+        if (value.contains("rag") || value.contains("检索增强")) return "RAG_APPLICATION_DEVELOPER";
+        if (value.contains("prompt") || value.contains("提示词")) return "PROMPT_ENGINEER";
+        if (ai && value.contains("算法")) return "AI_ALGORITHM_ENGINEER";
+        if (value.contains("大模型") || value.contains("llm")) return "LLM_APPLICATION_DEVELOPER";
+        if (value.contains("nlp") || value.contains("自然语言")) return "NLP_ALGORITHM_ENGINEER";
+        if (value.contains("计算机视觉") || value.contains("图像识别")) return "COMPUTER_VISION_ENGINEER";
+        if (value.contains("推荐算法") || value.contains("推荐系统")) return "RECOMMENDATION_ALGORITHM";
+        if (value.contains("机器学习") || value.contains("machine learning")) return "MACHINE_LEARNING_ENGINEER";
+        if (value.contains("深度学习")) return "DEEP_LEARNING_ENGINEER";
+        if (ai) return "AI_APPLICATION_DEVELOPER";
+        if (value.contains("devops")) return "DEVOPS_ENGINEER";
+        if (value.contains("sre") || value.contains("可靠性")) return "SRE_ENGINEER";
+        if (value.contains("云计算") || value.contains("cloud")) return "CLOUD_ENGINEER";
+        if (value.contains("网络安全") || value.contains("security")) return "SECURITY_ENGINEER";
+        if (value.contains("android") || value.contains("安卓")) return "ANDROID_DEVELOPER";
+        if (value.contains("ios") || value.contains("苹果")) return "IOS_DEVELOPER";
+        if (value.contains("flutter") || value.contains("dart")) return "FLUTTER_DEVELOPER";
+        if (value.contains("vue")) return "VUE_DEVELOPER";
+        if (value.contains("react")) return "REACT_DEVELOPER";
         if (value.contains("前端") || value.contains("frontend")) return "FRONTEND";
+        if (value.contains("数据库") || value.contains("dba")) return "DATABASE_DEVELOPER";
+        if (value.contains("嵌入式") || value.contains("embedded")) return "EMBEDDED_ENGINEER";
+        if (value.contains("游戏") || value.contains("game")) return "GAME_DEVELOPER";
+        if (value.contains("区块链") || value.contains("blockchain")) return "BLOCKCHAIN_DEVELOPER";
+        if (value.contains("产品经理") || value.contains("product manager")) return "TECHNICAL_PRODUCT_MANAGER";
+        if (value.contains("解决方案") || value.contains("售前")) return "SOLUTION_ENGINEER";
+        if (value.contains("golang") || value.contains("go 语言")) return "GO_BACKEND";
+        if (value.contains("node") || value.contains("nodejs")) return "NODEJS_BACKEND";
+        if (value.contains("c++") || value.contains("cpp")) return "CPP_DEVELOPER";
+        if (value.contains("python") && value.contains("后端")) return "PYTHON_BACKEND";
         if (value.contains("算法") || value.contains("algorithm")) return "ALGORITHM";
         if (value.contains("测试") || value.contains("qa")) return "TEST";
         if (value.contains("数据分析") || value.contains("data")) return "DATA";
