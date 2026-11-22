@@ -33,7 +33,7 @@ ol {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #C9CDD4;
+  background: var(--ai-bg-light, #C9CDD4);
   border-radius: 3px;
 }
 

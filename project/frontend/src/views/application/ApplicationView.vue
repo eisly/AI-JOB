@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import AsyncState from '@/components/AsyncState.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Plus } from '@element-plus/icons-vue'
@@ -48,6 +50,7 @@ const listError = ref<string | null>(null)
 
 const summary = ref<ApplicationSummary>({ total: 0, counts: { PLANNED: 0, APPLIED: 0, INTERVIEWING: 0, CLOSED: 0 } })
 const summaryLoading = ref(false)
+const summaryLoaded = ref(false)
 const summaryError = ref<string | null>(null)
 
 /** 请求竞争序号 */
@@ -63,6 +66,7 @@ const formBaseline = ref<ApplicationVO | null>(null)
 /** 详情弹层 */
 const detailVisible = ref(false)
 const detailLoading = ref(false)
+const detailError = ref<string | null>(null)
 const detailRecord = ref<ApplicationVO | null>(null)
 /** 详情弹层打开时的记录 ID（用于断言迟到响应归属） */
 let detailTargetId: string | null = null
@@ -89,8 +93,6 @@ async function loadList(): Promise<void> {
     page.total = data.total
   } catch (e) {
     if (seq !== listSeq) return // 过期请求的失败不覆盖新请求状态
-    records.value = []
-    page.total = 0
     listError.value = e instanceof ApiError ? e.message : '加载投递列表失败，请稍后重试'
   } finally {
     if (seq === listSeq) listLoading.value = false
@@ -105,6 +107,7 @@ async function loadSummary(): Promise<void> {
     const data = await getApplicationSummary()
     if (seq !== summarySeq) return
     summary.value = data
+    summaryLoaded.value = true
   } catch (e) {
     if (seq !== summarySeq) return
     summaryError.value = e instanceof ApiError ? e.message : '加载统计数据失败，请稍后重试'
@@ -172,22 +175,22 @@ function handleFormSuccess(): void {
 
 // ---------- 详情 ----------
 
-async function openDetail(record: ApplicationVO): Promise<void> {
+async function openDetail(id: string): Promise<void> {
   const seq = ++detailSeq
-  detailTargetId = record.id
+  detailTargetId = id
   detailRecord.value = null
+  detailError.value = null
   detailLoading.value = true
   detailVisible.value = true
   try {
-    const data = await getApplicationDetail(record.id)
+    const data = await getApplicationDetail(id)
     // 弹层已关闭 / 已切换到其他记录：迟到响应丢弃
-    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== record.id) return
+    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== id) return
     detailRecord.value = data
   } catch (e) {
-    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== record.id) return
+    if (seq !== detailSeq || !detailVisible.value || detailTargetId !== id) return
     detailRecord.value = null
-    const message = e instanceof ApiError ? e.message : '加载详情失败'
-    ElMessage.error(message)
+    detailError.value = e instanceof ApiError ? e.message : '加载详情失败'
   } finally {
     if (seq === detailSeq) detailLoading.value = false
   }
@@ -290,7 +293,8 @@ function formatDateTime(value: string): string {
 <template>
   <div class="application-page">
     <!-- 统计卡片（独立请求，失败可独立重试） -->
-    <section v-loading="summaryLoading" class="summary-row">
+    <LoadingSkeleton v-if="summaryLoading && !summaryLoaded" :rows="2" label="正在读取投递统计" />
+    <section v-else-if="summaryLoaded" class="summary-row" :aria-busy="summaryLoading">
       <div v-for="card in summaryCards" :key="card.key" class="summary-card" :data-accent="card.accent">
         <span class="summary-card__value">{{ cardValue(card.key) }}</span>
         <span class="summary-card__label">{{ card.label }}</span>
@@ -325,16 +329,14 @@ function formatDateTime(value: string): string {
               :value="status"
             />
           </el-select>
-          <el-button :icon="Refresh" :disabled="listLoading" @click="refreshAll">刷新</el-button>
+          <el-button :icon="Refresh" :loading="listLoading" @click="refreshAll">{{ listLoading ? '正在刷新…' : '刷新' }}</el-button>
         </div>
         <el-button type="primary" :icon="Plus" @click="openCreate">新增投递记录</el-button>
       </div>
 
-      <el-alert v-if="listError" :title="listError" type="error" show-icon :closable="false" style="margin-bottom: 12px">
-        <el-button size="small" @click="loadList">重试</el-button>
-      </el-alert>
 
-      <el-table v-else v-loading="listLoading" :data="records" stripe style="width: 100%">
+      <AsyncState :loading="listLoading" :retain="records.length > 0" :error="listError" @retry="loadList">
+      <el-table :data="records" stripe style="width: 100%">
         <el-table-column prop="companyName" label="公司" min-width="150" show-overflow-tooltip />
         <el-table-column prop="jobTitle" label="岗位" min-width="170" show-overflow-tooltip />
         <el-table-column label="状态" width="100">
@@ -358,7 +360,7 @@ function formatDateTime(value: string): string {
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetail(asRecord(row))">详情</el-button>
+            <el-button link type="primary" @click="openDetail(asRecord(row).id)">详情</el-button>
             <el-button link type="primary" @click="openEdit(asRecord(row))">编辑</el-button>
             <el-button link type="danger" @click="openDelete(asRecord(row))">删除</el-button>
           </template>
@@ -373,6 +375,7 @@ function formatDateTime(value: string): string {
           </el-empty>
         </template>
       </el-table>
+      </AsyncState>
 
       <div class="panel__pagination">
         <el-pagination
@@ -391,7 +394,7 @@ function formatDateTime(value: string): string {
     <ApplicationForm v-model:visible="formVisible" :mode="formMode" :baseline="formBaseline" @success="handleFormSuccess" />
 
     <!-- 详情弹层（迟到响应由 detailSeq 丢弃） -->
-    <ApplicationDetail v-model:visible="detailVisible" :loading="detailLoading" :record="detailRecord" @update:visible="handleDetailClose" />
+    <ApplicationDetail v-model:visible="detailVisible" :loading="detailLoading" :record="detailRecord" :error="detailError" @retry="detailTargetId && openDetail(detailTargetId)" @update:visible="handleDetailClose" />
 
     <!-- 删除确认 -->
     <ApplicationDeleteConfirm v-model:visible="deleteVisible" :record="deleteTarget" :deleting="deleting" @confirm="handleDeleteConfirm" />
@@ -424,7 +427,7 @@ function formatDateTime(value: string): string {
 
   &[data-accent='primary'] { border-top-color: $ai-primary; }
   &[data-accent='info'] { border-top-color: $ai-text-tertiary; }
-  &[data-accent='applied'] { border-top-color: #2563eb; }
+  &[data-accent='applied'] { border-top-color: var(--ai-accent-border, #2563eb); }
   &[data-accent='warning'] { border-top-color: $ai-warning; }
   &[data-accent='success'] { border-top-color: $ai-success; }
 
@@ -442,7 +445,7 @@ function formatDateTime(value: string): string {
 
 .panel {
   background: $ai-bg-card;
-  border: 1px solid #e8f0fa;
+  border: 1px solid var(--ai-border-light, #e8f0fa);
   border-radius: $ai-radius-lg;
   padding: 16px 18px;
 }

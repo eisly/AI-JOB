@@ -103,15 +103,12 @@ export function adaptLegacySession(session: LearningSessionVO): PracticeSetVO {
     planId: session.planId,
     planItemId: session.planItemId,
     title: '专项训练 · 单题会话',
-    status: session.status === 'PREPARING'
-      ? 'GENERATING'
-      : session.status === 'FAILED'
-        ? 'FAILED'
-        : session.status === 'ACTIVE' ? 'IN_PROGRESS' : 'EVALUATING',
+    status: ({ PREPARING: 'GENERATING', FAILED: 'FAILED', ACTIVE: 'IN_PROGRESS', EVALUATING: 'EVALUATING', COMPLETED: 'EVALUATED' } as const)[session.status],
     config: null,
     questions: question ? [question] : [],
     totalMinutes: question?.estimatedMinutes ?? 0,
     version: session.version,
+    lastAnswerId: session.lastAnswerId,
   }
 }
 

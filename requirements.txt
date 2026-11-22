@@ -31,6 +31,8 @@ qdrant-client==1.20.0
 # Extract text from resume files
 pypdf==6.21.3
 python-docx==1.2.0
+# Render PDF pages to images for Tesseract OCR (image-based resume PDFs)
+PyMuPDF==1.24.9
 # Unit tests and coverage (development / CI)
 pytest==9.2.0
 pytest-asyncio==1.4.1.post1

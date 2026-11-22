@@ -44,7 +44,7 @@ const visible = computed({
   line-height: 1.8;
 }
 .muted {
-  color: #909399;
+  color: var(--ai-text-tertiary, #909399);
   font-size: 12px;
 }
 </style>

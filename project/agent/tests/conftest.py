@@ -54,8 +54,36 @@ def headers_for(settings: Settings):
     return build
 
 
+@pytest.fixture
+def repository_search_stub(monkeypatch):
+    from app.project_sources import RepoHit, RepositorySearchResult
+
+    async def stub(_settings, _skills, _query=None, _platforms=None, tech_stack_keywords=None, client=None):
+        hit = RepoHit(
+            platform="GITHUB",
+            path="spring-projects/spring-boot",
+            name="Spring Boot",
+            url="https://github.com/spring-projects/spring-boot",
+            description="Spring Boot makes it easy to create stand-alone, production-grade Spring applications.",
+            stars=70000,
+            default_branch="main",
+            license_hint="Apache-2.0",
+            readme_hint="https://github.com/spring-projects/spring-boot/blob/main/README.adoc",
+        )
+        hit.license = "Apache-2.0"
+        hit.readme_url = hit.readme_hint
+        return RepositorySearchResult(
+            source_runs=[{"platform": "GITHUB", "status": "SUCCEEDED", "reason": None}],
+            candidates=[hit],
+            terms=["java"],
+        )
+
+    monkeypatch.setattr("app.handlers.search_project_repositories", stub)
+    return stub
+
+
 @pytest_asyncio.fixture
-async def client_and_app(settings: Settings, fake_llm: FakeLLM):
+async def client_and_app(settings: Settings, fake_llm: FakeLLM, repository_search_stub):
     app = create_app(settings, llm_client=fake_llm)
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)

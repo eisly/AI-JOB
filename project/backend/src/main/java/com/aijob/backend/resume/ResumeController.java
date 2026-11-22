@@ -78,9 +78,23 @@ public class ResumeController {
 
     @GetMapping("/resume-versions/{versionId}/file")
     public ResponseEntity<org.springframework.core.io.Resource> file(@PathVariable String versionId,
-                                                                      @RequestParam long expires,
-                                                                      @RequestParam String signature) {
+                                                                       @RequestParam(required = false) Long expires,
+                                                                       @RequestParam(required = false) String signature,
+                                                                       @RequestParam(required = false) String owner) {
+        // owner + signature 模式：Agent 内部经 HMAC 签名 URL 下载原件，无需用户会话。
+        if (owner != null && expires != null && signature != null) {
+            String ownerId = Data.uuid(owner, "owner");
+            ResumeService.DownloadContent content = resumes.fileBySignature(ownerId, Data.uuid(versionId, "versionId"),
+                    expires, signature);
+            ContentDisposition disposition = ContentDisposition.attachment()
+                    .filename(content.fileName(), StandardCharsets.UTF_8).build();
+            return ResponseEntity.ok().contentType(MediaType.parseMediaType(content.mimeType()))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString()).body(content.resource());
+        }
         String userId = users.resolveCurrentUserId();
+        if (expires == null || signature == null) {
+            throw com.aijob.backend.common.BusinessException.validation("signature", "缺少 expires 或 signature 参数");
+        }
         ResumeService.DownloadContent content = resumes.file(userId, Data.uuid(versionId, "versionId"), expires, signature);
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(content.fileName(), StandardCharsets.UTF_8).build();
@@ -90,11 +104,12 @@ public class ResumeController {
 
     @PostMapping("/resume-versions/{versionId}/parse")
     public ResponseEntity<CommonResult<Object>> parse(@PathVariable String versionId,
-                                                       @RequestHeader("Idempotency-Key") String key,
-                                                       @RequestBody(required = false) Map<String, Object> body,
-                                                       HttpServletRequest request) {
+                                                        @RequestHeader("Idempotency-Key") String key,
+                                                        @RequestBody(required = false) Map<String, Object> body,
+                                                        HttpServletRequest request) {
         String id = Data.uuid(versionId, "versionId");
-        return resumes.parse(users.resolveCurrentUserId(), id, request.getRequestURI(), Data.idempotencyKey(key));
+        Boolean reparse = body != null && Boolean.TRUE.equals(body.get("reparse"));
+        return resumes.parse(users.resolveCurrentUserId(), id, request.getRequestURI(), Data.idempotencyKey(key), reparse);
     }
 
     @PostMapping("/resume-versions/{versionId}/confirm")

@@ -566,27 +566,20 @@ onMounted(async () => {
       show-icon
     />
 
-    <section v-if="activeTask" class="panel task-panel">
+    <section v-if="activeTaskId" class="panel task-panel">
       <div class="panel__heading">
         <h2>当前异步任务</h2>
-        <el-tag v-if="isTerminalTask(activeTask.status)" type="info" size="small">已结束</el-tag>
-        <el-tag v-else :type="tracker.connected.value ? 'success' : 'info'" size="small">
-          {{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}
-        </el-tag>
       </div>
-      <TaskStatus :task="activeTask" :reasoning="activeReasoning">
+      <TaskStatus :task="activeTask" :reasoning="activeReasoning" :loading="tracker.loading.value" :tracking-error="tracker.error.value" :refreshing="tracker.refreshing.value" @refresh="tracker.refresh">
         <template #actions>
-          <el-button v-if="canRetryTrackedTask(activeTask)" type="primary" :loading="retrying" @click="retryActiveTask">重试失败任务</el-button>
-          <el-button v-if="activeTask.status === 'FAILED' && activeTask.type === 'INTERVIEW_TURN' && answerAttempt" :disabled="submitting || retrying" @click="retryAnswerWithSameContent">使用原内容重新提交</el-button>
+          <el-button v-if="activeTask && canRetryTrackedTask(activeTask)" type="primary" :loading="retrying" @click="retryActiveTask">重试失败任务</el-button>
+          <el-button v-if="activeTask?.status === 'FAILED' && activeTask.type === 'INTERVIEW_TURN' && answerAttempt" :disabled="submitting || retrying" @click="retryAnswerWithSameContent">使用原内容重新提交</el-button>
         </template>
       </TaskStatus>
       <div v-if="pendingDeltaText" class="delta-preview">
         <strong>正在生成，尚未保存</strong>
         <div class="pre-wrap">{{ pendingDeltaText }}</div>
       </div>
-      <el-alert v-if="tracker.error.value" class="task-connection-error" :title="errorMessage(tracker.error.value)" type="warning" :closable="false" show-icon>
-        <el-button size="small" @click="tracker.restart">重新连接并刷新</el-button>
-      </el-alert>
     </section>
 
     <el-alert v-if="actionError" class="action-error" :title="errorMessage(actionError)" type="error" show-icon @close="actionError = null" />
@@ -663,7 +656,7 @@ onMounted(async () => {
                 <div class="message__content pre-wrap">{{ message.content }}</div>
               </article>
             </div>
-            <el-empty v-else-if="activeTask && !isTerminalTask(activeTask.status)" description="首题正在生成，保存后将显示在这里" />
+            <p v-else-if="activeTaskId && !isTerminalTask(activeTask?.status)" class="muted">首题就绪后将在这里显示。</p>
             <el-empty v-else description="暂无已保存的面试消息" />
 
             <div v-if="currentInterview.status === 'WAITING_ANSWER'" class="answer-box">
@@ -705,7 +698,7 @@ onMounted(async () => {
               <el-button v-if="currentInterview.status === 'COMPLETED'" type="primary" plain :loading="reportLoading" @click="loadReport(currentInterview.id)">查看 / 刷新报告</el-button>
             </div>
           </template>
-          <el-empty v-else-if="activeTask && !isTerminalTask(activeTask.status)" description="面试已创建，正在等待首题生成" />
+            <p v-else-if="activeTaskId && !isTerminalTask(activeTask?.status)" class="muted">首题就绪后将在这里显示。</p>
         </AsyncState>
       </section>
 
@@ -714,7 +707,7 @@ onMounted(async () => {
           <h2>面试复盘报告</h2>
           <el-tag v-if="report" type="info">报告 v{{ report.reportVersion }}</el-tag>
         </div>
-        <AsyncState :loading="reportLoading" :error="reportError" @retry="loadReport(selectedInterviewId)">
+        <AsyncState :loading="reportLoading" :retain="!!report" :error="reportError" @retry="loadReport(selectedInterviewId)">
           <template v-if="report">
             <div class="report-summary">
               <div class="score-card" :class="{ 'score-card--empty': report.evaluation.overallScore === null }">
@@ -791,7 +784,7 @@ onMounted(async () => {
         <h2>历史面试</h2>
         <el-button size="small" @click="loadHistory()">刷新记录</el-button>
       </div>
-      <AsyncState :loading="historyLoading" :error="historyError" :empty="!history.length" empty-text="暂无历史面试" @retry="loadHistory()">
+      <AsyncState :loading="historyLoading" :retain="history.length > 0" :error="historyError" :empty="!history.length" empty-text="暂无历史面试" @retry="loadHistory()">
         <div class="history-list">
           <article v-for="item in history" :key="item.id" class="history-item" :class="{ 'history-item--active': item.id === selectedInterviewId }">
             <button class="history-item__main" type="button" @click="openInterview(item.id)">
@@ -828,9 +821,7 @@ onMounted(async () => {
 <style scoped lang="scss">
 .interview-page { padding-bottom: 24px; }
 .text-only-alert, .action-error { margin-bottom: 14px; }
-.task-panel { border-color: #cfe0fb; }
-.task-connection-error { margin-top: 12px; }
-.task-connection-error .el-button { margin-top: 8px; }
+.task-panel { border-color: var(--ai-accent-border, #cfe0fb); }
 .delta-preview { display: grid; gap: 8px; margin-top: 12px; padding: 14px; border: 1px dashed $ai-primary; border-radius: $ai-radius; color: $ai-text-secondary; background: $ai-primary-light; }
 .delta-preview strong { color: $ai-primary; }
 .prepare-form { max-width: 920px; }
@@ -839,7 +830,7 @@ onMounted(async () => {
 .session-meta { margin: 6px 0 0; color: $ai-text-secondary; }
 .message-list { display: grid; gap: 14px; max-height: 680px; padding: 4px; overflow-y: auto; }
 .message { width: min(88%, 900px); padding: 14px 16px; border: 1px solid $ai-border; border-radius: $ai-radius-lg; background: $ai-bg-card; }
-.message--user { justify-self: end; border-color: #c9dcfb; background: $ai-primary-light; }
+.message--user { justify-self: end; border-color: var(--ai-accent-border, #c9dcfb); background: $ai-primary-light; }
 .message__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; color: $ai-text-secondary; font-size: 12px; }
 .message__meta strong { color: $ai-text-primary; font-size: 13px; }
 .message__meta time { margin-left: auto; }
@@ -848,7 +839,7 @@ onMounted(async () => {
 .answer-box__heading, .answer-box__actions, .session-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .session-actions { justify-content: flex-end; margin-top: 16px; }
 .report-summary { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
-.score-card { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; padding: 18px; border-radius: $ai-radius-lg; color: #fff; background: linear-gradient(145deg, $ai-primary, #668fec); }
+.score-card { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; padding: 18px; border-radius: $ai-radius-lg; color: #fff; background: linear-gradient(145deg, var(--ai-primary-solid, $ai-primary), var(--ai-primary-solid, #668fec)); }
 .score-card strong { margin: 8px 0; font-size: 44px; line-height: 1.1; }
 .score-card--empty { color: $ai-text-primary; background: $ai-bg-light; }
 .score-card--empty strong { font-size: 25px; }
@@ -858,7 +849,7 @@ onMounted(async () => {
 .report-facts strong { font-size: 18px; }
 .report-notice { margin-top: 16px; }
 .report-section { margin-top: 20px; }
-.report-section h3 { margin: 0 0 12px; color: #101d4b; font-size: 16px; }
+.report-section h3 { margin: 0 0 12px; color: var(--ai-text-primary, #101d4b); font-size: 16px; }
 .dimension-list, .gap-list { display: grid; gap: 12px; }
 .dimension-item, .gap-item { padding: 14px; border: 1px solid $ai-border; border-radius: $ai-radius; }
 .dimension-item__heading, .gap-item__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -868,9 +859,9 @@ onMounted(async () => {
 .report-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .report-list li { position: relative; padding: 12px 12px 12px 32px; border-radius: $ai-radius; line-height: 1.6; }
 .report-list li::before { position: absolute; left: 14px; font-weight: 700; }
-.strengths li { background: #ecfdf5; }
+.strengths li { background: var(--ai-success-bg, #ecfdf5); }
 .strengths li::before { content: '✓'; color: $ai-success; }
-.improvements li { background: #fff7ed; }
+.improvements li { background: var(--ai-warning-bg, #fff7ed); }
 .improvements li::before { content: '↑'; color: $ai-warning; }
 .gap-scores { display: flex; flex-wrap: wrap; gap: 8px 20px; color: $ai-text-secondary; }
 .history-list { display: grid; gap: 10px; }

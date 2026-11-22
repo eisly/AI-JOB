@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import WaitStatus from '@/components/WaitStatus.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CircleCheck, Edit, Plus, Refresh, Right } from '@element-plus/icons-vue'
+import { ArrowRight, CircleCheck, Clock, Document, Operation } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { learningApi } from '@/api/learning'
 import { isEndpointMissing, practiceApi } from '@/api/training'
@@ -26,6 +28,7 @@ import { useTask } from '@/composables/useTask'
 import { getJobRoleLabel, JOB_ROLE_LIST } from '@/config/jobRoles'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
+import TrainingFlowHeader from '@/components/training/TrainingFlowHeader.vue'
 import { commonStatusLabels, displayScore, errorMessage, formatDate } from '@/utils/format'
 
 type TrainingTab = 'plans' | 'mistakes'
@@ -34,6 +37,11 @@ const route = useRoute()
 const router = useRouter()
 const activeTab = ref<TrainingTab>(route.query.tab === 'mistakes' ? 'mistakes' : 'plans')
 const currentProfile = ref<ProfileVO | null>(null)
+const view = computed(() => queryValue(route.query.view))
+
+function returnToTraining() {
+  setQuery({ view: undefined, planItemId: undefined, mistakeId: undefined, mistakePage: undefined, mistakeSize: undefined, mistakeResolved: undefined })
+}
 
 function emptyPage<T>(size = 6): Page<T> {
   return { total: 0, records: [], current: 1, size }
@@ -72,7 +80,7 @@ function difficultyLabel(difficulty: string) {
 }
 
 function questionTypeLabel(type: string) {
-  return ({ TEXT_SCENARIO: '场景题', TEXT_KNOWLEDGE: '知识题' } as Record<string, string>)[type] || type
+  return ({ TEXT_SCENARIO: '场景题', TEXT_KNOWLEDGE: '知识题', CHOICE: '选择题', FILL: '填空题', SUBJECTIVE: '主观题' } as Record<string, string>)[type] || type
 }
 
 function evidenceLabel(status: string) {
@@ -100,20 +108,16 @@ async function loadPlans() {
   }
 }
 
-async function loadPlan(planId: string, syncRoute = false, clearCurrentSession = false) {
+async function loadPlan(planId: string) {
   if (!planId) return
   planDetailRequestId.value = planId
   const sequence = ++planLoadSequence
   planDetailLoading.value = true
   planDetailError.value = null
-  if (clearCurrentSession) {
-    selectedPlan.value = null
-  }
   try {
     const plan = await learningApi.getPlan(planId)
     if (sequence !== planLoadSequence) return
     selectedPlan.value = plan
-    if (syncRoute) setQuery({ tab: 'plans', planId, sessionId: undefined, answerId: undefined })
   } catch (reason) {
     if (sequence === planLoadSequence) planDetailError.value = reason
   } finally {
@@ -121,8 +125,11 @@ async function loadPlan(planId: string, syncRoute = false, clearCurrentSession =
   }
 }
 
-function selectPlan(planId: string) {
-  void loadPlan(planId, true, true)
+async function selectPlan(planId: string) {
+  await loadPlan(planId)
+  if (!planDetailError.value && selectedPlan.value?.id === planId) {
+    setQuery({ tab: 'plans', view: undefined, planId, planItemId: undefined, sessionId: undefined, answerId: undefined })
+  }
 }
 
 function changePlanPage(page: number) {
@@ -184,7 +191,7 @@ function conflictSessionId(reason: unknown) {
 }
 
 async function openPracticeSet(setId: string, allowLegacy = false) {
-  await router.push({ name: 'training-practice', params: { setId }, query: allowLegacy ? { legacy: '1' } : {} })
+  await router.push({ name: 'training-practice', params: { setId }, query: { legacy: allowLegacy ? '1' : undefined, from: activeTab.value === 'mistakes' ? 'mistakes' : undefined } })
 }
 
 async function openPreparePage(taskId: string) {
@@ -212,7 +219,9 @@ const configuredTotal = computed(() => {
   const dist = practiceConfig.value.typeDistribution
   return dist.choice + dist.fill + dist.subjective
 })
-const configValid = computed(() => configuredTotal.value === practiceConfig.value.totalQuestions && configuredTotal.value > 0)
+const configValid = computed(() => [5, 10, 15, 20].includes(practiceConfig.value.totalQuestions)
+  && Object.values(practiceConfig.value.typeDistribution).every(value => Number.isInteger(value) && value >= 0)
+  && configuredTotal.value === practiceConfig.value.totalQuestions)
 
 watch(() => practiceConfig.value.totalQuestions, total => normalizeDistribution(total))
 
@@ -248,9 +257,9 @@ const groupGeneratingItemId = ref<string | null>(null)
 const groupTaskError = ref<unknown>(null)
 
 async function startGroupPractice(item: PlanItemVO) {
-  if (!selectedPlan.value || item.kind !== 'PRACTICE') return
+  if (!selectedPlan.value || item.kind !== 'PRACTICE' || groupGeneratingItemId.value) return
   if (!configValid.value) {
-    ElMessage.warning('题型分布之和需要等于每组题目数，请先在右侧完成配置')
+    ElMessage.warning('题型分配相加须等于本组题量')
     return
   }
   const planId = selectedPlan.value.id
@@ -286,22 +295,42 @@ async function startGroupPractice(item: PlanItemVO) {
   }
 }
 
-// ===== 主页统计（顶部概览条） =====
-const heroPlan = computed(() => selectedPlan.value || plans.value.records[0] || null)
-const heroPlanProgress = computed(() => heroPlan.value ? planProgress(heroPlan.value) : { completed: 0, total: 0, percentage: 0 })
-const pendingPracticeItems = computed(() => heroPlan.value?.items.filter(item => item.kind === 'PRACTICE' && item.status !== 'COMPLETED') || [])
-const pendingPracticeMinutes = computed(() => pendingPracticeItems.value.reduce((sum, item) => sum + item.estimatedMinutes, 0))
-const totalCompletedUnits = computed(() => plans.value.records.reduce((sum, plan) => sum + plan.items.filter(item => item.status === 'COMPLETED').length, 0))
+const progress = computed(() => selectedPlan.value ? planProgress(selectedPlan.value) : { completed: 0, total: 0, percentage: 0 })
+const nextUnit = computed(() => selectedPlan.value?.items.find(item => item.status !== 'COMPLETED'))
+const activeUnit = computed(() => selectedPlan.value?.items.find(item => item.id === route.query.planItemId))
+const activeUnitIndex = computed(() => (selectedPlan.value?.items.findIndex(item => item.id === activeUnit.value?.id) ?? -1) + 1)
+const practiceDifficulty = computed(() => difficultyOptions.find(option => option.value === practiceConfig.value.difficulty)?.label)
+
+function openUnit(item: PlanItemVO) {
+  setQuery({ view: 'unit', planId: selectedPlan.value?.id, planItemId: item.id })
+}
+
+function openSetup(item?: PlanItemVO) {
+  const recommended = item || selectedPlan.value?.items.find(entry => entry.kind === 'PRACTICE' && entry.status !== 'COMPLETED')
+    || selectedPlan.value?.items.find(entry => entry.kind === 'PRACTICE')
+  groupTaskError.value = null
+  setQuery({ view: 'setup', planId: selectedPlan.value?.id, planItemId: recommended?.id })
+}
+
+function startNextUnit(item: PlanItemVO) {
+  if (item.kind === 'PRACTICE') openSetup(item)
+  else openUnit(item)
+}
 
 function goInterview(item: PlanItemVO) {
   void router.push({ path: '/interview', query: { planItemId: item.id } })
 }
 
-const mistakes = ref<Page<MistakeVO>>(emptyPage())
+const mistakePageSizes = [6, 12, 24]
+const initialMistakeSize = Number(route.query.mistakeSize)
+const initialMistakePage = Number(route.query.mistakePage)
+const mistakes = ref<Page<MistakeVO>>({
+  ...emptyPage<MistakeVO>(mistakePageSizes.includes(initialMistakeSize) ? initialMistakeSize : 6),
+  current: Number.isSafeInteger(initialMistakePage) && initialMistakePage > 0 ? initialMistakePage : 1,
+})
 const mistakesLoading = ref(false)
 const mistakesError = ref<unknown>(null)
-const mistakeResolved = ref(false)
-const mistakeDialogVisible = ref(false)
+const mistakeResolved = ref(route.query.mistakeResolved === '1')
 const selectedMistake = ref<MistakeVO | null>(null)
 const mistakeAnswer = ref<LearningAnswerVO | null>(null)
 const mistakeAnswerLoading = ref(false)
@@ -336,12 +365,13 @@ function changeMistakeSize(size: number) {
   void loadMistakes()
 }
 
-async function openMistake(mistake: MistakeVO) {
+async function openMistake(mistake: MistakeVO, syncRoute = true) {
   selectedMistake.value = mistake
   mistakeAnswer.value = null
   mistakeAnswerError.value = null
   mistakeAnswerLoading.value = true
-  mistakeDialogVisible.value = true
+  if (syncRoute) setQuery({ tab: 'mistakes', view: 'mistake', mistakeId: mistake.id,
+    mistakePage: String(mistakes.value.current), mistakeSize: String(mistakes.value.size), mistakeResolved: mistakeResolved.value ? '1' : undefined })
   try {
     mistakeAnswer.value = await learningApi.getAnswer(mistake.lastAnswerId)
   } catch (reason) {
@@ -407,9 +437,10 @@ function safeLinks(item: PlanItemVO) {
   return item.resourceLinks.filter(link => /^https:\/\/github\.com\//i.test(link.url))
 }
 
-const planDialogVisible = ref(false)
 const planContextLoading = ref(false)
+const planSubmitting = ref(false)
 const hasResume = ref(true)
+const readyResumes = ref<{ id: string; label: string }[]>([])
 const planError = ref<unknown>(null)
 const planForm = ref({
   resumeVersionId: '',
@@ -425,7 +456,8 @@ const planTracker = useTask(planTaskId, { onDone: handlePlanDone })
 const planTask = planTracker.task
 const planTrackingError = planTracker.error
 const planTaskActive = computed(() => taskIsActive(planTask.value))
-const planFormValid = computed(() => !!planForm.value.targetDirection && planForm.value.dailyMinutes >= 10 && planForm.value.days >= 1)
+const planFormValid = computed(() => !!planForm.value.resumeVersionId && !!planForm.value.targetDirection
+  && planForm.value.dailyMinutes >= 10 && planForm.value.days >= 1)
 
 async function loadPlanContext() {
   planContextLoading.value = true
@@ -434,9 +466,11 @@ async function loadPlanContext() {
       resumeApi.list({ current: 1, size: 20 }),
       profileApi.get().catch(() => null),
     ])
-    const ready = resumes.records.find(item => ['PARSED', 'CONFIRMED'].includes(item.latestVersion?.status))
-    hasResume.value = !!ready
-    if (ready) planForm.value.resumeVersionId = ready.latestVersion.id
+    readyResumes.value = resumes.records.filter(item => ['PARSED', 'CONFIRMED'].includes(item.latestVersion?.status))
+      .map(item => ({ id: item.latestVersion.id, label: `${item.title} · 第 ${item.latestVersion.versionNo} 版` }))
+    hasResume.value = readyResumes.value.length > 0
+    const active = readyResumes.value.find(item => item.id === profile?.activeResumeVersionId)
+    planForm.value.resumeVersionId = active?.id || readyResumes.value[0]?.id || ''
     if (profile?.targetRole) planForm.value.targetDirection = profile.targetRole
     const matches = await jobApi.listMatches({ current: 1, size: 5 }).catch(() => null)
     const items: MatchSummaryVO[] = []
@@ -457,12 +491,10 @@ async function loadPlanContext() {
 
 function openPlanDialog() {
   planError.value = null
-  planDialogVisible.value = true
-  void loadPlanContext()
+  setQuery({ view: 'new', planItemId: undefined })
 }
 
 function goResumeCenter() {
-  planDialogVisible.value = false
   void router.push('/resume')
 }
 
@@ -475,7 +507,8 @@ async function submitPlanFromResume() {
     goResumeCenter()
     return
   }
-  if (planTaskActive.value || !planFormValid.value) return
+  if (planContextLoading.value || planSubmitting.value || planTaskActive.value || !planFormValid.value) return
+  planSubmitting.value = true
   planError.value = null
   const body: Parameters<typeof learningApi.createPlanFromResume>[0] = {
     dailyMinutes: planForm.value.dailyMinutes,
@@ -493,6 +526,8 @@ async function submitPlanFromResume() {
     } else {
       planError.value = reason
     }
+  } finally {
+    planSubmitting.value = false
   }
 }
 
@@ -514,9 +549,9 @@ async function handlePlanDone(task: TaskVO) {
   }
   activeTab.value = 'plans'
   await loadPlans()
-  await loadPlan(planId, true, true)
+  await loadPlan(planId)
   if (!planDetailError.value) {
-    planDialogVisible.value = false
+    setQuery({ tab: 'plans', view: undefined, planId, planItemId: undefined })
     ElMessage.success('训练计划已生成，已读取计划依据与训练项')
   }
 }
@@ -528,16 +563,33 @@ async function openPlanItem(planItemId: string) {
   }
   const plan = plans.value.records.find(item => item.items.some(entry => entry.id === planItemId))
   if (plan) {
-    await loadPlan(plan.id, true, true)
-    setQuery({ planItemId: undefined })
+    await loadPlan(plan.id)
+    if (!planDetailError.value) setQuery({ tab: 'plans', view: 'unit', planId: plan.id, planItemId })
   }
 }
 
-function loadActiveTab() {
+async function loadActiveTab() {
   void refreshCurrentProfile()
-  if (activeTab.value === 'plans') void loadPlans()
-  else void loadMistakes()
+  if (activeTab.value === 'mistakes') { await loadMistakes(); return }
+  await loadPlans()
+  if (!selectedPlan.value && !planDetailLoading.value && !route.query.planId && !route.query.planItemId) {
+    const latest = plans.value.records[0]
+    if (latest) await loadPlan(latest.id)
+  }
 }
+
+watch(view, screen => {
+  if (screen === 'new') void loadPlanContext()
+}, { immediate: true })
+
+watch(() => route.query.planId, planId => {
+  const id = queryValue(planId)
+  if (id && id !== selectedPlan.value?.id) void loadPlan(id)
+})
+
+watch(() => route.query.tab, tab => {
+  activeTab.value = tab === 'mistakes' ? 'mistakes' : 'plans'
+})
 
 watch(activeTab, tab => {
   setQuery({ tab })
@@ -545,7 +597,7 @@ watch(activeTab, tab => {
 })
 
 onMounted(async () => {
-  loadActiveTab()
+  const ready = loadActiveTab()
   const planId = queryValue(route.query.planId)
   const sessionId = queryValue(route.query.sessionId)
   const planItemId = queryValue(route.query.planItemId)
@@ -556,535 +608,414 @@ onMounted(async () => {
   }
   if (planId) await loadPlan(planId)
   else if (planItemId) await openPlanItem(planItemId)
+  if (view.value === 'mistake') {
+    await ready
+    const match = mistakes.value.records.find(item => item.id === route.query.mistakeId)
+    if (match) await openMistake(match, false)
+  }
 })
 </script>
 
 <template>
-  <div class="page training-page">
-    <header class="page-header">
-      <div>
-        <h1><el-icon><Edit /></el-icon> 专项训练 <span class="page-header__en">TRAINING CENTER</span></h1>
-        <p>一次预生成整组题目，按题目列表连续完成训练，让每次练习有明确目标。</p>
-      </div>
-      <div class="actions page-header__actions">
-        <el-button type="primary" :icon="Plus" @click="openPlanDialog">新建训练计划</el-button>
-        <el-button :icon="Refresh" @click="loadActiveTab">刷新当前列表</el-button>
-      </div>
-    </header>
+  <template v-if="['library', 'unit', 'setup', 'new', 'mistake'].includes(view)">
+    <TrainingFlowHeader
+      :title="view === 'mistake' ? '错题本' : '专项训练'"
+      :subtitle="view === 'setup' ? activeUnit?.title : undefined"
+      :back-label="view === 'mistake' ? '返回错题本' : '返回训练计划'"
+      @back="returnToTraining"
+    >
+      <el-button v-if="view === 'library'" @click="openPlanDialog">新建训练计划</el-button>
+      <el-button v-if="view === 'new' || view === 'setup'" @click="returnToTraining">取消</el-button>
+    </TrainingFlowHeader>
 
-    <template v-if="activeTab === 'plans'">
-      <section v-if="heroPlan" class="hero-banner">
-        <div class="hero-banner__text">
-          <span class="hero-banner__eyebrow">MY LEARNING PATH · {{ commonStatusLabels[heroPlan.status] || heroPlan.status }}</span>
-          <h2>{{ heroPlan.title }}</h2>
-          <p>{{ heroPlan.basis?.summary || `${planDirectionLabel(heroPlan)} · 共 ${heroPlan.items.length} 个训练项` }}</p>
-          <div class="hero-banner__tags">
-            <span class="hero-tag">{{ planDirectionLabel(heroPlan) }}</span>
-            <span class="hero-tag">{{ heroPlan.dailyMinutes }} 分钟 / 天 · 周期 {{ heroPlan.days }} 天</span>
+    <div class="flow-content">
+      <template v-if="view === 'library'">
+        <header class="flow-title"><h1>我的训练计划</h1><p>查看计划进度，选择要继续的训练安排。</p></header>
+        <el-alert v-if="planDetailError" type="error" :title="errorMessage(planDetailError)" show-icon :closable="false" />
+        <AsyncState :loading="plansLoading" :retain="plans.records.length > 0" :error="plansError" :empty="!plans.records.length" empty-text="暂无训练计划" @retry="loadPlans">
+          <template #empty><el-button type="primary" @click="openPlanDialog">新建训练计划</el-button></template>
+          <div class="plan-library">
+            <article v-for="plan in plans.records" :key="plan.id" class="training-card">
+              <div class="section-heading"><h2>{{ plan.title }}</h2><el-tag :type="statusTagType(plan.status)" size="small">{{ commonStatusLabels[plan.status] || plan.status }}</el-tag></div>
+              <p class="muted">{{ planDirectionLabel(plan) }} · 每天 {{ plan.dailyMinutes }} 分钟 · {{ plan.days }} 天</p>
+              <p class="card-separator muted">{{ planProgress(plan).completed }} / {{ planProgress(plan).total }} 单元已完成 · {{ planSourceLabel(plan) }}</p>
+              <el-button type="primary" :loading="planDetailLoading && planDetailRequestId === plan.id" :disabled="planDetailLoading" @click="selectPlan(plan.id)">
+                {{ selectedPlan?.id === plan.id ? '打开当前计划' : '打开训练计划' }}
+              </el-button>
+            </article>
           </div>
+        </AsyncState>
+        <div v-if="plans.total > 6" class="pagination">
+          <el-pagination background layout="sizes, prev, pager, next" :total="plans.total" :current-page="plans.current" :page-size="plans.size" :page-sizes="[6, 12, 24]" @current-change="changePlanPage" @size-change="changePlanSize" />
         </div>
-        <div class="hero-banner__progress">
-          <strong>{{ heroPlanProgress.percentage }}%</strong>
-          <span>本次完成进度</span>
-          <el-progress type="circle" :percentage="heroPlanProgress.percentage" :width="72" :stroke-width="8" />
-        </div>
-      </section>
+      </template>
 
-      <div class="stats-row">
-        <div class="stat-card">
-          <span class="stat-card__label">今日练题</span>
-          <strong>{{ pendingPracticeItems.length * practiceConfig.totalQuestions }}</strong>
-          <span class="stat-card__unit">道题</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-card__label">预计训练时长</span>
-          <strong>{{ pendingPracticeMinutes }}</strong>
-          <span class="stat-card__unit">分钟</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-card__label">累计完成</span>
-          <strong>{{ totalCompletedUnits }}</strong>
-          <span class="stat-card__unit">个训练单元</span>
-        </div>
-      </div>
-    </template>
+      <template v-else-if="view === 'unit'">
+        <AsyncState :loading="planDetailLoading || plansLoading" :error="planDetailError" :empty="!activeUnit" empty-text="未找到该训练单元" @retry="loadPlan(planDetailRequestId)">
+          <template v-if="activeUnit">
+            <header class="flow-title"><h1>{{ activeUnit.title }}</h1><p>{{ selectedPlan?.title }} · 第 {{ activeUnitIndex }} 个训练单元</p></header>
+            <div class="training-columns flow-columns">
+              <article class="training-card training-card--details">
+                <section><h2>训练目标</h2><p>{{ activeUnit.objective }}</p></section>
+                <section class="card-separator"><h2>练习方式</h2><p>{{ activeUnit.method }}</p></section>
+                <section class="card-separator"><h2>完成要求</h2><p>{{ activeUnit.completionCriteria }}</p></section>
+                <details v-if="activeUnit.reason || activeUnit.evidenceQuote || activeUnit.evidenceStatus === 'PENDING'" class="card-separator disclosure">
+                  <summary>推荐依据</summary>
+                  <p v-if="activeUnit.reason">{{ activeUnit.reason }}</p>
+                  <p v-if="activeUnit.evidenceQuote" class="pre-wrap">{{ activeUnit.evidenceQuote }}</p>
+                  <p v-if="activeUnit.evidenceStatus === 'PENDING'">简历暂无该技能的直接证据，训练后再评估。</p>
+                </details>
+                <section v-if="safeLinks(activeUnit).length" class="card-separator"><h2>GitHub 学习资料</h2>
+                  <a v-for="link in safeLinks(activeUnit)" :key="link.url" class="resource-link" :href="link.url" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>
+                </section>
+                <section v-if="activeUnit.resourceRefs.length" class="card-separator"><h2>授权资料</h2>
+                  <blockquote v-for="reference in activeUnit.resourceRefs" :key="reference.documentId + ':' + reference.chunkId" class="pre-wrap">
+                    {{ reference.quote }} <small>{{ reference.documentId }} · v{{ reference.documentVersion }} · {{ reference.chunkId }}</small>
+                  </blockquote>
+                </section>
+              </article>
+              <aside class="training-card">
+                <h2>{{ kindLabel(activeUnit.kind) }}</h2>
+                <p class="muted">{{ activeUnit.skillCode }} · {{ categoryLabel(activeUnit.category) }} · 预计 {{ activeUnit.estimatedMinutes }} 分钟</p>
+                <div class="card-separator">
+                  <el-button v-if="activeUnit.kind === 'PRACTICE'" type="primary" @click="openSetup(activeUnit)">{{ activeUnit.status === 'COMPLETED' ? '再练一组' : '配置练习并开始' }}</el-button>
+                  <el-button v-else-if="activeUnit.kind === 'READING'" type="primary" :disabled="activeUnit.status === 'COMPLETED'" :loading="itemActionPending.includes(activeUnit.id)" @click="completeReading(activeUnit)">{{ activeUnit.status === 'COMPLETED' ? '已自评完成阅读' : '我已阅读（自评）' }}</el-button>
+                  <el-button v-else type="primary" @click="goInterview(activeUnit)">进入模拟面试</el-button>
+                </div>
+                <p v-if="activeUnit.kind === 'READING'" class="muted">阅读完成为自评记录，不计入技能评分证据。<template v-if="activeUnit.completedAt"> 完成于 {{ formatDate(activeUnit.completedAt) }}。</template></p>
+                <el-alert v-if="itemActionErrors[activeUnit.id]" type="error" :title="errorMessage(itemActionErrors[activeUnit.id])" show-icon :closable="false" />
+              </aside>
+            </div>
+          </template>
+        </AsyncState>
+      </template>
 
+      <template v-else-if="view === 'setup'">
+        <header class="flow-title"><h1>配置本组练习</h1><p>确认题量和题型，整组生成后即可按题作答。</p></header>
+        <div class="training-columns flow-columns">
+          <article class="training-card">
+            <div><h2>题量与题型</h2><p class="muted">题型分配相加须等于本组题量。</p></div>
+            <div class="config-field">
+              <span class="field-label">每组题量</span>
+              <div class="actions">
+                <el-button v-for="size in [5, 10, 15, 20]" :key="size" :type="practiceConfig.totalQuestions === size ? 'primary' : 'default'" :plain="practiceConfig.totalQuestions === size" :aria-pressed="practiceConfig.totalQuestions === size" @click="practiceConfig.totalQuestions = size">{{ size }}</el-button>
+              </div>
+            </div>
+            <div class="config-field card-separator">
+              <div v-for="option in typeDistributionOptions" :key="option.key" class="config-row">
+                <div><strong>{{ option.label }}</strong><small>{{ option.desc }}</small></div>
+                <el-input-number v-model="practiceConfig.typeDistribution[option.key]" :aria-label="option.label + '数量'" :min="0" :max="practiceConfig.totalQuestions" size="small" />
+              </div>
+            </div>
+            <div class="fields-grid card-separator">
+              <div class="config-field">
+                <span class="field-label">训练难度</span>
+                <el-radio-group v-model="practiceConfig.difficulty" aria-label="训练难度">
+                  <el-radio-button v-for="option in difficultyOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+                </el-radio-group>
+              </div>
+              <label class="config-field">
+                <span class="field-label">训练方向</span>
+                <el-select v-model="practiceConfig.direction" aria-label="训练方向">
+                  <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
+                </el-select>
+              </label>
+            </div>
+          </article>
+
+          <aside class="training-card">
+            <h2>本组练习</h2>
+            <div class="count-display"><strong>{{ practiceConfig.totalQuestions }}</strong><span>道题</span></div>
+            <dl class="flow-summary">
+              <div><dt>选择题 · 填空题 · 主观题</dt><dd>{{ practiceConfig.typeDistribution.choice }} · {{ practiceConfig.typeDistribution.fill }} · {{ practiceConfig.typeDistribution.subjective }}</dd></div>
+              <div><dt>训练难度</dt><dd>{{ practiceDifficulty }}</dd></div>
+              <div v-if="activeUnit"><dt>预计时长</dt><dd>{{ activeUnit.estimatedMinutes }} 分钟</dd></div>
+            </dl>
+            <p class="config-status card-separator" :class="{ 'config-status--error': !configValid }" aria-live="polite">
+              <el-icon v-if="configValid"><CircleCheck /></el-icon>
+              {{ configValid ? '已分配' : '请调整题型分配' }} {{ configuredTotal }} / {{ practiceConfig.totalQuestions }} 道题
+            </p>
+            <el-alert v-if="groupTaskError || planDetailError" :title="errorMessage(groupTaskError || planDetailError)" type="error" :closable="false" show-icon />
+            <div>
+              <el-button v-if="activeUnit?.kind === 'PRACTICE'" type="primary" :loading="!!groupGeneratingItemId" :disabled="!configValid" @click="startGroupPractice(activeUnit)">生成并开始练习</el-button>
+              <el-button v-else type="primary" :disabled="!configValid || planDetailLoading" @click="returnToTraining">应用设置</el-button>
+            </div>
+          </aside>
+        </div>
+      </template>
+
+      <template v-else-if="view === 'new'">
+        <header class="flow-title"><h1>新建训练计划</h1><p>选择已解析的简历和目标方向，再安排每天的训练量。</p></header>
+        <div class="training-columns flow-columns">
+          <article class="training-card">
+            <div><h2>训练依据</h2><p class="muted">根据简历中的项目和技能生成训练单元。</p></div>
+            <el-alert v-if="!hasResume && !planContextLoading" type="warning" :closable="false" show-icon title="请先在简历中心上传并解析简历" />
+            <el-alert v-if="planError" :title="errorMessage(planError)" type="error" :closable="false" show-icon />
+            <LoadingSkeleton v-if="planContextLoading && !hasResume" :rows="3" label="正在读取训练依据" />
+            <el-form v-if="hasResume" label-position="top" :disabled="planContextLoading || planTaskActive || planSubmitting">
+              <div class="fields-grid">
+                <el-form-item label="选择简历">
+                  <el-select v-model="planForm.resumeVersionId" aria-label="选择简历" placeholder="选择已解析的简历">
+                    <el-option v-for="resume in readyResumes" :key="resume.id" :value="resume.id" :label="resume.label" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="目标方向">
+                  <el-select v-model="planForm.targetDirection" aria-label="目标方向">
+                    <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
+                  </el-select>
+                </el-form-item>
+              </div>
+              <div class="fields-grid card-separator">
+                <el-form-item label="每天投入（分钟）"><el-input-number v-model="planForm.dailyMinutes" :min="10" :max="120" :step="5" /></el-form-item>
+                <el-form-item label="计划周期（天）"><el-input-number v-model="planForm.days" :min="1" :max="14" /></el-form-item>
+              </div>
+              <el-form-item label="参考岗位 · 可选">
+                <el-select v-model="planForm.matchItemId" clearable placeholder="暂不关联">
+                  <el-option v-for="option in matchOptions" :key="option.id" :label="`${option.title || '未命名岗位'}${option.matchScore === null ? '' : ` · ${option.matchScore} 分`}`" :value="option.id" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+            <TaskStatus v-if="planTaskId" :task="planTask" :loading="planTracker.loading.value" :reasoning="planTracker.reasoningText.value" :tracking-error="planTrackingError" :refreshing="planTracker.refreshing.value" @refresh="planTracker.refresh">
+              <template #actions><el-button v-if="planTask && canRetryTrackedTask(planTask)" size="small" type="primary" @click="retryPlanTask">按原参数重试</el-button></template>
+            </TaskStatus>
+          </article>
+          <aside class="training-card">
+            <h2>计划预览</h2>
+            <dl class="flow-summary card-separator">
+              <div><dt>来源</dt><dd>{{ readyResumes.find(item => item.id === planForm.resumeVersionId)?.label || '已解析简历' }}</dd></div>
+              <div><dt>目标</dt><dd>{{ getJobRoleLabel(planForm.targetDirection) }}</dd></div>
+              <div><dt>时间安排</dt><dd>{{ planForm.dailyMinutes }} 分钟/天 · {{ planForm.days }} 天</dd></div>
+            </dl>
+            <div class="card-separator">
+              <el-button v-if="!hasResume" type="primary" @click="goResumeCenter">前往简历中心</el-button>
+              <el-button v-else type="primary" :loading="planTaskActive || planSubmitting" :disabled="planContextLoading || !planFormValid" @click="submitPlanFromResume">生成训练计划</el-button>
+            </div>
+          </aside>
+        </div>
+      </template>
+
+      <template v-else>
+        <header class="flow-title"><h1>错题解析</h1><p>对照原回答和参考答案，找到需要补练的知识点。</p></header>
+        <div v-if="selectedMistake" class="training-columns flow-columns">
+          <article class="training-card training-card--details">
+            <div class="actions">
+              <el-tag effect="plain">{{ questionTypeLabel(selectedMistake.question.type) }}</el-tag>
+              <el-tag v-for="skill in selectedMistake.question.skillCodes" :key="skill" type="info" effect="plain">{{ skill }}</el-tag>
+            </div>
+            <h2 class="pre-wrap">{{ selectedMistake.question.stem }}</h2>
+            <AsyncState :loading="mistakeAnswerLoading" :error="mistakeAnswerError" :empty="!mistakeAnswer" empty-text="未读取到原回答" @retry="openMistake(selectedMistake)">
+              <div v-if="mistakeAnswer" class="review-content">
+                <section class="card-separator"><h2>你的回答</h2><p class="pre-wrap">{{ mistakeAnswer.content }}</p></section>
+                <template v-if="mistakeAnswer.evaluation">
+                  <section><h2>参考答案</h2><p class="pre-wrap">{{ mistakeAnswer.evaluation.referenceAnswer || '当前评价未提供参考答案' }}</p></section>
+                  <section v-if="mistakeAnswer.evaluation.strengths.length">
+                    <h2>作答优点</h2><ul><li v-for="(point, i) in mistakeAnswer.evaluation.strengths" :key="i">{{ point }}</li></ul>
+                  </section>
+                </template>
+                <el-alert v-else title="该原回答暂无评价结果" type="info" :closable="false" show-icon />
+              </div>
+            </AsyncState>
+          </article>
+          <aside class="training-card">
+            <div class="section-heading"><h2>复盘要点</h2><el-tag v-if="mistakeAnswer?.evaluation" :type="statusTagType(mistakeAnswer.evaluation.evidenceStatus)" size="small">{{ evidenceLabel(mistakeAnswer.evaluation.evidenceStatus) }}</el-tag></div>
+            <p v-if="mistakeAnswer?.evaluation?.overallScore != null" class="muted">本题得分 {{ displayScore(mistakeAnswer.evaluation.overallScore) }}</p>
+            <ul v-if="mistakeAnswer?.evaluation?.improvements.length" class="review-tips">
+              <li v-for="(point, i) in mistakeAnswer.evaluation.improvements" :key="i">{{ point }}</li>
+            </ul>
+            <p v-else class="muted">可以保留原题型，单独练习这道题。</p>
+            <el-alert v-if="practiceActionError" :title="errorMessage(practiceActionError)" type="error" :closable="false" show-icon />
+            <div class="card-separator"><el-button type="primary" :loading="retryingMistakeId === selectedMistake.id" :disabled="!!retryingMistakeId" @click="retryMistake(selectedMistake)">重新练习此题</el-button></div>
+          </aside>
+        </div>
+        <el-empty v-else description="请从错题本打开要复盘的题目"><el-button @click="returnToTraining">返回错题本</el-button></el-empty>
+      </template>
+    </div>
+  </template>
+
+  <div v-else class="page training-page">
+    <header class="training-heading">
+      <div><h1>专项训练</h1><p>按计划完成训练，做完一组后查看反馈和错题。</p></div>
+      <el-button @click="openPlanDialog">新建训练计划</el-button>
+    </header>
     <el-tabs v-model="activeTab" class="training-tabs">
       <el-tab-pane label="训练计划" name="plans" />
       <el-tab-pane label="错题本" name="mistakes" />
     </el-tabs>
 
     <template v-if="activeTab === 'plans'">
-      <div class="training-layout" :class="{ 'training-layout--home': !selectedPlan }">
-        <section class="panel plan-list-panel">
-          <div class="panel__heading">
-            <h2>我的训练计划</h2>
-            <el-tag type="info">{{ plans.total }} 个计划</el-tag>
-          </div>
-          <AsyncState :loading="plansLoading" :error="plansError" :empty="!plans.records.length" empty-text="暂无训练计划" @retry="loadPlans">
-            <template #empty>
-              <p class="empty-hint">可以直接基于已解析简历生成计划，也可以从岗位匹配结果创建计划。</p>
-              <div class="actions empty-actions">
-                <el-button type="primary" @click="openPlanDialog">基于简历生成计划</el-button>
-                <el-button @click="router.push('/jobs?tab=matches')">前往岗位匹配</el-button>
-              </div>
-            </template>
-            <div class="list-stack">
-              <button v-for="plan in plans.records" :key="plan.id" type="button" class="plan-card" :class="{ 'plan-card--active': selectedPlan?.id === plan.id }" @click="selectPlan(plan.id)">
-                <span class="plan-card__heading">
-                  <strong>{{ plan.title }}</strong>
-                  <el-tag size="small" :type="statusTagType(plan.status)">{{ commonStatusLabels[plan.status] || plan.status }}</el-tag>
-                </span>
-                <span class="plan-card__source">
-                  <el-tag size="small" :type="plan.source === 'RESUME' ? 'success' : 'info'">{{ planSourceLabel(plan) }}</el-tag>
-                  <span class="muted">{{ planDirectionLabel(plan) }} · 第 {{ plan.generationNo }} 版</span>
-                </span>
-                <span class="muted">画像 v{{ plan.profileVersion }} · {{ plan.items.length }} 个训练项 · 生成于 {{ formatDate(plan.generatedAt) }}</span>
-                <el-tag v-if="planOutdatedReasons(plan).length" type="warning" size="small">建议更新：{{ planOutdatedReasons(plan).join('；') }}</el-tag>
-                <el-progress :percentage="planProgress(plan).percentage" :stroke-width="7" />
-                <span class="plan-card__progress">{{ planProgress(plan).completed }} / {{ planProgress(plan).total }} 已完成</span>
-              </button>
-            </div>
-          </AsyncState>
-          <div class="pagination">
-            <el-pagination background layout="total, sizes, prev, pager, next" :total="plans.total" :current-page="plans.current" :page-size="plans.size" :page-sizes="[6, 12, 24]" @current-change="changePlanPage" @size-change="changePlanSize" />
-          </div>
-        </section>
-
-        <section v-if="selectedPlan || planDetailLoading || planDetailError" class="panel plan-detail-panel">
-          <AsyncState :loading="planDetailLoading" :error="planDetailError" :empty="!selectedPlan" empty-text="请选择训练计划查看计划项" @retry="loadPlan(planDetailRequestId)">
-            <template v-if="selectedPlan">
-              <div class="panel__heading">
-                <div>
-                  <h2>{{ selectedPlan.title }}</h2>
-                  <span class="muted break-all">计划ID：{{ selectedPlan.id }} · 画像 v{{ selectedPlan.profileVersion }} · 第 {{ selectedPlan.generationNo }} 版</span>
-                </div>
-                <div class="actions">
-                  <el-tag :type="statusTagType(selectedPlan.status)">{{ commonStatusLabels[selectedPlan.status] || selectedPlan.status }}</el-tag>
-                  <el-button size="small" :icon="Refresh" @click="refreshCurrentProfile(); loadPlan(selectedPlan.id)">刷新</el-button>
-                </div>
-              </div>
-              <el-alert v-if="planOutdatedReasons(selectedPlan).length" class="inline-alert" type="warning" :closable="false" show-icon :title="`该计划依据已更新：${planOutdatedReasons(selectedPlan).join('；')}。你可以继续查看旧计划，或生成新计划。`">
-                <template #default><el-button type="primary" plain size="small" @click="openPlanDialog">按当前画像生成新计划</el-button></template>
-              </el-alert>
-              <div class="plan-basis">
-                <div class="plan-basis__row">
-                  <el-tag :type="selectedPlan.source === 'RESUME' ? 'success' : 'info'" effect="plain">{{ planSourceLabel(selectedPlan) }}</el-tag>
-                  <span v-if="selectedPlan.source === 'RESUME'">
-                    简历 v{{ selectedPlan.basis?.resumeVersionNo || '-' }}
-                    <template v-if="selectedPlan.basis?.resumeVersionId"> · {{ selectedPlan.basis.resumeVersionId }}</template>
-                  </span>
-                  <span>目标方向：{{ selectedPlan.targetDirection ? getJobRoleLabel(selectedPlan.targetDirection) : '未设置' }}</span>
-                  <span>生成时间：{{ formatDate(selectedPlan.generatedAt) }}</span>
-                </div>
-                <div class="plan-basis__row">
-                  <span>每日投入 {{ selectedPlan.dailyMinutes }} 分钟 · 周期 {{ selectedPlan.days }} 天</span>
-                  <span v-if="selectedPlan.matchSummary">参考岗位：{{ selectedPlan.matchSummary.title }}<template v-if="selectedPlan.matchSummary.companyName"> · {{ selectedPlan.matchSummary.companyName }}</template></span>
-                  <span v-else>未参考岗位匹配结果</span>
-                </div>
-                <p v-if="selectedPlan.basis?.summary" class="plan-basis__summary">{{ selectedPlan.basis.summary }}</p>
-                <ul v-if="selectedPlan.basis?.limitations?.length" class="plan-basis__limitations">
-                  <li v-for="(item, index) in selectedPlan.basis.limitations" :key="index">{{ item }}</li>
-                </ul>
-              </div>
-              <el-alert
-                v-if="selectedPlan.source === 'RESUME'"
-                :title="githubNotice(selectedPlan)"
-                :type="githubNoticeType(selectedPlan)"
-                :closable="false"
-                show-icon
-              />
-              <el-alert v-if="selectedPlan.status === 'GENERATING'" title="计划仍在生成，可稍后刷新读取计划项" type="warning" :closable="false" show-icon />
-              <el-alert v-else-if="selectedPlan.status === 'FAILED'" title="计划生成失败，请返回匹配结果核对任务状态" type="error" :closable="false" show-icon />
-              <el-empty v-else-if="!selectedPlan.items.length" description="该计划尚无训练项" />
-              <div v-else class="plan-items">
-                <article v-for="(item, index) in selectedPlan.items" :key="item.id" class="plan-item">
-                  <div class="plan-item__index">{{ index + 1 }}</div>
-                  <div class="plan-item__content">
-                    <div class="plan-item__heading">
-                      <div>
-                        <h3>{{ item.title }}</h3>
-                        <p class="plan-item__meta">
-                          <el-tag size="small" effect="plain">{{ categoryLabel(item.category) }}</el-tag>
-                          <span>{{ item.skillCode }} · {{ kindLabel(item.kind) }} · 预计 {{ item.estimatedMinutes }} 分钟</span>
-                        </p>
-                      </div>
-                      <el-tag :type="statusTagType(item.status)">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
-                    </div>
-                    <div class="plan-item__guide">
-                      <p><strong>训练目标：</strong>{{ item.objective }}</p>
-                      <p><strong>推荐原因：</strong>{{ item.reason }}</p>
-                      <p><strong>练习方式：</strong>{{ item.method }}</p>
-                      <p><strong>完成标准：</strong>{{ item.completionCriteria }}</p>
-                      <p v-if="item.evidenceStatus === 'PENDING'" class="plan-item__pending">
-                        <el-tag size="small" type="warning">待评估</el-tag>
-                        简历未提供该技能的直接证据，训练后再评估能力。
-                      </p>
-                      <p v-if="item.evidenceQuote" class="muted">简历依据：{{ item.evidenceQuote }}</p>
-                    </div>
-                    <div v-if="safeLinks(item).length" class="resource-links">
-                      <h4>GitHub 项目学习</h4>
-                      <a v-for="link in safeLinks(item)" :key="link.url" :href="link.url" target="_blank" rel="noopener noreferrer">
-                        {{ link.label }} <span class="muted">{{ link.url }}</span>
-                      </a>
-                    </div>
-                    <div v-if="item.resourceRefs.length" class="resource-refs">
-                      <h4>授权资料引用</h4>
-                      <blockquote v-for="reference in item.resourceRefs" :key="`${reference.documentId}:${reference.chunkId}`">
-                        <p class="pre-wrap">{{ reference.quote }}</p>
-                        <span>{{ reference.documentId }} · v{{ reference.documentVersion }} · {{ reference.chunkId }}</span>
-                      </blockquote>
-                    </div>
-                    <el-alert v-if="itemActionErrors[item.id]" :title="errorMessage(itemActionErrors[item.id])" type="error" :closable="false" show-icon />
-                    <div class="actions plan-item__actions">
-                      <el-button v-if="item.kind === 'READING'" type="primary" :disabled="item.status === 'COMPLETED'" :loading="itemActionPending.includes(item.id)" @click="completeReading(item)">{{ item.status === 'COMPLETED' ? '已自评完成阅读' : itemActionErrors[item.id] ? '重试自评完成' : '我已阅读（自评）' }}</el-button>
-                      <el-button v-else-if="item.kind === 'PRACTICE'" type="primary" :disabled="groupGeneratingItemId !== null" :loading="groupGeneratingItemId === item.id" @click="startGroupPractice(item)">
-                        {{ item.status === 'COMPLETED' ? '再次生成并练习本组' : '生成并开始本组练习' }}（{{ practiceConfig.totalQuestions }} 道题）
-                      </el-button>
-                      <el-button v-else type="success" plain @click="goInterview(item)">进入模拟面试 <el-icon><Right /></el-icon></el-button>
-                    </div>
-                    <p v-if="item.kind === 'PRACTICE'" class="muted practice-jump-note">
-                      按右侧「自定义出题」配置预生成本组题目，完成后进入答题页面，可随时返回训练中心。
-                    </p>
-                    <p v-if="item.kind === 'READING'" class="muted reading-self-check-note">
-                      {{ item.status === 'COMPLETED' ? '阅读完成为自评记录（完成时间已保存），不代表系统已验证掌握该技能；建议结合答题训练检验效果。' : '请先阅读上方授权资料，确认理解后自评完成；该记录为自评性质，不会计入技能评分证据。' }}
-                    </p>
-                    <p v-if="item.kind === 'READING' && item.completedAt" class="muted">自评完成时间：{{ formatDate(item.completedAt) }}</p>
-                  </div>
-                </article>
-              </div>
-            </template>
-          </AsyncState>
-        </section>
-
-        <section class="panel config-panel">
-          <div class="panel__heading">
-            <div>
-              <h2>自定义出题</h2>
-              <p class="muted">在开始训练前，预生成整组题目与题型，做完一组再生成下一组。</p>
-            </div>
-          </div>
-          <div class="config-block">
-            <h4>每组题目数</h4>
-            <div class="config-total">
-              <el-input-number v-model="practiceConfig.totalQuestions" :min="5" :max="20" :step="5" />
-              <div class="config-total__quick">
-                <el-button v-for="size in [5, 10, 15, 20]" :key="size" size="small" :type="practiceConfig.totalQuestions === size ? 'primary' : ''" @click="practiceConfig.totalQuestions = size">{{ size }}</el-button>
-              </div>
-            </div>
-          </div>
-          <div class="config-block">
-            <h4>题型分布</h4>
-            <div v-for="option in typeDistributionOptions" :key="option.key" class="config-type">
-              <div class="config-type__text">
-                <strong>{{ option.label }}</strong>
-                <span>{{ option.desc }}</span>
-              </div>
-              <el-input-number v-model="practiceConfig.typeDistribution[option.key]" :min="0" :max="practiceConfig.totalQuestions" size="small" />
-            </div>
-            <p class="config-sum" :class="{ 'config-sum--error': !configValid }">
-              已配置题目总数 {{ configuredTotal }} / {{ practiceConfig.totalQuestions }}
-              <el-icon v-if="configValid"><CircleCheck /></el-icon>
-            </p>
-          </div>
-          <div class="config-block">
-            <h4>训练难度</h4>
-            <el-radio-group v-model="practiceConfig.difficulty">
-              <el-radio-button v-for="option in difficultyOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
-            </el-radio-group>
-          </div>
-          <div class="config-block">
-            <h4>训练方向</h4>
-            <el-select v-model="practiceConfig.direction" placeholder="选择训练方向">
-              <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-          </div>
-          <el-alert type="info" :closable="false" show-icon title="整组预生成说明" description="点击左侧任意训练单元下方的「生成并开始本组练习」，将按右侧当前配置一次性预生成整组题目，并进入答题页面；客观题自动判分，主观题交卷后由 AI 统一评估。" />
-          <p class="config-generate-hint">配置完成后，请到左侧训练单元卡片下方点击生成。</p>
-          <el-alert v-if="groupTaskError" :title="errorMessage(groupTaskError)" type="error" :closable="false" show-icon />
-        </section>
-      </div>
-
-      <el-alert v-if="practiceActionError" :title="errorMessage(practiceActionError)" type="error" :closable="false" show-icon />
-    </template>
-
-    <template v-else>
-      <section class="panel">
-        <div class="panel__heading">
-          <div>
-            <h2>错题本</h2>
-            <p class="muted">有效评价低于 60 分或明确回答"不会"的题目会进入待复习；重新练习会创建新会话并保留历史回答。</p>
-          </div>
-          <el-radio-group v-model="mistakeResolved" @change="changeMistakeFilter">
-            <el-radio-button :label="false">待攻克</el-radio-button>
-            <el-radio-button :label="true">已解决</el-radio-button>
-          </el-radio-group>
-        </div>
-        <el-alert v-if="practiceActionError" :title="errorMessage(practiceActionError)" type="error" :closable="false" show-icon />
-        <AsyncState :loading="mistakesLoading" :error="mistakesError" :empty="!mistakes.records.length" :empty-text="mistakeResolved ? '暂无已解决错题' : '暂无待攻克错题'" @retry="loadMistakes">
-          <div class="mistake-list">
-            <article v-for="mistake in mistakes.records" :key="mistake.id" class="mistake-card">
-              <div class="mistake-card__heading">
-                <div class="question-card__meta">
-                  <el-tag size="small" type="primary" effect="plain">{{ difficultyLabel(mistake.question.difficulty) }}</el-tag>
-                  <el-tag v-for="skill in mistake.question.skillCodes" :key="skill" size="small" type="info">{{ skill }}</el-tag>
-                  <el-tag size="small" :type="mistake.resolved ? 'success' : 'danger'">{{ mistake.resolved ? '已解决' : (mistake.cause === 'UNKNOWN' ? `不会 · ${mistake.wrongCount} 次` : `错误 ${mistake.wrongCount} 次`) }}</el-tag>
-                </div>
-                <span class="muted">题目 v{{ mistake.question.questionVersion }}</span>
-              </div>
-              <p class="pre-wrap mistake-stem">{{ mistake.question.stem }}</p>
-              <p class="muted break-all">最近回答ID：{{ mistake.lastAnswerId }}</p>
-              <div class="actions">
-                <el-button type="primary" plain @click="openMistake(mistake)">查看题目与原回答</el-button>
-                <el-button type="primary" :loading="retryingMistakeId === mistake.id" :disabled="groupGeneratingItemId !== null" @click="retryMistake(mistake)">重新练习</el-button>
-              </div>
-            </article>
-          </div>
-        </AsyncState>
-        <div class="pagination">
-          <el-pagination background layout="total, sizes, prev, pager, next" :total="mistakes.total" :current-page="mistakes.current" :page-size="mistakes.size" :page-sizes="[6, 12, 24]" @current-change="changeMistakePage" @size-change="changeMistakeSize" />
-        </div>
-      </section>
-    </template>
-
-    <el-dialog v-model="planDialogVisible" title="生成专项训练计划" width="620px" class="responsive-dialog">
-      <div v-loading="planContextLoading" class="plan-dialog">
-        <el-alert v-if="!hasResume" type="warning" :closable="false" show-icon title="没有可用简历">
-          <p>请先在简历中心上传简历并完成解析，再生成专项训练计划。</p>
-          <el-button type="primary" size="small" @click="goResumeCenter">前往简历中心</el-button>
-        </el-alert>
-        <template v-else>
-          <el-form label-width="96px">
-            <el-form-item label="目标方向">
-              <el-select v-model="planForm.targetDirection" placeholder="请选择目标方向">
-                <el-option v-for="option in directionOptions" :key="option.value" :label="option.label" :value="option.value" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="每天投入">
-              <el-input-number v-model="planForm.dailyMinutes" :min="10" :max="120" :step="5" />
-              <span class="form-hint">分钟 / 天</span>
-            </el-form-item>
-            <el-form-item label="计划周期">
-              <el-input-number v-model="planForm.days" :min="1" :max="14" />
-              <span class="form-hint">天</span>
-            </el-form-item>
-            <el-form-item label="参考岗位">
-              <el-select v-model="planForm.matchItemId" clearable placeholder="可选：参考最近一次岗位匹配">
-                <el-option
-                  v-for="option in matchOptions"
-                  :key="option.id"
-                  :label="`${option.title}${option.matchScore === null ? '' : ` · ${option.matchScore} 分`}`"
-                  :value="option.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-form>
-          <p class="muted">计划将基于简历版本 {{ planForm.resumeVersionId || '当前可用版本' }} 生成，历史计划与进度会保留。</p>
-          <el-alert v-if="planError" :title="errorMessage(planError)" type="error" :closable="false" show-icon />
-          <TaskStatus v-if="planTask" :task="planTask" :reasoning="planTracker.reasoningText.value">
-            <template #actions>
-              <el-button v-if="canRetryTrackedTask(planTask)" size="small" type="primary" @click="retryPlanTask">按原参数重试</el-button>
-            </template>
-          </TaskStatus>
-          <div v-if="planTrackingError" class="tracking-error">
-            <span>{{ errorMessage(planTrackingError) }}</span>
-            <el-button size="small" @click="planTracker.restart">恢复任务跟踪</el-button>
-          </div>
+      <AsyncState :loading="!selectedPlan && (plansLoading || planDetailLoading)" :error="planDetailError || (!selectedPlan && plansError)" :empty="!selectedPlan" empty-text="暂无训练计划" @retry="planDetailRequestId ? loadPlan(planDetailRequestId) : loadActiveTab()">
+        <template #empty>
+          <p class="muted">可以根据已解析的简历或岗位匹配结果生成训练计划。</p>
+          <div class="actions"><el-button type="primary" @click="openPlanDialog">新建训练计划</el-button><el-button @click="router.push('/jobs?tab=matches')">前往岗位匹配</el-button></div>
         </template>
-      </div>
-      <template #footer>
-        <el-button @click="planDialogVisible = false">关闭</el-button>
-        <el-button v-if="!hasResume" type="primary" @click="goResumeCenter">前往简历中心</el-button>
-        <el-button v-else type="primary" :loading="planTaskActive" :disabled="planTaskActive || !planFormValid" @click="submitPlanFromResume">{{ planError ? '重试生成' : '生成计划' }}</el-button>
-      </template>
-    </el-dialog>
+        <div v-if="selectedPlan" class="training-columns">
+          <div class="unit-column">
+            <section v-if="nextUnit" class="training-card next-unit">
+              <div class="unit-metadata"><span class="tone-label">下一项</span><span><el-icon><Clock /></el-icon> 预计 {{ nextUnit.estimatedMinutes }} 分钟</span></div>
+              <div><h2>{{ nextUnit.title }}</h2><p class="muted">{{ nextUnit.objective }}</p></div>
+              <div class="actions">
+                <el-button type="primary" @click="startNextUnit(nextUnit)">{{ nextUnit.kind === 'PRACTICE' ? '开始练习' : '查看训练详情' }}</el-button>
+                <span v-if="nextUnit.kind === 'PRACTICE'" class="muted">{{ practiceConfig.totalQuestions }} 道题 · {{ practiceDifficulty }}</span>
+              </div>
+            </section>
+            <WaitStatus v-else-if="selectedPlan.status === 'GENERATING'" title="正在生成训练计划">
+              <template #actions><el-button size="small" :loading="planDetailLoading" @click="loadPlan(selectedPlan.id)">刷新计划</el-button></template>
+            </WaitStatus>
+            <section v-else class="training-card">
+              <h2>{{ selectedPlan.status === 'FAILED' ? '计划生成失败' : progress.total ? '已完成当前计划' : '当前计划暂无训练单元' }}</h2>
+              <div class="actions"><el-button @click="refreshCurrentProfile(); loadPlan(selectedPlan.id)">刷新计划</el-button><el-button @click="openPlanDialog">新建训练计划</el-button></div>
+            </section>
 
-    <el-dialog v-model="mistakeDialogVisible" title="错题与原回答" width="780px" class="responsive-dialog">
-      <template v-if="selectedMistake">
-        <div class="question-card mistake-dialog-question">
-          <div class="question-card__meta">
-            <el-tag type="primary" effect="plain">{{ difficultyLabel(selectedMistake.question.difficulty) }}</el-tag>
-            <el-tag effect="plain">{{ questionTypeLabel(selectedMistake.question.type) }}</el-tag>
-            <el-tag v-for="skill in selectedMistake.question.skillCodes" :key="skill" type="info">{{ skill }}</el-tag>
+            <section v-if="selectedPlan.items.length" class="unit-list" aria-labelledby="unit-list-title">
+              <div class="section-heading"><h2 id="unit-list-title">训练单元</h2><span class="muted">共 {{ progress.total }} 项 · 已完成 {{ progress.completed }} 项</span></div>
+              <button v-for="(item, index) in selectedPlan.items" :key="item.id" class="item-row" type="button" @click="openUnit(item)">
+                <span class="unit-number">{{ String(index + 1).padStart(2, '0') }}</span>
+                <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.skillCode }} · {{ kindLabel(item.kind) }} · {{ item.estimatedMinutes }} 分钟</small></span>
+                <span class="item-state" :class="{ 'item-state--done': item.status === 'COMPLETED' }">{{ item.id === nextUnit?.id ? '下一项' : commonStatusLabels[item.status] || item.status }}</span>
+              </button>
+            </section>
           </div>
-          <h3>题目</h3>
-          <p class="pre-wrap question-stem">{{ selectedMistake.question.stem }}</p>
-          <span class="muted">题目版本 v{{ selectedMistake.question.questionVersion }}</span>
+
+          <aside class="training-aside">
+            <section class="training-card">
+              <div class="section-heading"><h2>当前计划</h2><el-tag :type="statusTagType(selectedPlan.status)" size="small">{{ commonStatusLabels[selectedPlan.status] || selectedPlan.status }}</el-tag></div>
+              <div><h3>{{ selectedPlan.title }}</h3><p class="muted">{{ planDirectionLabel(selectedPlan) }} · {{ selectedPlan.dailyMinutes }} 分钟/天 · 共 {{ selectedPlan.days }} 天</p></div>
+              <div class="plan-progress">
+                <div class="section-heading"><span>{{ progress.completed }} / {{ progress.total }} 单元已完成</span><strong>{{ progress.percentage }}%</strong></div>
+                <div v-if="progress.total && progress.total <= 20" class="progress-segments" role="progressbar" aria-label="计划完成度" :aria-valuenow="progress.percentage">
+                  <span v-for="item in selectedPlan.items" :key="item.id" :class="{ finished: item.status === 'COMPLETED' }" />
+                </div>
+                <el-progress v-else :percentage="progress.percentage" :show-text="false" :stroke-width="7" />
+              </div>
+              <div class="card-separator source-caption"><el-icon><Document /></el-icon>{{ selectedPlan.source === 'RESUME' ? '根据已解析简历生成' : '根据岗位匹配生成' }}</div>
+              <div><el-button @click="setQuery({ view: 'library' }); loadPlans()">查看我的计划</el-button></div>
+              <el-alert v-if="planOutdatedReasons(selectedPlan).length" :title="planOutdatedReasons(selectedPlan).join('、')" type="warning" :closable="false" show-icon />
+              <details v-if="selectedPlan.basis || selectedPlan.matchSummary" class="disclosure">
+                <summary>查看计划依据</summary>
+                <p v-if="selectedPlan.matchSummary">参考岗位 {{ selectedPlan.matchSummary.title }}</p>
+                <p v-if="selectedPlan.basis?.summary">{{ selectedPlan.basis.summary }}</p>
+                <ul v-if="selectedPlan.basis?.limitations?.length"><li v-for="note in selectedPlan.basis.limitations" :key="note">{{ note }}</li></ul>
+                <el-alert v-if="selectedPlan.basis?.github" :title="githubNotice(selectedPlan)" :type="githubNoticeType(selectedPlan)" :closable="false" />
+              </details>
+            </section>
+
+            <section class="training-card">
+              <div class="config-heading"><span class="unit-number"><el-icon><Operation /></el-icon></span><div><h2>本组出题设置</h2><p class="muted">适用于下一组答题训练</p></div></div>
+              <div class="actions"><span class="tone-label">{{ practiceConfig.totalQuestions }} 道题</span><span class="item-state">{{ practiceDifficulty }}</span><span class="item-state">{{ getJobRoleLabel(practiceConfig.direction) }}</span></div>
+              <div class="card-separator distribution-row"><span>选择 {{ practiceConfig.typeDistribution.choice }}</span><span>填空 {{ practiceConfig.typeDistribution.fill }}</span><span>主观 {{ practiceConfig.typeDistribution.subjective }}</span></div>
+              <div><el-button @click="openSetup()">调整出题设置</el-button></div>
+            </section>
+          </aside>
         </div>
-        <AsyncState :loading="mistakeAnswerLoading" :error="mistakeAnswerError" :empty="!mistakeAnswer" empty-text="未读取到原回答" @retry="openMistake(selectedMistake)">
-          <template v-if="mistakeAnswer">
-            <div class="original-answer">
-              <h3>lastAnswerId 对应原回答</h3>
-              <p class="pre-wrap">{{ mistakeAnswer.content }}</p>
-              <span class="muted break-all">{{ mistakeAnswer.id }} · 会话 {{ mistakeAnswer.sessionId }}</span>
-            </div>
-            <template v-if="mistakeAnswer.evaluation">
-              <div class="evaluation-overview">
-                <div class="overall-score"><strong>{{ mistakeAnswer.evaluation.overallScore === null ? '待评估' : displayScore(mistakeAnswer.evaluation.overallScore) }}</strong><span>综合得分</span></div>
-                <el-tag :type="statusTagType(mistakeAnswer.evaluation.evidenceStatus)">{{ evidenceLabel(mistakeAnswer.evaluation.evidenceStatus) }}</el-tag>
-              </div>
-              <div class="feedback-grid">
-                <section class="feedback-card feedback-card--strength"><h3>优点</h3><ul><li v-for="(item, index) in mistakeAnswer.evaluation.strengths" :key="index">{{ item }}</li></ul></section>
-                <section class="feedback-card feedback-card--improvement"><h3>改进建议</h3><ul><li v-for="(item, index) in mistakeAnswer.evaluation.improvements" :key="index">{{ item }}</li></ul></section>
-              </div>
-              <section class="reference-answer"><h3>参考答案</h3><p class="pre-wrap">{{ mistakeAnswer.evaluation.referenceAnswer || '当前评价未提供参考答案' }}</p></section>
-            </template>
-            <el-alert v-else title="该原回答暂无可展示的评价结果" type="warning" :closable="false" show-icon />
-          </template>
-        </AsyncState>
-      </template>
-      <template #footer>
-        <el-button @click="mistakeDialogVisible = false">关闭</el-button>
-        <el-button v-if="selectedMistake" type="primary" :loading="selectedMistake && retryingMistakeId === selectedMistake.id" @click="selectedMistake && retryMistake(selectedMistake)">重新练习此题</el-button>
-      </template>
-    </el-dialog>
+      </AsyncState>
+    </template>
+
+    <section v-else class="training-card mistakes-panel">
+      <div class="section-heading">
+        <div><h2>{{ mistakeResolved ? '已解决' : '待攻克' }}</h2><p class="muted">优先复盘最近练习中的错题。</p></div>
+        <el-radio-group v-model="mistakeResolved" aria-label="错题状态" @change="changeMistakeFilter">
+          <el-radio-button :value="false">待攻克</el-radio-button><el-radio-button :value="true">已解决</el-radio-button>
+        </el-radio-group>
+      </div>
+      <AsyncState :loading="mistakesLoading" :retain="mistakes.records.length > 0" :error="mistakesError" :empty="!mistakes.records.length" :empty-text="mistakeResolved ? '暂无已解决错题' : '暂无待攻克错题'" @retry="loadMistakes">
+        <div class="mistake-list">
+          <button v-for="mistake in mistakes.records" :key="mistake.id" class="item-row" type="button" @click="openMistake(mistake)">
+            <span class="row-copy"><strong>{{ mistake.question.stem }}</strong><small>{{ [...mistake.question.skillCodes, questionTypeLabel(mistake.question.type), difficultyLabel(mistake.question.difficulty)].join(' · ') }}</small></span>
+            <span class="item-state" :class="mistake.resolved ? 'item-state--done' : 'item-state--review'">{{ mistake.resolved ? '已解决' : '待攻克' }}</span>
+            <span class="review-link">查看解析 <el-icon><ArrowRight /></el-icon></span>
+          </button>
+        </div>
+      </AsyncState>
+      <div v-if="mistakes.total > 6" class="pagination">
+        <el-pagination background layout="sizes, prev, pager, next" :total="mistakes.total" :current-page="mistakes.current" :page-size="mistakes.size" :page-sizes="[6, 12, 24]" @current-change="changeMistakePage" @size-change="changeMistakeSize" />
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped lang="scss">
-.training-page { padding-bottom: 28px; }
-.page-header__actions { align-items: center; }
-.empty-hint { margin: 0 0 12px; color: $ai-text-secondary; }
-.empty-actions { justify-content: center; }
-.plan-card__source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.plan-basis { display: grid; gap: 6px; margin: 14px 0; padding: 14px 16px; border-radius: $ai-radius; background: $ai-bg-page; color: $ai-text-secondary; font-size: 13px; }
-.plan-basis__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
-.plan-basis__summary { margin: 4px 0 0; color: #101d4b; }
-.plan-basis__limitations { margin: 4px 0 0; padding-left: 18px; }
-.plan-item__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.plan-item__guide { display: grid; gap: 4px; margin: 12px 0; color: $ai-text-secondary; font-size: 13px; }
-.plan-item__guide p { margin: 0; }
-.plan-item__guide strong { color: #101d4b; }
-.plan-item__pending { display: flex; align-items: center; gap: 8px; }
-.resource-links { display: grid; gap: 6px; margin: 12px 0; }
-.resource-links h4 { margin: 0 0 4px; }
-.resource-links a { word-break: break-all; }
-.plan-dialog { min-height: 120px; }
-.form-hint { margin-left: 8px; color: $ai-text-secondary; font-size: 12px; }
-.page-header h1 { display: flex; align-items: center; gap: 10px; }
-.training-tabs { margin-bottom: 16px; padding: 0 16px; border: 1px solid #e8f0fa; border-radius: $ai-radius-lg; background: #fff; }
-.training-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr) 300px; align-items: start; gap: 14px; }
-.training-layout--home { grid-template-columns: minmax(0, 1fr) 340px; }
-.plan-list-panel { min-width: 0; }
-.plan-detail-panel { min-width: 0; }
-.config-panel { position: sticky; top: 76px; display: grid; gap: 14px; align-self: start; }
-.config-block { display: grid; gap: 8px; }
-.config-block h4 { margin: 0; font-size: 13px; color: $ai-text-primary; }
-.config-total { display: grid; gap: 8px; }
-.config-total__quick { display: flex; gap: 8px; }
-.config-type { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid $ai-border-light; border-radius: $ai-radius; background: $ai-bg-page; }
-.config-type__text { display: grid; gap: 2px; }
-.config-type__text strong { font-size: 13px; color: $ai-text-primary; }
-.config-type__text span { color: $ai-text-tertiary; font-size: 11px; }
-.config-sum { display: flex; align-items: center; gap: 6px; margin: 0; color: $ai-text-secondary; font-size: 12px; }
-.config-sum--error { color: $ai-danger; }
-.config-generate-hint { margin: 0; padding: 10px 12px; border: 1px dashed #bfdbfe; border-radius: $ai-radius; color: #1e40af; font-size: 12px; line-height: 1.6; background: $ai-primary-light; }
-.hero-banner { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 14px; padding: 24px 28px; border-radius: $ai-radius-lg; background: linear-gradient(105deg, #2563eb 0%, #1d4ed8 60%, #1e40af 100%); color: #fff; }
-.hero-banner__eyebrow { color: rgba(255, 255, 255, 0.72); font-size: 12px; letter-spacing: 1px; }
-.hero-banner h2 { margin: 6px 0 6px; font-size: 24px; }
-.hero-banner p { margin: 0 0 12px; max-width: 560px; color: rgba(255, 255, 255, 0.82); font-size: 13px; line-height: 1.6; }
-.hero-banner__tags { display: flex; flex-wrap: wrap; gap: 8px; }
-.hero-tag { padding: 3px 10px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 999px; font-size: 12px; }
-.hero-banner__progress { display: grid; justify-items: center; gap: 4px; flex-shrink: 0; }
-.hero-banner__progress strong { font-size: 24px; }
-.hero-banner__progress span { color: rgba(255, 255, 255, 0.72); font-size: 12px; }
-.hero-banner__progress :deep(.el-progress__text) { color: #fff; }
-.stats-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
-.stat-card { display: flex; align-items: baseline; gap: 8px; padding: 16px 18px; border: 1px solid $ai-border-light; border-radius: $ai-radius-lg; background: #fff; box-shadow: $ai-shadow-card; }
-.stat-card__label { color: $ai-text-secondary; font-size: 12px; }
-.stat-card strong { color: #101d4b; font-size: 26px; line-height: 1; }
-.stat-card__unit { color: $ai-text-tertiary; font-size: 12px; }
-.page-header__en { margin-left: 8px; color: $ai-text-tertiary; font-size: 12px; font-weight: 500; letter-spacing: 1px; }
-.break-all { word-break: break-all; }
-.plan-card { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; width: 100%; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: #fff; cursor: pointer; overflow-wrap: anywhere; }
-.plan-card :deep(.el-tag) { max-width: 100%; height: auto; min-height: 20px; white-space: normal; }
-.plan-card :deep(.el-tag__content) { overflow-wrap: anywhere; }
-.plan-card:hover, .plan-card--active { border-color: $ai-primary; background: $ai-primary-light; }
-.plan-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.plan-card__heading strong { min-width: 0; color: #101d4b; line-height: 1.5; }
-.plan-card__heading > .el-tag { flex-shrink: 0; }
-.plan-card__progress { color: $ai-text-secondary; font-size: 12px; text-align: right; }
-.plan-items { display: grid; gap: 12px; margin-top: 16px; }
-.plan-item { display: flex; gap: 12px; padding: 15px; border: 1px solid $ai-border; border-radius: $ai-radius; }
-.plan-item__index { display: flex; flex: 0 0 28px; align-items: center; justify-content: center; height: 28px; border-radius: 50%; color: $ai-primary; font-weight: 700; background: $ai-primary-light; }
-.plan-item__content { min-width: 0; flex: 1; }
-.plan-item__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.plan-item__heading h3 { margin: 0 0 6px; color: #101d4b; font-size: 16px; }
-.plan-item__heading p { margin: 0; color: $ai-text-secondary; font-size: 13px; }
-.plan-item__actions { margin-top: 13px; }
-.plan-item__actions .el-button { min-width: 220px; }
-.practice-jump-note { margin: 8px 0 0; font-size: 12px; line-height: 1.6; }
-.resource-refs { margin: 14px 0; }
-.resource-refs h4 { margin: 0 0 8px; }
-.resource-refs blockquote { margin: 8px 0; padding: 10px 12px; border-left: 3px solid $ai-primary; background: $ai-bg-page; }
-.resource-refs blockquote p { margin: 0 0 6px; }
-.resource-refs blockquote span { color: $ai-text-tertiary; font-size: 11px; word-break: break-all; }
-.tracking-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: $ai-danger; font-size: 13px; }
-.session-panel { margin-top: 14px; }
-.question-card { padding: 18px; border: 1px solid #dbe7fa; border-radius: $ai-radius; background: $ai-primary-light; }
-.question-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.question-card h3 { margin: 16px 0 8px; color: #101d4b; }
-.question-stem { margin: 0; color: #101d4b; font-size: 17px; font-weight: 500; }
-.question-code-block { margin: 10px 0; padding: 12px 14px; border: 1px solid #dbe7fa; border-radius: 8px; background: #f4f7fd; overflow-x: auto; }
-.question-code-block code { font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 13px; line-height: 1.6; color: #1f3576; white-space: pre; }
-.question-code { min-width: 0; margin-top: 12px; }
-.question-code__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.question-source { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; color: $ai-text-secondary; font-size: 12px; }
-.answer-editor { margin-top: 18px; }
-.answer-editor__heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.answer-editor__heading h3 { margin: 0; }
-.answer-editor__heading span { color: $ai-text-secondary; }
-.answer-editor__heading .limit-warning { color: $ai-danger; }
-.answer-editor .el-alert { margin-top: 12px; }
-.answer-editor .actions { margin-top: 14px; }
-.draft-status { margin: 7px 0 0; color: $ai-text-secondary; font-size: 12px; }
-.error-text { color: $ai-danger; }
-.evaluation-task { margin-top: 18px; }
-.answer-result { margin-top: 22px; padding-top: 18px; border-top: 1px solid $ai-border; }
-.original-answer { margin-bottom: 12px; padding: 14px; border-radius: $ai-radius; background: $ai-bg-page; }
-.original-answer h3 { margin: 0 0 9px; font-size: 15px; }
-.original-answer p { margin: 0 0 8px; }
-.answer-result .el-alert { margin-top: 12px; }
-.evaluation-overview { display: flex; align-items: center; gap: 22px; margin: 18px 0; padding: 16px; border-radius: $ai-radius; background: $ai-bg-page; }
-.overall-score { display: grid; min-width: 92px; text-align: center; }
-.overall-score strong { color: $ai-primary; font-size: 32px; line-height: 1.2; }
-.overall-score span { color: $ai-text-secondary; font-size: 12px; }
-.evaluation-overview p { margin: 7px 0 0; }
-.detail-block { overflow-x: auto; }
-.detail-block h3 { margin: 0 0 10px; }
-.detail-block :deep(.el-table) { min-width: 560px; }
-.feedback-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.feedback-card { padding: 15px; border-radius: $ai-radius; }
-.feedback-card h3 { margin: 0 0 10px; font-size: 16px; }
-.feedback-card ul { display: grid; gap: 7px; margin: 0; padding-left: 20px; line-height: 1.65; }
-.feedback-card--strength { background: #ecfdf5; }
-.feedback-card--improvement { background: #fff7ed; }
-.reference-answer { margin-top: 14px; padding: 16px; border-left: 4px solid $ai-primary; border-radius: $ai-radius; background: $ai-primary-light; }
-.reference-answer h3 { margin: 0 0 10px; }
-.reference-answer p { margin: 0; }
-.mistake-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.mistake-card { padding: 16px; border: 1px solid $ai-border; border-radius: $ai-radius; background: #fff; }
-.mistake-card__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.mistake-stem { min-height: 54px; margin: 16px 0; color: #101d4b; font-size: 16px; font-weight: 500; }
-.mistake-dialog-question { margin-bottom: 16px; }
-:global(.responsive-dialog) { max-width: calc(100vw - 24px); }
-@media (max-width: 1100px) {
-  .training-layout { grid-template-columns: 320px minmax(0, 1fr); }
-  .training-layout--home { grid-template-columns: minmax(0, 1fr) 320px; }
-  .config-panel { position: static; grid-column: 1 / -1; }
-  .stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .hero-banner { flex-direction: column; align-items: flex-start; }
-}
-@media (max-width: 700px) {
-  .training-layout { grid-template-columns: 1fr; }
-  .training-layout--home { grid-template-columns: 1fr; }
-  .stats-row { grid-template-columns: 1fr; }
-  .training-tabs { padding: 0 8px; }
-  .feedback-grid, .mistake-list { grid-template-columns: 1fr; }
-  .plan-item { padding: 12px; }
-  .plan-item__actions .el-button { width: 100%; min-width: 0; }
-  .plan-item__heading, .mistake-card__heading { flex-direction: column; }
-  .evaluation-overview { align-items: flex-start; flex-direction: column; }
-  .pagination { justify-content: center; overflow-x: auto; }
+.training-page { padding-block:24px 36px; }
+.training-heading,.section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }
+.training-heading { margin-bottom:12px; }
+h1,h2,h3,p { margin:0; }
+h1,h2,h3 { font-weight:700; }
+h1 { font-size:32px; line-height:1.35; letter-spacing:-.025em; }
+.training-heading p,.flow-title p { margin-top:5px; color:$ai-text-secondary; line-height:1.6; }
+h2 { font-size:17px; line-height:1.4; }
+h3 { font-size:20px; line-height:1.4; }
+p { line-height:1.65; overflow-wrap:anywhere; }
+.muted { color:$ai-text-secondary; }
+.training-tabs { margin-bottom:12px; }
+.training-tabs :deep(.el-tabs__header) { margin-bottom:8px; }
+.training-tabs :deep(.el-tabs__nav-wrap::after) { height:1px; }
+.training-columns { display:grid; grid-template-columns:minmax(0, 1.76fr) minmax(288px, 1fr); align-items:start; gap:24px; }
+.flow-columns { grid-template-columns:minmax(0, 1.94fr) minmax(288px, 1fr); }
+.unit-column,.training-aside,.unit-list,.mistake-list,.review-content,.plan-library { display:grid; min-width:0; gap:14px; }
+.unit-list,.mistake-list { gap:8px; }
+.unit-list .section-heading { margin:0 0 5px; }
+.unit-list h2 { font-size:20px; }
+.unit-list .section-heading span { font-size:13px; text-align:right; }
+.training-card { display:grid; padding:22px; gap:14px; min-width:0; background:$ai-bg-card; border:1px solid $ai-border; border-radius:16px; }
+.training-card > :is(div,section) > .muted { margin-top:5px; }
+.next-unit { padding:23px; gap:14px; }
+.next-unit h2 { font-size:clamp(22px, 2.15vw, 31px); overflow-wrap:anywhere; }
+.next-unit .actions { gap:12px; }
+.unit-metadata,.unit-metadata > span,.source-caption { display:flex; align-items:center; gap:7px; color:$ai-text-secondary; font-size:13px; }
+.unit-metadata { gap:12px; }
+.tone-label,.item-state { display:inline-flex; align-items:center; border-radius:7px; padding:4px 8px; font-size:12px; font-weight:500; line-height:1.35; }
+.tone-label { background:$ai-primary-light; color:$ai-primary; }
+.item-state { background:$ai-bg-light; color:$ai-text-secondary; }
+.item-state--done { background:var(--ai-success-bg,#e5f6ee); color:var(--ai-success,#167953); }
+.item-state--review { background:var(--ai-warning-bg,#fff1e2); color:var(--ai-warning,#a65318); }
+.unit-number { display:grid; place-items:center; width:36px; height:36px; flex-shrink:0; border-radius:9px; background:$ai-primary-light; color:$ai-primary; font-size:13px; font-weight:650; }
+.unit-number .el-icon { font-size:18px; }
+.item-row { display:flex; align-items:center; gap:12px; width:100%; min-width:0; min-height:62px; padding:11px 14px; border:1px solid $ai-border; border-radius:10px; background:$ai-bg-card; color:$ai-text-primary; font:inherit; text-align:left; cursor:pointer; }
+.item-row:hover,.item-row:focus-visible { border-color:$ai-primary; }
+.row-copy { flex:1; min-width:0; display:grid; gap:4px; overflow-wrap:anywhere; }
+.row-copy strong { font-size:14px; line-height:1.45; }
+small,.row-copy small { color:$ai-text-secondary; font-size:12px; line-height:1.45; }
+.config-heading { display:flex; align-items:center; gap:10px; }
+.config-heading p { font-size:12px; }
+.card-separator { padding-top:13px; border-top:1px solid $ai-border-light; }
+.plan-progress { display:grid; gap:8px; font-size:13px; color:$ai-text-secondary; }
+.plan-progress strong { color:$ai-primary; font-size:23px; font-variant-numeric:tabular-nums; }
+.progress-segments { display:flex; gap:6px; }
+.progress-segments span { flex:1; height:7px; border-radius:5px; background:var(--ai-primary-light,#dbe5fb); }
+.progress-segments .finished { background:$ai-primary; }
+.source-caption .el-icon,.review-link { color:$ai-primary; }
+.distribution-row { display:flex; gap:16px; flex-wrap:wrap; color:$ai-text-secondary; font-size:13px; }
+.flow-content { width:min(1152px, calc(100% - 40px)); margin:36px auto; color:$ai-text-primary; }
+.flow-title { margin-bottom:24px; }
+.fields-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; }
+.config-field { display:grid; gap:9px; align-content:start; }
+.field-label { font-weight:650; }
+.config-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:3px 0; }
+.config-row small { display:block; margin-top:3px; }
+.config-status { color:var(--ai-success,#167953); }
+.config-status--error,.error-text { color:$ai-danger; }
+.count-display { display:flex; align-items:baseline; gap:7px; color:$ai-text-secondary; }
+.count-display strong { font-size:40px; line-height:1; color:$ai-text-primary; font-variant-numeric:tabular-nums; }
+.flow-summary { display:grid; gap:12px; margin:0; }
+.flow-summary div { display:flex; justify-content:space-between; gap:12px; }
+.flow-summary dt { color:$ai-text-secondary; }
+.flow-summary dd { margin:0; font-weight:600; text-align:right; overflow-wrap:anywhere; }
+.plan-library { max-width:744px; }
+.disclosure summary { color:$ai-primary; cursor:pointer; }
+.disclosure p,.training-card--details p { margin-top:7px; color:$ai-text-secondary; }
+.resource-link { display:block; margin-top:7px; color:$ai-primary; overflow-wrap:anywhere; }
+blockquote { margin:8px 0 0; padding:8px 12px; border-left:2px solid $ai-border; color:$ai-text-secondary; }
+blockquote small { display:block; }
+.review-link { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; font-weight:600; }
+.review-tips,.review-content ul { margin:0; padding-left:18px; line-height:1.65; }
+@media (max-width: 1050px) { .training-columns,.flow-columns { gap:16px; } }
+@media (max-width: 880px) { .training-columns,.flow-columns { grid-template-columns:minmax(0,1fr); } }
+@media (max-width: 560px) {
+  .fields-grid { grid-template-columns:minmax(0,1fr); gap:6px; }
+  .training-heading { align-items:flex-start; flex-wrap:wrap; }
+  h1 { font-size:26px; }
+  .training-card { padding:15px; }
+  .flow-content { width:calc(100% - 28px); margin:24px auto; }
+  .item-row { flex-wrap:wrap; }
+  .review-link { margin-left:auto; }
 }
 </style>

@@ -233,11 +233,11 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
 
 <style scoped>
 .voice-panel {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--ai-border-light, #ebeef5);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
-  background: #fafcff;
+  background: var(--ai-bg-card, #fafcff);
 }
 .voice-panel__heading {
   display: flex;
@@ -263,7 +263,7 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
   margin-top: 12px;
 }
 .muted {
-  color: #909399;
+  color: var(--ai-text-tertiary, #909399);
   font-size: 12px;
 }
 @media (max-width: 700px) {

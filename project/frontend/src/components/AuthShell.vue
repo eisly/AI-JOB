@@ -1,5 +1,6 @@
 <template>
   <div class="auth-page">
+    <ThemeToggle class="auth-theme-toggle" />
     <div class="auth-wave auth-wave--top" aria-hidden="true"></div>
     <div class="auth-wave auth-wave--bottom" aria-hidden="true"></div>
     <section class="brand-panel">
@@ -32,6 +33,7 @@
 
 <script setup lang="ts">
 import { Aim, Edit, School, TrendCharts } from '@element-plus/icons-vue'
+import ThemeToggle from './ThemeToggle.vue'
 
 defineProps<{
   title: string
@@ -39,10 +41,10 @@ defineProps<{
 }>()
 
 const features = [
-  { icon: Aim, color: '#DBEAFE', title: '智能匹配岗位', desc: '基于简历与能力画像，精准推荐目标岗位' },
-  { icon: Edit, color: '#E0E7FF', title: '定向提升能力', desc: '提供针对性的学习与训练建议' },
-  { icon: TrendCharts, color: '#D1FAE5', title: '实战模拟练习', desc: '通过项目实战与模拟面试提升实战能力' },
-  { icon: School, color: '#FFEDD5', title: '跟踪投递进展', desc: '管理投递记录，跟踪求职全流程' }
+  { icon: Aim, color: 'var(--ai-primary-light, #DBEAFE)', title: '智能匹配岗位', desc: '基于简历与能力画像，精准推荐目标岗位' },
+  { icon: Edit, color: 'var(--ai-accent-alt-bg, #E0E7FF)', title: '定向提升能力', desc: '提供针对性的学习与训练建议' },
+  { icon: TrendCharts, color: 'var(--ai-success-bg, #D1FAE5)', title: '实战模拟练习', desc: '通过项目实战与模拟面试提升实战能力' },
+  { icon: School, color: 'var(--ai-warning-bg, #FFEDD5)', title: '跟踪投递进展', desc: '管理投递记录，跟踪求职全流程' }
 ]
 </script>
 
@@ -53,7 +55,7 @@ const features = [
   min-height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: linear-gradient(135deg, #{$ai-primary-light} 0%, #DBEAFE 100%);
+  background: linear-gradient(135deg, #{$ai-primary-light} 0%, var(--ai-primary-light, #DBEAFE) 100%);
 }
 
 .auth-wave {
@@ -67,7 +69,7 @@ const features = [
   right: -150px;
   width: 460px;
   height: 460px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--ai-auth-wave-top, rgba(255, 255, 255, 0.5));
 }
 
 .auth-wave--bottom {
@@ -75,7 +77,7 @@ const features = [
   left: -160px;
   width: 520px;
   height: 520px;
-  background: rgba(191, 219, 254, 0.38);
+  background: var(--ai-auth-wave-bottom, rgba(191, 219, 254, 0.38));
 }
 
 .brand-panel {

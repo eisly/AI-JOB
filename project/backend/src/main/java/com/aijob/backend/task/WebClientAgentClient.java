@@ -30,12 +30,15 @@ public class WebClientAgentClient implements AgentClient {
 
     private static final Map<String, String> PATHS = Map.ofEntries(
             Map.entry("RESUME_PARSE", "/internal/ai/v1/resumes/parse"),
+            Map.entry("RESUME_OCR", "/internal/ai/v1/resumes/ocr"),
             Map.entry("JD_ANALYZE", "/internal/ai/v1/jobs/analyze"),
             Map.entry("JOB_MATCH", "/internal/ai/v1/jobs/match"),
             Map.entry("JOB_SEARCH", "/internal/ai/v1/jobs/search"),
             Map.entry("LEARNING_PLAN", "/internal/ai/v1/learning/plans"),
             Map.entry("LEARNING_QUESTION", "/internal/ai/v1/learning/questions"),
             Map.entry("LEARNING_EVALUATE", "/internal/ai/v1/learning/evaluate"),
+            Map.entry("LEARNING_PRACTICE_QUESTIONS", "/internal/ai/v1/learning/practice/questions"),
+            Map.entry("LEARNING_PRACTICE_EVALUATE", "/internal/ai/v1/learning/practice/evaluate"),
             Map.entry("INTERVIEW_TURN", "/internal/ai/v1/interviews/turn"),
             Map.entry("INTERVIEW_REPORT", "/internal/ai/v1/interviews/report"),
             Map.entry("GROWTH_ANALYZE", "/internal/ai/v1/growth/analyze"),

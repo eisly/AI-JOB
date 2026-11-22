@@ -66,7 +66,7 @@ defineExpose({
   align-items: center;
 }
 .muted {
-  color: #909399;
+  color: var(--ai-text-tertiary, #909399);
   font-size: 12px;
   margin: 6px 0 0;
 }

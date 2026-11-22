@@ -12,7 +12,9 @@ tools: build_model_input,parse_model_output,validate_result_contract
 
 - 只提取文本中明确出现的信息；毕业年份、专业、学历无法确定时写 null。
 - skills 的 skillCode 必须来自 skillCatalog；目录中没有对应项时写入 unmappedSkills，不得自造 code。
-- 每条 skill 的 quote 必须是 documentText 中的逐字片段，保持原文，不要改写；location 使用 page:N、paragraph:N 或 text:N。
+- 技能识别必须覆盖全文：专业技能、项目经历和实习经历中明确写出的技能都要提取，不要只看「专业技能」章节。
+- 每条 skill 的 quote 必须是 documentText 中的逐字片段，保持原文，不要改写；location 使用 page:N、paragraph:N 或 text:N（最终位置由程序按原文重算）。
+- unmappedSkills 填写目录外技能在原文中的逐字名称，保持原样，不要改写或翻译。
 - confirmed 必须为 false，不要输出 true。
 - 实习不得自动计入全职 experienceMonths；如有歧义写入 warnings。
 - 将明确写出的实习和获奖/奖学金经历分别放入 internships、awards；每条都保留简历原文的逐字 quote 和位置，不能只放在 warnings 中。

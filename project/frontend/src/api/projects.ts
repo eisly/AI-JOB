@@ -1,9 +1,17 @@
 import { request } from './request'
 import { submitTrackedTask } from './task-registry'
-import type { MatchItemOptionVO, Page, PageQuery, ProjectRecommendationVO, ProjectSummaryVO, ProjectVO } from './types'
+import type { MatchItemOptionVO, Page, PageQuery, ProjectRecommendationVO, ProjectSummaryVO, ProjectVO, RepoPlatform } from './types'
 
 export const projectApi = {
-  recommend(body: { matchItemId?: string; skillCodes?: string[]; difficulty?: string; maxDurationWeeks?: number }) {
+  recommend(body: {
+    query?: string
+    sources?: RepoPlatform[]
+    techStackKeywords?: string[]
+    matchItemId?: string
+    skillCodes?: string[]
+    difficulty?: string
+    maxDurationWeeks?: number
+  }) {
     return submitTrackedTask('/api/v1/projects/recommendations', body, '/project?tab=recommendations')
   },
   matchItemOptions() {
@@ -11,6 +19,10 @@ export const projectApi = {
   },
   getRecommendation(recommendationId: string) {
     return request<ProjectRecommendationVO>(`/api/v1/projects/recommendations/${recommendationId}`)
+  },
+  moreRecommendations(recommendationId: string, afterBatchId: string) {
+    return submitTrackedTask(`/api/v1/projects/recommendations/${recommendationId}/more`, { afterBatchId },
+      `/project?tab=recommendations&recommendationId=${recommendationId}`)
   },
   createPlan(body: { recommendationItemId: string; weeklyHours: number }) {
     return submitTrackedTask('/api/v1/projects/plans', body, '/project?tab=projects')

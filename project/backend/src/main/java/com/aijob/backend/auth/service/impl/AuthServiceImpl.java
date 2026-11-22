@@ -7,7 +7,6 @@ import com.aijob.backend.auth.dto.ResetPasswordRequest;
 import com.aijob.backend.auth.security.JwtService;
 import com.aijob.backend.auth.security.UserPrincipal;
 import com.aijob.backend.auth.service.AuthService;
-import com.aijob.backend.auth.service.RateLimitService;
 import com.aijob.backend.auth.service.SessionService;
 import com.aijob.backend.auth.service.TokenRevocationService;
 import com.aijob.backend.auth.service.VerificationCodeService;
@@ -38,7 +37,6 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final SessionService sessionService;
-    private final RateLimitService rateLimitService;
     private final VerificationCodeService verificationCodeService;
     private final TokenRevocationService tokenRevocationService;
     private final MailService mailService;
@@ -49,7 +47,6 @@ public class AuthServiceImpl implements AuthService {
                            PasswordEncoder passwordEncoder,
                            JwtService jwtService,
                            SessionService sessionService,
-                           RateLimitService rateLimitService,
                            VerificationCodeService verificationCodeService,
                            TokenRevocationService tokenRevocationService,
                            MailService mailService,
@@ -59,7 +56,6 @@ public class AuthServiceImpl implements AuthService {
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.sessionService = sessionService;
-        this.rateLimitService = rateLimitService;
         this.verificationCodeService = verificationCodeService;
         this.tokenRevocationService = tokenRevocationService;
         this.mailService = mailService;
@@ -93,18 +89,13 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginOutcome login(LoginRequest request, String clientIp) {
+    public LoginOutcome login(LoginRequest request) {
         String email = normalizeEmail(request.email());
-        long retryAfter = rateLimitService.retryAfterSeconds(email, clientIp);
-        if (retryAfter > 0) {
-            throw new BusinessException(ApiErrorCode.RATE_LIMITED, "登录尝试过于频繁，请稍后再试", retryAfter);
-        }
         AppUserAuth user = appUserMapper.selectAuthByEmail(email);
         boolean credentialsMatch = user != null
                 && user.getPasswordHash() != null
                 && passwordEncoder.matches(request.password(), user.getPasswordHash());
         if (!credentialsMatch || !"ACTIVE".equals(user.getStatus())) {
-            rateLimitService.recordFailure(email, clientIp);
             throw new BusinessException(ApiErrorCode.UNAUTHENTICATED, "邮箱或密码错误");
         }
         String accessToken = jwtService.issue(user.getId(), user.getRole(), user.getTokenVersion());

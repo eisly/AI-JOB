@@ -79,19 +79,19 @@ function go(target: NavigationTarget | null): void {
 </template>
 
 <style scoped lang="scss">
-.panel { background: #fff; border: 1px solid #e8f0fa; border-radius: 10px; padding: 16px 18px 14px; }
+.panel { background: var(--ai-bg-card, #fff); border: 1px solid var(--ai-border-light, #e8f0fa); border-radius: 10px; padding: 16px 18px 14px; }
 .panel__heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
 .panel h2 { font-size: 18px; display: flex; align-items: center; gap: 10px; line-height: 1.4; }
-.panel h2 > .el-icon { color: #0861fc; font-size: 23px; }
-.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: #0662ff; font-size: 14px; cursor: pointer; }
-.activity-panel__refresh { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, #0c5cf5, transparent); background-size: 50% 100%; animation: activity-refresh 1.1s linear infinite; }
+.panel h2 > .el-icon { color: var(--ai-primary, #0861fc); font-size: 23px; }
+.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: var(--ai-primary, #0662ff); font-size: 14px; cursor: pointer; }
+.activity-panel__refresh { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--ai-primary-solid, #0c5cf5), transparent); background-size: 50% 100%; animation: activity-refresh 1.1s linear infinite; }
 @keyframes activity-refresh { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
 .activity-list { display: flex; flex-direction: column; gap: 6px; }
-.activity { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid #e7eff9; border-radius: 8px; background: #fff; text-align: left; cursor: default; }
+.activity { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--ai-border-light, #e7eff9); border-radius: 8px; background: var(--ai-bg-card, #fff); text-align: left; cursor: default; }
 .activity--link { cursor: pointer; }
-.activity--link:hover { border-color: #b9d4fb; background: #fbfdff; }
+.activity--link:hover { border-color: var(--ai-accent-border, #b9d4fb); background: var(--ai-bg-card, #fbfdff); }
 .activity:disabled { opacity: 1; }
-.activity__type { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; background: #eef5ff; color: #4d6a9c; font-size: 12px; }
-.activity__summary { flex: 1; min-width: 0; color: #33456f; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activity__time { flex: 0 0 auto; color: #8495b1; font-size: 12px; white-space: nowrap; }
+.activity__type { flex: 0 0 auto; padding: 1px 8px; border-radius: 999px; background: var(--ai-bg-light, #eef5ff); color: var(--ai-text-secondary, #4d6a9c); font-size: 12px; }
+.activity__summary { flex: 1; min-width: 0; color: var(--ai-text-secondary, #33456f); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity__time { flex: 0 0 auto; color: var(--ai-text-tertiary, #8495b1); font-size: 12px; white-space: nowrap; }
 </style>

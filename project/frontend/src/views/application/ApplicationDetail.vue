@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import AsyncState from '@/components/AsyncState.vue'
 import {
   APPLICATION_STATUS_LABELS,
   type ApplicationStatus,
@@ -15,10 +16,12 @@ const props = defineProps<{
   visible: boolean
   loading: boolean
   record: ApplicationVO | null
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
+  (e: 'retry'): void
 }>()
 
 const dialogVisible = computed({
@@ -56,7 +59,7 @@ const cityDisplay = computed(() => {
 
 <template>
   <el-dialog v-model="dialogVisible" title="投递记录详情" width="620px" top="8vh">
-    <div v-loading="loading" class="detail-body">
+    <AsyncState class="detail-body" :loading="loading" :error="error" :empty="!record" loading-text="正在加载投递详情" @retry="emit('retry')">
       <template v-if="record">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="公司名称" :span="2">{{ record.companyName }}</el-descriptions-item>
@@ -83,8 +86,7 @@ const cityDisplay = computed(() => {
           </el-descriptions-item>
         </el-descriptions>
       </template>
-      <el-empty v-else-if="!loading" description="暂无数据" />
-    </div>
+    </AsyncState>
     <template #footer>
       <el-button @click="dialogVisible = false">关闭</el-button>
     </template>

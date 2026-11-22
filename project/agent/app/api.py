@@ -28,11 +28,14 @@ from .operations import (
     JOB_SEARCH,
     LEARNING_EVALUATE,
     LEARNING_PLAN,
+    LEARNING_PRACTICE_EVALUATE,
+    LEARNING_PRACTICE_QUESTIONS,
     LEARNING_QUESTION,
     PROJECT_PLAN,
     PROJECT_RECOMMEND,
     RESUME_DIAGNOSE,
     RESUME_OPTIMIZE,
+    RESUME_OCR,
     RESUME_PARSE,
 )
 from .runner import RunService
@@ -290,6 +293,15 @@ def create_app(
     ) -> JSONResponse:
         return await submit(request, RESUME_PARSE, body, idempotency_key, principal)
 
+    @app.post("/internal/ai/v1/resumes/ocr", status_code=202)
+    async def resume_ocr(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, RESUME_OCR, body, idempotency_key, principal)
+
     @app.post("/internal/ai/v1/resumes/diagnose", status_code=202)
     async def resume_diagnose(
         request: Request,
@@ -361,6 +373,24 @@ def create_app(
         principal: Principal = Depends(principal_dependency),
     ) -> JSONResponse:
         return await submit(request, LEARNING_EVALUATE, body, idempotency_key, principal)
+
+    @app.post("/internal/ai/v1/learning/practice/questions", status_code=202)
+    async def learning_practice_questions(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, LEARNING_PRACTICE_QUESTIONS, body, idempotency_key, principal)
+
+    @app.post("/internal/ai/v1/learning/practice/evaluate", status_code=202)
+    async def learning_practice_evaluate(
+        request: Request,
+        body: AIRequestEnvelope,
+        idempotency_key: UUID = Header(alias="Idempotency-Key"),
+        principal: Principal = Depends(principal_dependency),
+    ) -> JSONResponse:
+        return await submit(request, LEARNING_PRACTICE_EVALUATE, body, idempotency_key, principal)
 
     @app.post("/internal/ai/v1/interviews/turn", status_code=202)
     async def interview_turn(

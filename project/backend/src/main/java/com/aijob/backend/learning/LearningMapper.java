@@ -341,13 +341,19 @@ public interface LearningMapper {
                           @Param("lastAnswerId") String lastAnswerId);
 
     @Update("""
+            UPDATE learning_session SET evaluation_task_id=#{taskId},version=version+1,updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status='EVALUATING' AND session_kind='GROUP'
+            """)
+    int practiceEvaluationRetried(@Param("id") String id, @Param("taskId") String taskId);
+
+    @Update("""
             UPDATE learning_session SET status='COMPLETED',result_json=#{resultJson},version=version+1,
               updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='EVALUATING'
             """)
     int practiceCompleted(@Param("id") String id, @Param("resultJson") String resultJson);
 
     @Select("""
-            SELECT question_id FROM learning_session_question sq
+            SELECT sq.question_id FROM learning_session_question sq
             JOIN learning_session s ON s.id=sq.session_id WHERE s.user_id=#{userId}
             """)
     List<String> usedSessionQuestionIds(@Param("userId") String userId);

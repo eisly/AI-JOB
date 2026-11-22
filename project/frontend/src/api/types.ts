@@ -101,6 +101,12 @@ export interface ResumeFacts {
   warnings: string[]
 }
 
+export interface UnmappedSkillDetail {
+  name: string
+  quote: string
+  location: string
+}
+
 export interface ResumeVersionVO {
   id: string
   resumeId: string
@@ -111,6 +117,9 @@ export interface ResumeVersionVO {
   status: 'UPLOADED' | 'PARSING' | 'PARSED' | 'CONFIRMED' | 'FAILED' | 'DELETED'
   facts: ResumeFacts | null
   parsedFacts: ResumeFacts | null
+  textLayoutVersion?: string | null
+  ocrPages?: number[] | null
+  parseMeta?: { unmappedDetails?: UnmappedSkillDetail[]; [key: string]: unknown } | null
   createdAt: string
 }
 
@@ -166,18 +175,60 @@ export interface SkillVO {
 export interface DiagnosisItem {
   id: string
   priority: 'IMPORTANT' | 'SUGGESTION' | 'NOTICE'
+  dimensionCode?: AssessmentDimensionCode | null
+  checkCode?: string | null
   title: string
   issue: string
   quote: string
+  quotes?: string[]
   rationale: string
+  impact?: string | null
   suggestion: string
+  example?: string | null
+  pendingVerification?: string[]
+}
+
+export type AssessmentDimensionCode = 'EXPERIENCE_PROJECTS' | 'SKILLS_EVIDENCE' | 'CONTENT_COMPLETENESS' | 'STRUCTURE_CLARITY' | 'EXPRESSION_PROFESSIONALISM'
+
+export interface AssessmentDimension {
+  code: AssessmentDimensionCode
+  label?: string
+  score: number
+  maxScore?: number
+  rationale: string
+  quote: string | null
+  quotes?: string[]
+  criteria?: { code: string; label: string; score: number; maxScore: number }[]
+}
+
+export interface AssessmentStrength {
+  title: string
+  quote: string
+  quotes?: string[]
+  description: string
+  approach?: string | null
+  contribution?: string | null
+  result?: string | null
+}
+
+export interface ResumeAssessmentVO {
+  ruleVersion: string
+  summary?: string | null
+  totalScore: number
+  dimensions: AssessmentDimension[]
+  strengths: AssessmentStrength[]
+  assessedAt: string
 }
 
 export interface ResumeDiagnosisVO {
   id: string
+  taskId?: string | null
   resumeVersionId: string
   status: 'GENERATING' | 'READY' | 'FAILED'
   items: DiagnosisItem[]
+  assessment: ResumeAssessmentVO | null
+  readOrderVerified?: boolean
+  textLayoutVersion?: string | null
   createdAt: string
 }
 
@@ -670,6 +721,8 @@ export interface PracticeSetVO {
   /** 乐观锁版本号 */
   version: number
   generatedAt?: string
+  evaluationTaskId?: string | null
+  lastAnswerId?: string | null
 }
 
 /** 单题作答载荷 */
@@ -725,6 +778,22 @@ export interface PracticeSetResultVO {
   questionResults: PracticeQuestionResultVO[]
 }
 
+export type RepoPlatform = 'GITHUB' | 'GITEE' | 'GITCODE'
+
+export interface RepositorySourceVO {
+  platform: RepoPlatform
+  path: string
+  url: string
+  license: string
+  readmeUrl: string | null
+}
+
+export interface RepositorySourceRunVO {
+  platform: RepoPlatform
+  status: 'SUCCEEDED' | 'FAILED'
+  reason: string | null
+}
+
 export interface ProjectRecommendationItem {
   id: string
   title: string
@@ -733,14 +802,29 @@ export interface ProjectRecommendationItem {
   difficulty: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'
   estimatedWeeks: number
   reason: string
+  gettingStarted: string[]
   deliverables: string[]
+  primarySource: RepositorySourceVO | null
+  alternateSources: RepositorySourceVO[]
+  stackEvidence?: Array<{
+    keyword: string
+    status: 'VERIFIED' | 'DOCUMENTED'
+    path: string
+    url: string
+  }>
 }
 
 export interface ProjectRecommendationVO {
   id: string
+  mode: 'REPOSITORY' | 'LEGACY_IDEA'
   status: 'GENERATING' | 'READY' | 'FAILED'
+  sourceRuns: RepositorySourceRunVO[]
   items: ProjectRecommendationItem[]
   createdAt: string
+  afterBatchId?: string
+  hasMore?: boolean
+  searchLimitReached?: boolean
+  continuationTaskId?: string
 }
 
 export interface ProjectTaskVO {
@@ -774,6 +858,7 @@ export interface ProjectVO {
   taskId: string
   title: string | null
   summary: string | null
+  primarySource: RepositorySourceVO | null
   status: 'GENERATING' | 'ACTIVE' | 'COMPLETED' | 'FAILED'
   progress: number
   weeklyHours: number

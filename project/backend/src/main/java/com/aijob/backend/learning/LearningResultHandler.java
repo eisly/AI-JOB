@@ -111,7 +111,11 @@ public class LearningResultHandler implements TaskResultHandler {
                 mapper.answerSubmitted(String.valueOf(answer.get("session_id")), original.getResourceId());
             }
             case "LEARNING_PRACTICE_QUESTIONS" -> mapper.updateSessionStatus(original.getResourceId(), "PREPARING");
-            case "LEARNING_PRACTICE_EVALUATE" -> mapper.updateSessionStatus(original.getResourceId(), "EVALUATING");
+            case "LEARNING_PRACTICE_EVALUATE" -> {
+                if (mapper.practiceEvaluationRetried(original.getResourceId(), newTaskId) == 0) {
+                    throw BusinessException.conflict("练习评估状态已变化", "INVALID_STATE");
+                }
+            }
             default -> throw BusinessException.conflict("不支持的任务重试", "INVALID_STATE");
         }
     }

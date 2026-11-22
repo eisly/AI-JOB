@@ -70,16 +70,16 @@ const stateLabel = computed(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  color: #606266;
+  color: var(--ai-text-secondary, #606266);
 }
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #c0c4cc;
+  background: var(--ai-bg-light, #c0c4cc);
 }
 .status-dot.recording {
-  background: #f56c6c;
+  background: var(--ai-danger-bg, #f56c6c);
   animation: pulse 1s infinite;
 }
 .recording-controls__actions {

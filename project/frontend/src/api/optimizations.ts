@@ -9,6 +9,11 @@ export const optimizationApi = {
   getDiagnosis(diagnosisId: string) {
     return request<ResumeDiagnosisVO>(`/api/v1/resume-optimizations/diagnoses/${diagnosisId}`)
   },
+  exportDiagnosis(diagnosisId: string) {
+    return downloadBinary(`/api/v1/resume-optimizations/diagnoses/${diagnosisId}/export`, {
+      fallbackName: `resume-assessment-${diagnosisId}.pdf`,
+    })
+  },
   listDiagnoses(query: PageQuery & { resumeVersionId?: string }) {
     return request<Page<ResumeDiagnosisVO>>('/api/v1/resume-optimizations/diagnoses', { query })
   },

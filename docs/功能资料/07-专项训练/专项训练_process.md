@@ -1155,3 +1155,169 @@ esult_json、evaluation_task_id，状态机增加 SUBMITTED。
 **遗留问题：** 未以用户账号提交真实简历生成计划，模型端到端结果未验证。
 
 ---
+
+### [2026-11-21 14:24] 按 Figma 梳理专项训练页面与导航
+
+**任务目标：** 将用户确认的 Figma 浅深原型接入现有专项训练前端。
+
+**执行行为：** 核对首页画板和各流程图稿，保留既有计划、出题、答题、错题和任务追踪接口。梳理默认计划、训练单元详情、整组出题和新建计划的路由状态，为独立练习页面提供共享顶栏与主题切换。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/frontend/src/components/training/TrainingFlowHeader.vue` | 训练流程返回、上下文及浅深切换 | 对应原型的独立流程顶栏 |
+| 修改 | `project/frontend/src/layouts/MainLayout.vue`、`project/frontend/src/layouts/components/Header.vue` | 专项训练首页的面包屑与布局、练习流程专注布局 | 支持工作区与独立流程 |
+| 修改 | `project/frontend/src/views/training/TrainingView.vue` | 计划、单元、出题和错题导航与表单校验 | 复用现有业务调用 |
+
+**执行命令与验证：** 使用 `rg` 与 `Get-Content` 核查现有路由、接口与视图，并用 Figma 截图核对主画板。模板和交互回归待完成。
+
+**影响范围：** 前端专项训练及相关主框架分支。日志追加到实际工作树的 `docs/功能资料`。
+
+**遗留问题：** 继续完成视图、适配答题和复盘，随后执行构建与浏览器验证。
+
+---
+
+### [2026-11-21 14:33] 完成训练页面、答题与复盘布局
+
+**任务目标：** 实现 Figma 中的训练工作区和独立流程，并保留现有业务入口。
+
+**执行行为：** 首页按下一项训练、训练单元和当前计划组织。计划库、单元详情、新建计划、配置题组和错题解析使用独立页面。继续复用题型分配、题组校验、草稿、任务跟踪和旧版会话。答题改为主答题区与右侧题号进度，结果保留逐题反馈且可筛选需要复盘的题。已评估练习刷新时重读结果，结果查询失败时保留草稿。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/views/training/TrainingView.vue` | 首页、计划库、单元、出题、新建计划、错题解析及响应式样式 | 落地 Figma 页面 |
+| 修改 | `project/frontend/src/views/training/TrainingSessionView.vue` | 答题进度侧栏、评估摘要、逐题筛选和刷新恢复 | 落地答题及复盘设计 |
+| 修改 | `project/frontend/src/views/training/PracticePrepareView.vue` | 复用流程顶栏并保留原验证与重试 | 连接异步出题 |
+| 修改 | `project/frontend/src/components/training/QuestionRenderer.vue` | 调整题干层级和间距 | 对齐答题画板 |
+
+**执行命令与验证：** 首次 `npm.cmd run type-check` 发现岗位选项标题可能为 null，已加回退文本。`git diff --check` 未报告空白错误，Git 提示部分文件换行可能转换。最新构建和浏览器验收待执行。
+
+**影响范围：** 专项训练前端。现有 API、任务契约和数据库未改动。
+
+**遗留问题：** 验证页面重载、出题到复盘、错题重练以及浅深主题。
+
+---
+
+### [2026-11-21 14:39] 完成专项训练兼容性与浏览器验收
+
+**任务目标：** 确认 Figma 版本已连接既有训练流程，并验证桌面、手机与历史练习链接。
+
+**执行行为：** 补齐已提交题组的只读状态、错题详情重载与旧版已完成会话的状态映射。自动生成的全局组件类型只移除本次衍生项，保留原有改动。核对本机开发站点是否已提供新版训练组件。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/api/training.ts` | 将旧版已完成会话映射为已评估 | 打开历史练习时正确读取结果 |
+| 修改 | `project/frontend/src/views/training/TrainingView.vue`、`project/frontend/src/views/training/TrainingSessionView.vue` | 恢复错题详情、锁定已提交答案、使用服务端复盘条件 | 保持刷新与旧数据兼容 |
+| 修改并恢复生成项 | `project/frontend/src/components.d.ts` | 移除本次 Vite 自动添加的全局组件声明 | 训练流程顶栏已显式导入 |
+
+**执行命令与验证：**
+
+- `npm.cmd run build -- --outDir <临时路径>` 通过，含 `vue-tsc --noEmit`。Vite 报告主包体积提示。
+- Playwright 与 Chrome 使用模拟 API。验证默认计划、计划切换、单元详情、阅读自评、题型合计不符时禁止提交、异步出题、三种题型作答、交卷取消、逐题复盘筛选、报告和错题刷新、单题重练、选简历生成计划、旧版已完成会话、主题切换和 390 像素布局。首轮测试点击 Element Plus 下拉的内部输入被显示文本遮挡，改为点击控件外层后通过。最终运行退出码 0。
+- `Invoke-WebRequest` 读取本机 5173 和 5184 的训练组件，返回 HTTP 200，确认包含新版布局。5183 未建立连接，验收使用独立的 5198 端口，测试服务用完即退出。
+
+**影响范围：** AI-JOB 专项训练前端。本机 5173 已加载新版源文件，未部署构建产物。
+
+**遗留问题：** 浏览器验证使用模拟接口，未在真实账号发起出题、评分或计划生成。
+
+---
+
+### [2026-11-21 19:21] 修复整组出题查询中的同名列
+
+**任务目标：** 修复题量分配正确时点击「生成并开始练习」仍返回 HTTP 500 的问题。
+
+**执行行为：** 核对正在运行的 Java 日志，确认 `POST /api/v1/learning/practice-sets` 在 `LearningMapper.usedSessionQuestionIds` 执行 `SELECT question_id` 时被 MySQL 拒绝。关联的 `learning_session_question` 与 `learning_session` 均有 `question_id`。将查询列限定为 `sq.question_id`，保留会话所属用户过滤。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/learning/LearningMapper.java` | 显式查询题组明细的 `sq.question_id` | 消除列歧义并保持历史题目去重 |
+
+**执行命令与验证：** `rg` 与 `Get-Content` 核对实际日志中的 SQL、MyBatis 调用点及异常。已修正源代码，MySQL 和服务验收待执行。
+
+**影响范围：** 整组出题在创建任务前的历史查重。没有引入数据库迁移。
+
+**遗留问题：** 验证 SQL 与实际出题，并更新正在监听 8080 的后端实例。
+
+---
+
+### [2026-11-21 19:25] 执行真实 MySQL 回归并重启 Java 后端
+
+**任务目标：** 确认 MyBatis 查询在真实库执行通过，并让本地运行实例加载修复。
+
+**执行行为：** 用现有只读 MySQL 测试类增加回归用例，使用测试 UUID 触发同一查询。重启前确认业务库版本为 V18，查询无排队或运行中的 AI 任务。重启原 8080 后端并将 Flyway 目标保持在 V18，检查新实例启动日志。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/DatabaseQueryTest.java` | 新增真实 MyBatis 历史题目查询测试 | 覆盖同名列导致的 MySQL 错误 |
+| 新增 | `project/backend/target/local-restarts/practice-500-20261121-192408/` | 记录本地 Java 重启的输出，目录由 Git 忽略 | 核实 Flyway 和服务启动 |
+
+**执行命令与验证：** `mvn.cmd -o -B -Dtest=DatabaseQueryTest#practiceHistoryQueryWorksWhenBothTablesHaveQuestionId -DmysqlIt=true -Dapp.agent.scheduler-enabled=false test`，1 项通过。Java 使用 `spring-boot:run` 启动，Tomcat 监听 8080，Flyway 报告无需迁移，前端和 Agent 就绪端点返回 HTTP 200。
+
+**影响范围：** 本地 Java 后端进程。没有执行新迁移。
+
+**遗留问题：** 使用隔离测试账号通过浏览器验证题组完整生成。
+
+---
+
+### [2026-11-21 19:28] 接通整组出题与交卷评分的 Agent 派发
+
+**任务目标：** 修复初始 500 后端到端验收发现的任务派发失败，并覆盖交卷时同类断点。
+
+**执行行为：** 测试账号在 Chrome 提交 4 道选择题、3 道填空题、3 道主观题，Java 已返回 HTTP 202。任务随后在 Outbox 派发失败。核对代码发现 Java 的操作映射和 Agent HTTP 路由均缺少整组出题与评分，虽已有对应处理器。增加对应路由，复用原有内部鉴权、幂等和任务派发机制。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/task/WebClientAgentClient.java` | 增加整组出题与评分的操作映射 | 让 Outbox 能发送请求 |
+| 修改 | `project/agent/app/api.py` | 添加 `/internal/ai/v1/learning/practice/questions` 和 `/internal/ai/v1/learning/practice/evaluate` | 将请求交给既有生成和评价处理器 |
+| 修改 | `project/agent/tests/test_practice_handlers.py` | 新增经鉴权 HTTP 接收到任务成功的回归用例 | 覆盖内存和 SQLite 两种存储 |
+
+**执行命令与验证：** 真实浏览器首轮确认出题请求为 HTTP 202，任务因缺失派发路由失败。`rg` 核对 Java 路由映射与 Agent 应用路由。修复后的定向测试和服务复测待执行。
+
+**影响范围：** 整组出题、整组交卷评分以及相关任务重试。
+
+**遗留问题：** 重启 Java 和 Agent 后，对 10 题配置以及交卷评分继续做真实浏览器验证。
+
+---
+
+### [2026-11-21 19:31] 验证派发接口并加载修复
+
+**任务目标：** 验证出题及评分的新派发入口，并让本机 Java 和 Agent 加载改动。
+
+**执行行为：** 分别执行 Java 和 Agent 定向测试。确认 Agent 无活动任务后，重启 8080 Java 与 8100 Agent，保留本机原有代理与 V18 迁移目标。首轮派发失败验收已退出，清理了该轮独立测试账号与记录。
+
+**文件变更：** 新增 `project/backend/target/local-restarts/practice-dispatch-20261121-193007/` 下的运行日志，目录由 Git 忽略。
+
+**执行命令与验证：** `python -m pytest -o addopts= -q tests/test_practice_handlers.py`，8 项通过，含内存与 SQLite 的实际 ASGI 派发。Maven 定向运行 `DatabaseQueryTest` 的回归用例、`PracticeServiceGradingTest` 与 `OutboxSchedulerTest`，共 5 项通过。Java 和 Agent 均已启动，Flyway 报告无需迁移。
+
+**影响范围：** 整组练习的 Java/Agent 派发及本机服务。
+
+**遗留问题：** 正在执行真实页面的 10 题生成及评分复测。
+
+---
+
+### [2026-11-21 19:32] 完成真实浏览器整组出题和交卷验收
+
+**任务目标：** 用截图相同的 Redis Stream、AI 应用开发工程师、进阶和 10 道题设置确认修复生效。
+
+**执行行为：** 使用临时测试账号和合成训练计划，Chrome 连接本机 5173 前端和 8080 Java 后端，通过实际 8100 Agent 和 DeepSeek 生成题目。逐题输入合成答案后交卷，确认结果页显示并读取完整评估。测试结束后仅清理该轮创建的 MySQL 测试账号与相关数据。
+
+**文件变更：** 无新增源代码变更。本机服务日志记录了运行过程，Agent SQLite 留有正常运行历史。
+
+**执行命令与验证：** 通过 Playwright、Chrome 与实际服务交互，整组出题和交卷请求均返回 HTTP 202，两个异步任务均为 `SUCCEEDED`。答题页实得 10 题，4 道选择、3 道填空、3 道主观。结果页有 10 道题的评估，其中 7 道客观题和 3 道主观题。测试账号清理验证通过。`git diff --check` 无新增空白错误。
+
+**影响范围：** 本机专项训练整组出题、答题和交卷评分，业务库仍为 V18。
+
+**遗留问题：** 未代用户在原账号中创建练习或交卷。
+
+---

@@ -167,6 +167,6 @@ a {
 
 .home-facts dd {
   margin: 0;
-  color: #1e293b;
+  color: var(--ai-text-primary, #1e293b);
   word-break: break-all;
 }

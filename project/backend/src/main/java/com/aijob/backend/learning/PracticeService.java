@@ -270,6 +270,7 @@ public class PracticeService {
         result.put("version", session.get("version"));
         result.put("generatedAt", view.value(session.get("created_at")));
         result.put("lastAnswerId", session.get("last_answer_id"));
+        result.put("evaluationTaskId", session.get("evaluation_task_id"));
         return result;
     }
 

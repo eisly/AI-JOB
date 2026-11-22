@@ -466,7 +466,7 @@ def project_plan_envelope(task_id: UUID) -> dict[str, Any]:
 
 OPERATION_CASES: list[tuple[str, str, Callable[[UUID], dict[str, Any]], set[str]]] = [
     ("/internal/ai/v1/resumes/parse", "RESUME_PARSE", resume_envelope, {"facts", "textHash", "unmappedSkills"}),
-    ("/internal/ai/v1/resumes/diagnose", "RESUME_DIAGNOSE", resume_diagnose_envelope, {"items"}),
+    ("/internal/ai/v1/resumes/diagnose", "RESUME_DIAGNOSE", resume_diagnose_envelope, {"items", "assessment"}),
     ("/internal/ai/v1/resumes/optimize", "RESUME_OPTIMIZE", resume_optimize_envelope, {"title", "sections"}),
     ("/internal/ai/v1/jobs/analyze", "JD_ANALYZE", jd_envelope, {"requirements", "salary", "warnings"}),
     ("/internal/ai/v1/jobs/match", "JOB_MATCH", match_envelope, {"items"}),

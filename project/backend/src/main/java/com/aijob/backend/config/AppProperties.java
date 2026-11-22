@@ -16,7 +16,7 @@ public record AppProperties(
     public record Session(long refreshTtlSeconds, String cookieName, String cookiePath, boolean secure, String sameSite) {
     }
 
-    public record Security(String frontendOrigin, int loginRateLimit, long loginRateWindowSeconds) {
+    public record Security(String frontendOrigin) {
     }
 
     public record Mail(String from, boolean exposeCodeInResponse) {

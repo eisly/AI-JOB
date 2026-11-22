@@ -21,6 +21,7 @@ from app.schemas import (
     LearningPracticeEvaluatePayload,
     LearningPracticeQuestionsPayload,
 )
+from tests.factories import envelope, wait_for_run
 
 RUBRIC = {
     "version": "technical-answer-v1",
@@ -82,6 +83,29 @@ def context(payload, operation: str) -> ExecutionContext:
         files=FileFetcher(settings),
         emit_stage=emit_stage,
     )
+
+
+@pytest.mark.parametrize(
+    "path,operation,payload_factory,version_key,result_key",
+    [
+        ("questions", "LEARNING_PRACTICE_QUESTIONS", practice_questions_payload, "profileVersion", "questions"),
+        ("evaluate", "LEARNING_PRACTICE_EVALUATE", practice_evaluate_payload, "practiceSetVersion", "evaluations"),
+    ],
+)
+async def test_practice_routes_dispatch_and_complete(client, headers_for, path, operation, payload_factory, version_key, result_key):
+    task_id = uuid4()
+    payload = payload_factory().model_dump(mode="json", by_alias=True)
+    response = await client.post(
+        f"/internal/ai/v1/learning/practice/{path}",
+        json=envelope(task_id, payload, {version_key: 1}),
+        headers={**headers_for(str(task_id)), "Idempotency-Key": str(uuid4())},
+    )
+    assert response.status_code == 202, response.text
+    run = response.json()["data"]
+    assert run["operation"] == operation
+    terminal = await wait_for_run(client, headers_for, run["runId"], str(task_id))
+    assert terminal["status"] == "SUCCEEDED", terminal
+    assert terminal["result"][result_key]
 
 
 def test_practice_config_requires_distribution_sum():

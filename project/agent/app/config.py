@@ -139,6 +139,24 @@ class Settings(BaseSettings):
     file_allowed_schemes: str = "https"
     file_download_timeout_seconds: float = 10.0
 
+    # 图片 PDF OCR：本机 Tesseract 5（含 chi_sim+eng 语言包）。
+    tesseract_cmd: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TESSERACT_CMD", "AGENT_TESSERACT_CMD"),
+    )
+    tessdata_dir: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("TESSDATA_DIR", "AGENT_TESSDATA_DIR"),
+    )
+    ocr_langs: str = Field(
+        default="chi_sim+eng",
+        validation_alias=AliasChoices("AGENT_OCR_LANGS", "OCR_LANGS"),
+    )
+    ocr_dpi: int = Field(default=200, ge=72, le=400)
+    ocr_max_pages: int = Field(default=30, ge=1, le=100)
+    ocr_max_seconds: float = Field(default=240.0, gt=0)
+    ocr_page_timeout_seconds: float = Field(default=60.0, gt=0)
+
     tavily_api_key: str | None = Field(default=None, repr=False, validation_alias="TAVILY_API_KEY")
     brave_search_api_key: str | None = Field(default=None, repr=False, validation_alias="BRAVE_SEARCH_API_KEY")
     job_search_company_sites: str = "{}"
@@ -192,6 +210,15 @@ class Settings(BaseSettings):
     github_search_cache_ttl_seconds: int = 3600
     github_search_trust_env: bool = False
     github_search_user_agent: str = "AI-JOB-Agent/1.0 (+learning-plan; contact: local-agent)"
+
+    # 项目实战推荐：GitHub / Gitee / GitCode 公开仓库检索。
+    repository_search_timeout_seconds: float = Field(default=12.0, gt=0)
+    repository_search_per_page: int = Field(default=10, ge=1, le=20)
+    repository_search_max_candidates: int = Field(default=6, ge=1, le=6)
+    repository_search_trust_env: bool = False
+    repository_search_user_agent: str = "AI-JOB-Agent/1.0 (+project-recommend; contact: local-agent)"
+    gitee_token: str | None = Field(default=None, repr=False, validation_alias="GITEE_TOKEN")
+    gitcode_token: str | None = Field(default=None, repr=False, validation_alias="GITCODE_TOKEN")
 
     @field_validator("log_level")
     @classmethod

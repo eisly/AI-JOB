@@ -56,6 +56,17 @@ public class ResumeOptimizationController {
         return Responses.ok(optimizations.diagnosis(users.resolveCurrentUserId(), Data.uuid(diagnosisId, "diagnosisId")));
     }
 
+    @GetMapping("/diagnoses/{diagnosisId}/export")
+    public ResponseEntity<byte[]> exportDiagnosis(@PathVariable String diagnosisId) {
+        ResumeOptimizationService.ExportContent content = optimizations.exportDiagnosis(
+                users.resolveCurrentUserId(), Data.uuid(diagnosisId, "diagnosisId"));
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(content.mediaType()))
+                .contentLength(content.bytes().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(content.fileName(), StandardCharsets.UTF_8).build().toString())
+                .body(content.bytes());
+    }
+
     @PostMapping
     public ResponseEntity<CommonResult<Object>> optimize(@RequestHeader("Idempotency-Key") String key,
                                                           @RequestBody Map<String, Object> body,

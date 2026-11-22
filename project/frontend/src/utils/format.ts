@@ -20,6 +20,8 @@ export const taskTypeLabels: Record<string, string> = {
   LEARNING_PLAN: '生成训练计划',
   LEARNING_QUESTION: '准备训练题',
   LEARNING_EVALUATE: '训练评价',
+  LEARNING_PRACTICE_QUESTIONS: '准备整组练习',
+  LEARNING_PRACTICE_EVALUATE: '整组练习评估',
   PROJECT_RECOMMEND: '项目推荐',
   PROJECT_PLAN: '生成项目计划',
   INTERVIEW_TURN: '面试对话生成',
@@ -36,7 +38,8 @@ export const taskStageLabels: Record<string, string> = {
   calling_model: '正在调用模型',
   repairing_output: '正在修正模型输出',
   validating_result: '正在校验结果',
-  using_local_project_rules: '正在生成本地规则方案',
+  using_local_project_rules: '正在基于已选仓库生成规则化计划',
+  using_repository_hints: '正在整理候选仓库',
   search_planning: '正在规划搜索',
   searching_sources: '正在检索岗位来源',
   search_candidates_available: '已获得候选岗位',
@@ -44,6 +47,11 @@ export const taskStageLabels: Record<string, string> = {
   search_normalizing: '正在归一化岗位数据',
   understanding_jd: '正在理解 JD',
   finalizing_result: '正在汇总结果',
+}
+
+export function taskStageText(task: { status?: string; stage?: string | null }): string {
+  if (task.status === 'RUNNING') return taskStageLabels[task.stage || ''] || '处理中'
+  return taskStatusLabels[task.status || ''] || '等待任务状态'
 }
 
 export const commonStatusLabels: Record<string, string> = {

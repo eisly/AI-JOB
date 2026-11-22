@@ -34,12 +34,13 @@ async function verify(server) {
   const now = new Date().toISOString()
   const tasks = [
     { id: 't2', type: 'JOB_MATCH', status: 'QUEUED', progress: null, createdAt: now },
-    { id: 't1', type: 'RESUME_PARSE', status: 'RUNNING', progress: 40, createdAt: '2026-01-01T00:00:00Z' },
+    { id: 't1', type: 'RESUME_PARSE', status: 'RUNNING', stage: 'calling_model', progress: 40, createdAt: '2026-01-01T00:00:00Z' },
   ]
   const next = buildNextTask({ tasks, plans: [], profile, profileOk: true })
   assert.strictEqual(next.suggestion.kind, 'TASK')
   assert.strictEqual(next.suggestion.title, '简历解析')
-  assert.strictEqual(next.suggestion.progress, 40)
+  assert.strictEqual(next.suggestion.stage, '正在调用模型')
+  assert.strictEqual(next.suggestion.progress, undefined)
 
   const planNext = buildNextTask({
     tasks: [],

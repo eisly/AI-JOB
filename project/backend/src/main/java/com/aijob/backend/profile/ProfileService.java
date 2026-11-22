@@ -110,6 +110,15 @@ public class ProfileService {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("code", row.get("code"));
             item.put("name", row.get("name"));
+            String aliases = row.get("aliases") == null ? "" : String.valueOf(row.get("aliases"));
+            List<String> aliasList = new ArrayList<>();
+            for (String alias : aliases.split(";")) {
+                String trimmed = alias.strip();
+                if (!trimmed.isEmpty() && !aliasList.contains(trimmed)) {
+                    aliasList.add(trimmed);
+                }
+            }
+            item.put("aliases", aliasList);
             return item;
         }).toList();
     }

@@ -23,7 +23,7 @@ const detailTarget = computed(() => resolveRoute({ name: 'growth', label: 'æŸ¥çœ
 const ringStyle = computed(() => {
   const value = percent.value ?? 0
   return {
-    background: `conic-gradient(#0c5cf5 ${value}%, #e6effb ${value}% 100%)`,
+    background: `conic-gradient(var(--ai-primary, #0c5cf5) ${value}%, var(--ai-bg-light, #e6effb) ${value}% 100%)`,
   }
 })
 
@@ -123,36 +123,36 @@ function go(target: NavigationTarget | null): void {
 </template>
 
 <style scoped lang="scss">
-.panel { background: #fff; border: 1px solid #e8f0fa; border-radius: 10px; padding: 16px 18px 14px; }
+.panel { background: var(--ai-bg-card, #fff); border: 1px solid var(--ai-border-light, #e8f0fa); border-radius: 10px; padding: 16px 18px 14px; }
 .panel__heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
 .panel h2 { font-size: 18px; display: flex; align-items: center; gap: 10px; line-height: 1.4; }
-.panel h2 > .el-icon { color: #0861fc; font-size: 23px; }
-.panel h2 small { color: #7284a5; font-size: 14px; font-weight: 400; margin-left: 8px; }
-.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: #0662ff; font-size: 14px; cursor: pointer; }
-.progress-panel__refresh { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, #0c5cf5, transparent); background-size: 50% 100%; animation: progress-refresh 1.1s linear infinite; }
+.panel h2 > .el-icon { color: var(--ai-primary, #0861fc); font-size: 23px; }
+.panel h2 small { color: var(--ai-text-secondary, #7284a5); font-size: 14px; font-weight: 400; margin-left: 8px; }
+.panel__link { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; white-space: nowrap; color: var(--ai-primary, #0662ff); font-size: 14px; cursor: pointer; }
+.progress-panel__refresh { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--ai-primary-solid, #0c5cf5), transparent); background-size: 50% 100%; animation: progress-refresh 1.1s linear infinite; }
 @keyframes progress-refresh { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
 .progress-overview { display: flex; align-items: center; gap: 24px; margin-bottom: 18px; }
 .progress-ring { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; }
-.progress-ring__inner { width: 104px; height: 104px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; }
-.progress-ring__inner strong { color: #0b1746; font-size: 26px; line-height: 1.1; }
-.progress-ring__inner strong.progress-ring__unknown { font-size: 13px; color: #7184a6; }
-.progress-ring__inner span { color: #8495b1; font-size: 11px; }
-.progress-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: #7184a6; }
+.progress-ring__inner { width: 104px; height: 104px; border-radius: 50%; background: var(--ai-bg-card, #fff); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; }
+.progress-ring__inner strong { color: var(--ai-text-primary, #0b1746); font-size: 26px; line-height: 1.1; }
+.progress-ring__inner strong.progress-ring__unknown { font-size: 13px; color: var(--ai-text-secondary, #7184a6); }
+.progress-ring__inner span { color: var(--ai-text-tertiary, #8495b1); font-size: 11px; }
+.progress-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--ai-text-secondary, #7184a6); }
 .progress-meta__tip { line-height: 1.5; }
-.progress-meta__retry { border: 1px solid #d8e5f6; background: #fff; color: #0c5cf5; cursor: pointer; padding: 7px 12px; border-radius: 7px; }
+.progress-meta__retry { border: 1px solid var(--ai-accent-border, #d8e5f6); background: var(--ai-bg-card, #fff); color: var(--ai-primary, #0c5cf5); cursor: pointer; padding: 7px 12px; border-radius: 7px; }
 .stage-list { display: flex; flex-direction: column; gap: 8px; }
-.stage { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e7eff9; border-radius: 8px; background: #fbfdff; }
-.stage__dot { width: 9px; height: 9px; border-radius: 50%; background: #c3d3e8; flex: 0 0 auto; }
+.stage { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--ai-border-light, #e7eff9); border-radius: 8px; background: var(--ai-bg-card, #fbfdff); }
+.stage__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ai-primary-light, #c3d3e8); flex: 0 0 auto; }
 .stage--done .stage__dot { background: #10b981; }
 .stage--pending .stage__dot { background: #f59e0b; }
-.stage--unknown .stage__dot { background: #9ca3af; }
+.stage--unknown .stage__dot { background: var(--ai-primary-solid, #9ca3af); }
 .stage__content { flex: 1; min-width: 0; }
-.stage__title { color: #1b2a4e; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
-.stage__priority { padding: 1px 7px; border-radius: 999px; background: #eef5ff; color: #0c5cf5; font-size: 11px; font-weight: 600; }
-.stage__note { color: #8495b1; font-size: 12px; margin-top: 3px; }
-.stage__status { color: #7184a6; font-size: 12px; white-space: nowrap; }
-.stage--done .stage__status { color: #0f9d70; }
-.stage__link { border: 0; background: transparent; color: #0c5cf5; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; padding: 0; }
+.stage__title { color: var(--ai-text-primary, #1b2a4e); font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.stage__priority { padding: 1px 7px; border-radius: 999px; background: var(--ai-bg-light, #eef5ff); color: var(--ai-primary, #0c5cf5); font-size: 11px; font-weight: 600; }
+.stage__note { color: var(--ai-text-tertiary, #8495b1); font-size: 12px; margin-top: 3px; }
+.stage__status { color: var(--ai-text-secondary, #7184a6); font-size: 12px; white-space: nowrap; }
+.stage--done .stage__status { color: var(--ai-success, #0f9d70); }
+.stage__link { border: 0; background: transparent; color: var(--ai-primary, #0c5cf5); cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; padding: 0; }
 @media (max-width: 700px) {
   .panel h2 small { display: none; }
   .progress-overview { flex-direction: column; align-items: flex-start; gap: 14px; }

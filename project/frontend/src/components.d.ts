@@ -40,7 +40,6 @@ declare module 'vue' {
     ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElResult: typeof import('element-plus/es')['ElResult']
     ElSelect: typeof import('element-plus/es')['ElSelect']
-    ElSkeleton: typeof import('element-plus/es')['ElSkeleton']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
@@ -49,14 +48,14 @@ declare module 'vue' {
     ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
-    EvaluationLoadingDialog: typeof import('./components/training/EvaluationLoadingDialog.vue')['default']
+    LoadingSkeleton: typeof import('./components/LoadingSkeleton.vue')['default']
     ModelReasoning: typeof import('./components/ModelReasoning.vue')['default']
     QuestionRenderer: typeof import('./components/training/QuestionRenderer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     TaskStatus: typeof import('./components/TaskStatus.vue')['default']
-  }
-  export interface ComponentCustomProperties {
-    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
+    ThemeToggle: typeof import('./components/ThemeToggle.vue')['default']
+    TrainingFlowHeader: typeof import('./components/training/TrainingFlowHeader.vue')['default']
+    WaitStatus: typeof import('./components/WaitStatus.vue')['default']
   }
 }

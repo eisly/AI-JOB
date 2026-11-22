@@ -26,15 +26,16 @@ public interface ResumeMapper {
 
     @Insert("""
             INSERT INTO resume_version (id,resume_id,user_id,version_no,file_name,storage_key,mime_type,size_bytes,
-              sha256,status,extracted_text,extracted_text_sha256)
+              sha256,status,extracted_text,extracted_text_sha256,text_layout_version)
             VALUES (#{id},#{resumeId},#{userId},#{versionNo},#{fileName},#{storageKey},#{mimeType},#{sizeBytes},
-              UNHEX(#{sha256}),'UPLOADED',#{extractedText},#{extractedTextSha256})
+              UNHEX(#{sha256}),'UPLOADED',#{extractedText},#{extractedTextSha256},#{textLayoutVersion})
             """)
     int insertVersion(@Param("id") String id, @Param("resumeId") String resumeId, @Param("userId") String userId,
                       @Param("versionNo") int versionNo, @Param("fileName") String fileName,
                       @Param("storageKey") String storageKey, @Param("mimeType") String mimeType,
                       @Param("sizeBytes") long sizeBytes, @Param("sha256") String sha256,
-                      @Param("extractedText") String extractedText, @Param("extractedTextSha256") String extractedTextSha256);
+                      @Param("extractedText") String extractedText, @Param("extractedTextSha256") String extractedTextSha256,
+                      @Param("textLayoutVersion") String textLayoutVersion);
 
     @Update("UPDATE resume SET latest_version_id=#{versionId},updated_at=UTC_TIMESTAMP(3) WHERE id=#{resumeId}")
     int updateLatest(@Param("resumeId") String resumeId, @Param("versionId") String versionId);
@@ -44,7 +45,7 @@ public interface ResumeMapper {
 
     @Select("""
             SELECT r.title,r.id AS resume_id,v.id AS version_id,v.version_no,v.status,v.parsed_facts_json,
-              v.confirmed_facts_json,v.extracted_text
+              v.confirmed_facts_json,v.extracted_text,v.ocr_pages_json,v.parse_meta_json,v.text_layout_version
             FROM resume r JOIN resume_version v ON v.id=r.latest_version_id
             WHERE r.user_id=#{userId} AND r.deleted_at IS NULL AND v.deleted_at IS NULL
             ORDER BY r.updated_at DESC,r.id DESC LIMIT #{size}
@@ -53,7 +54,7 @@ public interface ResumeMapper {
 
     @Select("""
             SELECT r.title,r.id AS resume_id,v.id AS version_id,v.version_no,v.status,v.parsed_facts_json,
-              v.confirmed_facts_json,v.extracted_text
+              v.confirmed_facts_json,v.extracted_text,v.ocr_pages_json,v.parse_meta_json,v.text_layout_version
             FROM resume_version v JOIN resume r ON r.id=v.resume_id
             WHERE v.id=#{versionId} AND v.user_id=#{userId} AND v.deleted_at IS NULL AND r.deleted_at IS NULL
             """)
@@ -65,7 +66,8 @@ public interface ResumeMapper {
     @Select("""
             SELECT r.id,r.title,r.created_at,v.id AS version_id,v.resume_id,v.version_no,v.file_name,v.mime_type,
               v.size_bytes,v.status,v.parsed_facts_json,v.confirmed_facts_json,v.created_at AS version_created_at,
-              v.storage_key,v.extracted_text,v.extracted_text_sha256
+              v.storage_key,v.extracted_text,v.extracted_text_sha256,v.ocr_pages_json,v.parse_meta_json,
+              v.text_layout_version
             FROM resume r JOIN resume_version v ON v.id=r.latest_version_id
             WHERE r.user_id=#{userId} AND r.deleted_at IS NULL ORDER BY r.created_at DESC,r.id DESC
             LIMIT #{size} OFFSET #{offset}
@@ -77,7 +79,8 @@ public interface ResumeMapper {
 
     @Select("""
             SELECT id,resume_id,version_no,file_name,mime_type,size_bytes,status,parsed_facts_json,confirmed_facts_json,
-              storage_key,extracted_text,extracted_text_sha256,created_at FROM resume_version
+              storage_key,extracted_text,extracted_text_sha256,ocr_pages_json,parse_meta_json,text_layout_version,
+              created_at FROM resume_version
             WHERE resume_id=#{resumeId} AND user_id=#{userId} AND deleted_at IS NULL ORDER BY version_no DESC
             """)
     List<Map<String,Object>> versions(@Param("resumeId") String resumeId, @Param("userId") String userId);
@@ -90,6 +93,15 @@ public interface ResumeMapper {
               updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='PARSING'
             """)
     int parsed(@Param("id") String id, @Param("factsJson") String factsJson, @Param("metaJson") String metaJson);
+
+    @Update("""
+            UPDATE resume_version SET extracted_text=#{text},extracted_text_sha256=#{textSha256},
+              text_layout_version='pdf-ocr-v1',ocr_pages_json=#{ocrPagesJson},status='UPLOADED',
+              updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status IN ('UPLOADED','PARSING')
+            """)
+    int ocrTextSaved(@Param("id") String id, @Param("text") String text,
+                     @Param("textSha256") String textSha256, @Param("ocrPagesJson") String ocrPagesJson);
 
     @Update("""
             UPDATE resume_version SET confirmed_facts_json=#{factsJson},status='CONFIRMED',confirmed_at=UTC_TIMESTAMP(3),

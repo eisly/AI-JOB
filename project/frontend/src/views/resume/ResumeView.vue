@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
+import WaitStatus from '@/components/WaitStatus.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile, type UploadUserFile } from 'element-plus'
@@ -11,6 +13,7 @@ import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { addReference } from '@/utils/references'
 import { cloneFacts, commonStatusLabels, educationLabels, emptyFacts, errorMessage, formatDate, formatFileSize } from '@/utils/format'
+import type { UnmappedSkillDetail } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,7 +76,7 @@ const evidenceGroups = [
 ] as const
 type EvidenceKind = typeof evidenceGroups[number]['key']
 
-const { task, deltaText, reasoningText, error: taskError, restart: restartTask } = useTask(activeTaskId, {
+const { task, deltaText, reasoningText, error: taskError, loading: taskLoading, refreshing: taskRefreshing, refresh: refreshTask, restart: restartTask } = useTask(activeTaskId, {
   onTerminal: async currentTask => {
     const id = currentTask.result?.resourceId || currentTask.resourceId
     if (!id) {
@@ -257,14 +260,25 @@ async function refreshParsedVersion(versionId: string) {
   }
 }
 
-async function startParse(versionId: string) {
+async function startParse(versionId: string, reparse = false) {
   if (!versionId || parseSubmitting.value) return
+  if (reparse) {
+    try {
+      await ElMessageBox.confirm('重新解析会覆盖当前待确认的解析草稿，确认继续吗？', '重新解析', {
+        type: 'warning',
+        confirmButtonText: '重新解析',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return
+    }
+  }
   parseSubmitting.value = true
   parseSubmissionError.value = null
   taskAuthorityError.value = null
   taskVersionId.value = versionId
   try {
-    const submitted = await resumeApi.parse(versionId)
+    const submitted = await resumeApi.parse(versionId, reparse)
     if (activeTaskId.value === submitted.id) await restartTask()
     else activeTaskId.value = submitted.id
   } catch (reason) {
@@ -276,6 +290,52 @@ async function startParse(versionId: string) {
 
 function retryTaskAuthority() {
   if (taskVersionId.value) void refreshParsedVersion(taskVersionId.value)
+}
+
+const ocrPageSet = computed(() => new Set(selectedVersion.value?.ocrPages || []))
+
+function locationParts(location?: string): { page: number; line: number } | null {
+  if (!location) return null
+  const match = location.match(/page:(\d+);line:(\d+)/)
+  return match ? { page: Number(match[1]), line: Number(match[2]) } : null
+}
+
+function formatLocation(location?: string): string {
+  const parts = locationParts(location)
+  if (!parts) return location || ''
+  return `第 ${parts.page} 页 · 第 ${parts.line} 行`
+}
+
+function locationOnOcrPage(location?: string): boolean {
+  const parts = locationParts(location)
+  return !!parts && ocrPageSet.value.has(parts.page)
+}
+
+const unmappedCandidates = computed<UnmappedSkillDetail[]>(() => {
+  const details = selectedVersion.value?.parseMeta?.unmappedDetails
+  if (!Array.isArray(details)) return []
+  const knownNames = new Set([...skillCatalog.value.map(item => item.name.toLowerCase()), ...facts.value.skills.map(item => item.skillCode.toLowerCase())])
+  return details.filter(item => item?.name && !knownNames.has(item.name.toLowerCase()))
+})
+
+const unmappedAdding = ref('')
+
+async function addUnmappedSkill(detail: UnmappedSkillDetail) {
+  if (unmappedAdding.value || !canEditFacts.value) return
+  unmappedAdding.value = detail.name
+  operationError.value = null
+  try {
+    const skill = await profileApi.createCustomSkill(detail.name)
+    await loadSkills()
+    if (!facts.value.skills.some(item => item.skillCode === skill.code)) {
+      facts.value.skills.push({ skillCode: skill.code, claim: detail.quote.slice(0, 500), quote: detail.quote, location: detail.location, confirmed: false })
+    }
+    ElMessage.success('已添加为账号私有技能并加入技能事实')
+  } catch (reason) {
+    operationError.value = reason
+  } finally {
+    unmappedAdding.value = ''
+  }
 }
 
 function validateFile(file: File) {
@@ -577,7 +637,7 @@ onMounted(() => {
           <h2>我的简历</h2>
           <el-button text type="primary" :loading="listLoading" @click="loadResumes(false)">刷新</el-button>
         </div>
-        <AsyncState :loading="listLoading" :error="listError" :empty="!resumes.length" empty-text="还没有简历" empty-description="上传 PDF 或 DOCX 后，系统会开始解析。" @retry="loadResumes(true)">
+        <AsyncState :loading="listLoading" :retain="resumes.length > 0" :error="listError" :empty="!resumes.length" empty-text="还没有简历" empty-description="上传 PDF 或 DOCX 后，系统会开始解析。" @retry="loadResumes(true)">
           <template #empty>
             <el-button type="primary" @click="openUpload('new')">直接上传简历</el-button>
           </template>
@@ -641,9 +701,9 @@ onMounted(() => {
           </el-alert>
         </section>
 
-        <section v-if="task || parseSubmissionError || taskAuthorityError || taskError" class="panel">
-          <div class="panel__heading"><h2>解析任务</h2><el-tag v-if="taskRunning" type="warning">轮询与事件流同步中</el-tag></div>
-          <TaskStatus :task="task" :reasoning="reasoningText">
+        <section v-if="task || taskLoading || parseSubmissionError || taskAuthorityError || taskError" class="panel">
+          <div class="panel__heading"><h2>解析任务</h2></div>
+          <TaskStatus :task="task" :reasoning="reasoningText" :loading="taskLoading" :tracking-error="taskError" :refreshing="taskRefreshing" @refresh="refreshTask">
             <template #actions>
               <el-button v-if="task?.status === 'FAILED'" type="primary" :loading="parseSubmitting" @click="startParse(taskVersionId || selectedVersionId)">按原版本重试</el-button>
               <el-button v-if="taskVersionId" :loading="detailLoading" @click="loadVersion(taskVersionId)">刷新版本详情</el-button>
@@ -656,9 +716,6 @@ onMounted(() => {
           <el-alert v-if="taskAuthorityError" type="error" :title="`任务已完成，但权威详情加载失败：${errorMessage(taskAuthorityError)}`" :closable="false" show-icon>
             <template #default><el-button text type="primary" @click="retryTaskAuthority">重新加载详情</el-button></template>
           </el-alert>
-          <el-alert v-if="taskError" type="warning" :title="`任务状态连接异常：${errorMessage(taskError)}`" description="任务可能仍在后端执行，可重新连接并恢复轮询。" :closable="false" show-icon>
-            <template #default><el-button text type="primary" @click="restartTask">重新连接</el-button></template>
-          </el-alert>
         </section>
 
         <section class="panel">
@@ -668,8 +725,9 @@ onMounted(() => {
               <p class="muted facts-description">确认前请逐项核对；技能确认提交时会统一标记为已确认。</p>
             </div>
             <el-button v-if="selectedVersion && ['UPLOADED', 'FAILED'].includes(selectedVersion.status)" type="primary" :loading="parseSubmitting || taskRunning" @click="startParse(selectedVersion.id)">{{ selectedVersion.status === 'FAILED' ? '重试解析' : '开始解析' }}</el-button>
+            <el-button v-else-if="selectedVersion && selectedVersion.status === 'PARSED'" :loading="parseSubmitting || taskRunning" @click="startParse(selectedVersion.id, true)">重新解析</el-button>
           </div>
-          <AsyncState :loading="detailLoading" :error="detailError" :empty="!selectedVersion" empty-text="暂无版本详情" @retry="loadVersion(selectedVersionId)">
+          <AsyncState :loading="detailLoading" :retain="!!selectedVersion && selectedVersion.id === selectedVersionId" :error="detailError" :empty="!selectedVersion" empty-text="暂无版本详情" @retry="loadVersion(selectedVersionId)">
             <template v-if="selectedVersion">
               <div class="version-meta">
                 <span>上传时间：{{ formatDate(selectedVersion.createdAt) }}</span>
@@ -677,7 +735,9 @@ onMounted(() => {
               </div>
               <el-alert v-if="selectedVersion.status === 'FAILED'" class="inline-alert" type="error" title="该版本解析失败，请查看解析任务中的错误详情，或按原版本重试。" :closable="false" show-icon />
               <el-alert v-if="selectedVersion.status === 'UPLOADED'" class="inline-alert" type="info" title="文件已上传，开始解析后才能核对事实。" :closable="false" show-icon />
-              <el-alert v-if="selectedVersion.status === 'PARSING'" class="inline-alert" type="warning" title="正在解析，请等待任务完成。" :closable="false" show-icon />
+              <WaitStatus v-if="selectedVersion.status === 'PARSING' && (!taskRunning || taskVersionId !== selectedVersion.id)" title="正在解析简历">
+                <template #actions><el-button size="small" :loading="detailLoading" @click="loadVersion(selectedVersionId)">刷新版本详情</el-button></template>
+              </WaitStatus>
               <template v-if="['PARSED', 'CONFIRMED'].includes(selectedVersion.status)">
                 <el-alert v-if="selectedVersion.status === 'CONFIRMED' && !correctionEditing" class="inline-alert" type="success" title="该版本事实已确认；可纠正当前生效版本中的单项事实，原解析内容会保留。" :closable="false" show-icon>
                   <template #default><el-button size="small" type="primary" plain @click="startCorrection">纠正事实</el-button></template>
@@ -699,7 +759,7 @@ onMounted(() => {
                   <el-alert v-if="skillsError" class="inline-alert" type="error" :title="`技能目录加载失败：${errorMessage(skillsError)}`" :closable="false" show-icon>
                     <template #default><el-button text type="primary" :loading="skillsLoading" @click="loadSkills">重试目录加载</el-button></template>
                   </el-alert>
-                  <el-skeleton v-if="skillsLoading" :rows="2" animated />
+                  <LoadingSkeleton v-if="skillsLoading && !facts.skills.length" :rows="2" label="正在读取技能目录" />
                   <el-empty v-else-if="!facts.skills.length" description="暂无技能事实">
                     <el-button v-if="canEditFacts" @click="addSkill">添加技能</el-button>
                   </el-empty>
@@ -716,11 +776,33 @@ onMounted(() => {
                       </el-table-column>
                       <el-table-column label="能力自述" min-width="190"><template #default="scope"><el-input v-model="scope.row.claim" type="textarea" :rows="2" maxlength="500" :disabled="!canEditFacts" /></template></el-table-column>
                       <el-table-column label="原文引用" min-width="210"><template #default="scope"><el-input v-model="scope.row.quote" type="textarea" :rows="2" maxlength="1000" :disabled="!canEditFacts" /></template></el-table-column>
-                      <el-table-column label="原文位置" min-width="150"><template #default="scope"><el-input v-model="scope.row.location" maxlength="200" placeholder="page:1" :disabled="!canEditFacts" /></template></el-table-column>
+                      <el-table-column label="原文位置" min-width="150">
+                        <template #default="scope">
+                          <el-input v-model="scope.row.location" maxlength="200" placeholder="page:1;line:1" :disabled="!canEditFacts" />
+                          <small class="location-hint">{{ formatLocation(scope.row.location) }}<template v-if="locationOnOcrPage(scope.row.location)"> · OCR 识别</template></small>
+                        </template>
+                      </el-table-column>
                       <el-table-column label="已核对" width="90" align="center"><template #default="scope"><el-switch v-model="scope.row.confirmed" :disabled="!canEditFacts" /></template></el-table-column>
                       <el-table-column v-if="canEditFacts" label="操作" width="80" align="center"><template #default="scope"><el-button text type="danger" @click="removeSkill(scope.$index)">删除</el-button></template></el-table-column>
                     </el-table>
                   </div>
+
+                  <section v-if="canEditFacts && unmappedCandidates.length" class="unmapped-section">
+                    <div class="skills-heading">
+                      <div>
+                        <h3>目录外技能候选</h3>
+                        <p class="muted">以下技能在简历原文中明确出现但不在技能目录中，可添加为账号私有技能后纳入技能事实。</p>
+                      </div>
+                    </div>
+                    <div v-for="detail in unmappedCandidates" :key="detail.name" class="unmapped-item">
+                      <div class="unmapped-item__head">
+                        <strong>{{ detail.name }}</strong>
+                        <el-tag size="small" type="info">{{ formatLocation(detail.location) }}<template v-if="locationOnOcrPage(detail.location)"> · OCR 识别</template></el-tag>
+                        <el-button size="small" type="primary" plain :loading="unmappedAdding === detail.name" @click="addUnmappedSkill(detail)">添加为私有技能</el-button>
+                      </div>
+                      <p class="muted unmapped-item__quote">{{ detail.quote }}</p>
+                    </div>
+                  </section>
 
                   <section v-for="group in evidenceGroups" :key="group.key" class="evidence-section">
                     <div class="skills-heading">
@@ -732,7 +814,10 @@ onMounted(() => {
                       <el-input v-model="entry.claim" type="textarea" :rows="2" maxlength="500" :placeholder="`${group.title}内容`" :disabled="!canEditFacts" />
                       <el-input v-model="entry.quote" type="textarea" :rows="2" maxlength="1000" placeholder="简历原文引用" :disabled="!canEditFacts" />
                       <div class="evidence-item__footer">
-                        <el-input v-model="entry.location" maxlength="200" placeholder="原文位置，例如 page:1;paragraph:6" :disabled="!canEditFacts" />
+                        <div class="evidence-item__location">
+                          <el-input v-model="entry.location" maxlength="200" placeholder="原文位置，例如 page:1;line:6" :disabled="!canEditFacts" />
+                          <small class="location-hint">{{ formatLocation(entry.location) }}<template v-if="locationOnOcrPage(entry.location)"> · OCR 识别</template></small>
+                        </div>
                         <el-switch v-model="entry.confirmed" :disabled="!canEditFacts" active-text="已核对" />
                         <el-button v-if="canEditFacts" text type="danger" @click="removeEvidence(group.key, index)">删除</el-button>
                       </div>
@@ -815,11 +900,11 @@ onMounted(() => {
 .resume-list-panel { min-width: 0; }
 .resume-main { min-width: 0; }
 .resume-list { display: grid; gap: 10px; }
-.resume-card { padding: 13px; border: 1px solid #e3ecf7; border-radius: 9px; cursor: pointer; transition: border-color .2s, background .2s; }
-.resume-card:hover { border-color: #9dbff5; }
-.resume-card--active { border-color: #2d72ec; background: #f2f7ff; }
+.resume-card { padding: 13px; border: 1px solid var(--ai-border-light, #e3ecf7); border-radius: 9px; cursor: pointer; transition: border-color .2s, background .2s; }
+.resume-card:hover { border-color: var(--ai-accent-border, #9dbff5); }
+.resume-card--active { border-color: var(--ai-accent-border, #2d72ec); background: var(--ai-bg-light, #f2f7ff); }
 .resume-card__title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.resume-card__title strong { min-width: 0; color: #14234d; overflow-wrap: anywhere; }
+.resume-card__title strong { min-width: 0; color: var(--ai-text-primary, #14234d); overflow-wrap: anywhere; }
 .resume-card p { margin: 8px 0; color: $ai-text-secondary; font-size: 13px; overflow-wrap: anywhere; }
 .resume-card__meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: $ai-text-tertiary; font-size: 12px; }
 .resume-card__actions { display: flex; justify-content: space-between; margin-top: 5px; }
@@ -828,29 +913,35 @@ onMounted(() => {
 .version-select { width: min(520px, 100%); }
 .version-note { margin: 12px 0 0; font-size: 12px; line-height: 1.6; }
 .inline-alert { margin-top: 14px; }
-.task-delta { max-height: 180px; margin: 12px 0; padding: 12px; overflow: auto; border-radius: 8px; background: #f5f8fc; }
+.task-delta { max-height: 180px; margin: 12px 0; padding: 12px; overflow: auto; border-radius: 8px; background: var(--ai-bg-light, #f5f8fc); }
 .facts-description { margin: 5px 0 0; font-size: 13px; }
 .version-meta { display: flex; flex-wrap: wrap; gap: 12px 24px; color: $ai-text-secondary; font-size: 12px; }
 .facts-form { margin-top: 18px; }
 .field { display: grid; gap: 7px; min-width: 0; color: $ai-text-secondary; }
 .field > .el-select, .field > .el-input-number { width: 100%; }
 .skills-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 12px; }
-.skills-heading h3 { margin: 0; color: #14234d; }
+.skills-heading h3 { margin: 0; color: var(--ai-text-primary, #14234d); }
 .skills-heading p { margin: 5px 0 0; font-size: 12px; }
 .skill-table-wrap { overflow-x: auto; }
 .skill-code { display: block; margin-top: 5px; color: $ai-text-tertiary; overflow-wrap: anywhere; }
-.facts-warnings { margin-top: 16px; padding: 13px; border-radius: 8px; background: #fff8e9; color: #805b12; }
+.facts-warnings { margin-top: 16px; padding: 13px; border-radius: 8px; background: var(--ai-warning-bg, #fff8e9); color: var(--ai-warning, #805b12); }
 .evidence-section { margin-top: 24px; }
-.evidence-item { display: grid; gap: 10px; padding: 14px; margin-top: 10px; border: 1px solid #e5e7eb; border-radius: 8px; }
+.evidence-item { display: grid; gap: 10px; padding: 14px; margin-top: 10px; border: 1px solid var(--ai-border-light, #e5e7eb); border-radius: 8px; }
 .evidence-item__footer { display: flex; align-items: center; gap: 12px; }
 .evidence-item__footer .el-input { flex: 1; }
+.evidence-item__location { flex: 1; display: grid; gap: 5px; min-width: 0; }
+.location-hint { display: block; color: $ai-text-tertiary; font-size: 12px; line-height: 1.5; }
+.unmapped-section { margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--ai-border-light, #e3ecf7); }
+.unmapped-item { padding: 12px; margin-top: 10px; border: 1px solid var(--ai-border-light, #e5e7eb); border-radius: 8px; }
+.unmapped-item__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.unmapped-item__quote { margin: 8px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .facts-warnings ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
-.confirm-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #e8eef7; }
+.confirm-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--ai-border-light, #e8eef7); }
 .confirm-bar > span { line-height: 1.6; }
 .resume-uploader { width: 100%; }
 .resume-uploader :deep(.el-upload), .resume-uploader :deep(.el-upload-dragger) { width: 100%; }
 .upload-placeholder { padding: 26px 12px; }
-.upload-placeholder strong { color: #17285a; }
+.upload-placeholder strong { color: var(--ai-text-primary, #17285a); }
 .upload-placeholder p { margin: 10px 0 0; color: $ai-text-secondary; }
 @media (max-width: 1050px) { .resume-layout { grid-template-columns: 1fr; } .resume-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .resume-list { grid-template-columns: 1fr; } .version-toolbar { align-items: stretch; flex-direction: column; } .version-select { width: 100%; } .skills-heading, .confirm-bar { align-items: stretch; flex-direction: column; } .confirm-bar .el-button { width: 100%; } .page-header__actions { width: 100%; } .page-header__actions .el-button { flex: 1; margin: 0; } }

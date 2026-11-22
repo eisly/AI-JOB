@@ -71,7 +71,7 @@ onMounted(refresh)
 </template>
 
 <style scoped lang="scss">
-.dashboard { max-width: 1500px; margin: 0 auto; color: #0b1746; }
+.dashboard { max-width: 1500px; margin: 0 auto; color: var(--ai-text-primary, #0b1746); }
 .welcome { padding: 32px 14px 20px; }
 .overview { display: grid; grid-template-columns: minmax(0, 1.37fr) minmax(0, 1fr); gap: 12px; }
 .progress-panel, .activity-panel { margin-top: 12px; }

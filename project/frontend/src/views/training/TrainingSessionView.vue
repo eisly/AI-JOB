@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Finished, Refresh } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { learningApi } from '@/api/learning'
 import { adaptLegacySession, isEndpointMissing, legacySubmitAnswer, practiceApi } from '@/api/training'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
@@ -17,8 +17,10 @@ import type {
 } from '@/api/types'
 import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
-import EvaluationLoadingDialog from '@/components/training/EvaluationLoadingDialog.vue'
+import TaskStatus from '@/components/TaskStatus.vue'
+import WaitStatus from '@/components/WaitStatus.vue'
 import QuestionRenderer from '@/components/training/QuestionRenderer.vue'
+import TrainingFlowHeader from '@/components/training/TrainingFlowHeader.vue'
 import { errorMessage } from '@/utils/format'
 
 const route = useRoute()
@@ -57,9 +59,18 @@ async function loadSet() {
     }
     if (sequence !== loadSequence) return
     practiceSet.value = value
+    submitted.value = ['SUBMITTED', 'EVALUATING', 'EVALUATED'].includes(value.status)
     ensureStartAt()
     loadAnswers()
     if (!currentQuestionId.value && value.questions.length) currentQuestionId.value = value.questions[0]!.id
+    if (value.status === 'EVALUATED') {
+      if (!result.value) await loadResult()
+    } else if (submitted.value && value.evaluationTaskId) {
+      evaluationTaskId.value = value.evaluationTaskId
+    } else if (submitted.value && isLegacyMode.value && value.lastAnswerId) {
+      const answer = await learningApi.getAnswer(value.lastAnswerId)
+      if (sequence === loadSequence) evaluationTaskId.value = answer.taskId
+    }
   } catch (reason) {
     if (sequence === loadSequence) loadError.value = reason
   } finally {
@@ -218,12 +229,9 @@ onBeforeUnmount(() => {
 })
 
 // ===== 交卷与评估 =====
-const evaluationVisible = ref(false)
-const evaluationStage = ref(0)
 const evaluationError = ref<string | null>(null)
 const evaluationTaskId = ref<string | null>(null)
-const lastSubmitVersion = ref(0)
-let stageTimer: number | undefined
+const retryingEvaluation = ref(false)
 
 const evaluationTracker = useTask(evaluationTaskId, { onDone: handleEvaluationDone })
 const evaluationTask = evaluationTracker.task
@@ -254,20 +262,15 @@ async function submitPaper() {
       return
     }
   }
+  if (submitting.value || submitted.value || set.id !== setId.value) return
   persistDraft()
   submitting.value = true
   evaluationError.value = null
-  evaluationStage.value = 0
-  evaluationVisible.value = true
-  startStageSimulation()
-  lastSubmitVersion.value = set.version
   try {
     if (isLegacyMode.value) {
       const question = questions.value[0]!
       const content = answers.value[question.id]?.content || ''
       if (!content.trim()) {
-        evaluationVisible.value = false
-        stopStageSimulation()
         ElMessage.warning('请先填写回答再提交')
         return
       }
@@ -286,65 +289,46 @@ async function submitPaper() {
       evaluationTaskId.value = task.id
     }
   } catch (reason) {
-    evaluationVisible.value = false
-    stopStageSimulation()
     ElMessage.error(errorMessage(reason))
   } finally {
     submitting.value = false
   }
 }
 
-/** 阶段提示：后端任务未提供细粒度进度时，按时间推进展示，任务完成后立即跳到最终阶段 */
-function startStageSimulation() {
-  stopStageSimulation()
-  const submittedAt = Date.now()
-  stageTimer = window.setInterval(() => {
-    const elapsed = Date.now() - submittedAt
-    evaluationStage.value = elapsed < 8000 ? 0 : elapsed < 22000 ? 1 : 2
-  }, 1000)
-}
-
-function stopStageSimulation() {
-  window.clearInterval(stageTimer)
-  stageTimer = undefined
-}
-
 async function handleEvaluationDone(_task: TaskVO) {
-  stopStageSimulation()
-  evaluationStage.value = 2
+  const loaded = await loadResult()
+  if (!loaded) return
+  clearDraft()
   try {
-    await loadResult()
-    evaluationVisible.value = false
-    clearDraft()
-    try {
-      localStorage.removeItem(startKey())
-    } catch {
-      return
-    }
-    ElMessage.success('评估完成，已生成本组训练反馈报告')
-  } catch (reason) {
-    evaluationError.value = errorMessage(reason)
-  }
+    localStorage.removeItem(startKey())
+  } catch { /* The report remains available when browser storage is blocked. */ }
+  ElMessage.success('评估完成，已生成本组训练反馈报告')
 }
 
 async function loadResult() {
+  const id = setId.value
+  const sequence = loadSequence
   resultLoading.value = true
   resultError.value = null
   try {
+    let value: PracticeSetResultVO
     if (isLegacyMode.value) {
-      const value = await learningApi.getSession(setId.value)
-      const answerId = value.lastAnswerId
+      const session = await learningApi.getSession(id)
+      const answerId = session.lastAnswerId
       if (!answerId) throw new Error('暂未获取到回答ID，请稍后刷新')
       const answer = await learningApi.getAnswer(answerId)
-      result.value = adaptLegacyAnswerToResult(answer)
+      value = adaptLegacyAnswerToResult(answer)
     } else {
-      result.value = await practiceApi.getResult(setId.value)
+      value = await practiceApi.getResult(id)
     }
-    window.clearTimeout(stageTimer)
+    if (sequence !== loadSequence) return false
+    result.value = value
+    return true
   } catch (reason) {
-    resultError.value = reason
+    if (sequence === loadSequence) resultError.value = reason
+    return false
   } finally {
-    resultLoading.value = false
+    if (sequence === loadSequence) resultLoading.value = false
   }
 }
 
@@ -372,24 +356,19 @@ function adaptLegacyAnswerToResult(answer: LearningAnswerVO): PracticeSetResultV
 }
 
 async function retryEvaluation() {
+  const task = evaluationTask.value
+  if (!task || !canRetryTrackedTask(task) || retryingEvaluation.value) return
+  const session = setId.value
+  retryingEvaluation.value = true
   evaluationError.value = null
-  if (evaluationTask.value && canRetryTrackedTask(evaluationTask.value)) {
-    try {
-      evaluationTaskId.value = (await retryTrackedTask(evaluationTask.value)).id
-      startStageSimulation()
-      return
-    } catch (reason) {
-      evaluationError.value = errorMessage(reason)
-      return
-    }
+  try {
+    const retried = await retryTrackedTask(task)
+    if (session === setId.value) evaluationTaskId.value = retried.id
+  } catch (reason) {
+    if (session === setId.value) evaluationError.value = errorMessage(reason)
+  } finally {
+    retryingEvaluation.value = false
   }
-  submitted.value = false
-  await submitPaper()
-}
-
-function closeEvaluationDialog() {
-  if (!evaluationError.value) return
-  evaluationVisible.value = false
 }
 
 // ===== 结果展示辅助 =====
@@ -399,13 +378,7 @@ function questionResultOf(questionId: string) {
   return result.value?.questionResults.find(item => item.questionId === questionId) || null
 }
 
-function navStateOf(question: PracticeQuestionVO): 'answered' | 'current' | 'correct' | 'wrong' | 'pending' {
-  const questionResult = questionResultOf(question.id)
-  if (resultMode.value && questionResult) {
-    if (questionResult.correct === true) return 'correct'
-    if (questionResult.correct === false) return 'wrong'
-    return 'answered'
-  }
+function navStateOf(question: PracticeQuestionVO): 'answered' | 'current' | 'pending' {
   if (question.id === currentQuestionId.value) return 'current'
   return isAnswered(question) ? 'answered' : 'pending'
 }
@@ -415,11 +388,24 @@ const objectiveSummary = computed(() => {
   return `${result.value.objectiveCorrectCount} / ${result.value.objectiveTotalCount}`
 })
 
+const needsReview = computed(() => result.value?.questionResults.filter(({ correct, evaluation }) => correct === false
+  || (evaluation?.evidenceStatus === 'VALID' && evaluation.overallScore != null && evaluation.overallScore < 60)
+  || (evaluation && 'answerClass' in evaluation && evaluation.answerClass === 'UNKNOWN')) || [])
+const reviewingMistakes = ref(false)
+const visibleReviewQuestions = computed(() => reviewingMistakes.value
+  ? questions.value.filter(question => needsReview.value.some(item => item.questionId === question.id)) : questions.value)
+const allQuestionTypes = { CHOICE: '选择题', FILL: '填空题', SUBJECTIVE: '主观题' }
+
+function reviewMistakes() {
+  reviewingMistakes.value = !reviewingMistakes.value
+}
+
 function leaveSession() {
-  void router.push('/training')
+  void router.push({ name: 'training', query: { planId: practiceSet.value?.planId || undefined, tab: route.query.from === 'mistakes' ? 'mistakes' : undefined } })
 }
 
 async function exitPractice() {
+  if (submitted.value || resultMode.value || !answeredCount.value) { leaveSession(); return }
   try {
     await ElMessageBox.confirm(
       '返回后作答草稿会保留在当前浏览器，可稍后从训练单元重新进入继续作答。确认返回专项训练吗？',
@@ -441,128 +427,91 @@ onMounted(() => {
 
 watch(setId, () => {
   result.value = null
+  resultLoading.value = false
+  resultError.value = null
+  evaluationTaskId.value = null
+  evaluationError.value = null
+  reviewingMistakes.value = false
   submitted.value = false
   answers.value = {}
+  currentQuestionId.value = ''
   void loadSet()
 })
 </script>
 
 <template>
   <div class="practice-page">
-    <header class="practice-header">
-      <div class="practice-header__heading">
-        <el-button link :icon="ArrowLeft" class="practice-back" :disabled="submitting" @click="exitPractice">返回专项训练</el-button>
-        <div class="practice-header__title">
-          <h1>{{ practiceSet?.title || '专项训练题目' }}</h1>
-          <p class="practice-header__sub">专项训练 / 题目 · {{ questions.length ? `本组共 ${questions.length} 题` : '题目加载中' }}</p>
-        </div>
-      </div>
-      <div class="practice-header__actions">
-        <span class="session-header__timer" aria-label="已用时">
-          <span class="timer-label">已用时</span>
-          <strong>{{ elapsedLabel }}</strong>
-        </span>
-        <span class="session-header__save">
-          <span class="save-dot" :class="{ 'save-dot--warn': draftSaveFailed }" />
-          {{ draftSaveFailed ? '草稿保存失败' : draftSavedAt ? '已自动保存' : '自动保存中' }}
-        </span>
-        <el-button
-          v-if="!resultMode"
-          type="primary"
-          :icon="Finished"
-          :loading="submitting"
-          :disabled="submitted && !evaluationError"
-          @click="submitPaper"
-        >交卷并AI评估</el-button>
-      </div>
-    </header>
+    <TrainingFlowHeader
+      class="practice-top"
+      :title="practiceSet?.title || '专项训练'"
+      :subtitle="resultMode ? '整组练习 · 评估完成' : '整组练习'"
+      :back-label="route.query.from === 'mistakes' ? '返回错题本' : '返回训练计划'"
+      :disabled="submitting"
+      @back="exitPractice"
+    >
+      <el-button v-if="resultMode" @click="router.push({ name: 'training', query: { tab: 'mistakes', planId: practiceSet?.planId || undefined } })">查看错题本</el-button>
+      <el-tag v-else-if="!submitted && currentQuestion" effect="plain">第 {{ currentQuestion.index }} / {{ questions.length }} 题</el-tag>
+    </TrainingFlowHeader>
 
-    <main class="session-body">
-      <!-- 左侧：题号导航 -->
-      <aside class="session-nav">
-        <h3>答题导航</h3>
-        <p class="session-nav__sub">
-          本组共 {{ questions.length }} 题 · 已答 {{ answeredCount }} 题
-        </p>
-        <div class="session-nav__progress">
-          <span>答题进度</span>
-          <strong>{{ answeredPercentage }}%</strong>
-        </div>
-        <el-progress :percentage="answeredPercentage" :stroke-width="6" :show-text="false" />
-        <div v-for="group in typeGroups" :key="group.type" class="session-nav__group">
-          <h4>{{ group.label }} <span class="muted">{{ group.items.length }} 题</span></h4>
-          <div class="session-nav__numbers">
-            <button
-              v-for="question in group.items"
-              :key="question.id"
-              type="button"
-              class="nav-number"
-              :class="`nav-number--${navStateOf(question)}`"
-              :aria-label="`第 ${question.index} 题`"
-              @click="goQuestion(question.id)"
-            >{{ question.index }}</button>
-          </div>
-        </div>
-        <p class="session-nav__legend">
-          <span class="legend-dot legend-dot--answered" /> 蓝色为当前题，绿色为已答
-        </p>
-      </aside>
+    <div class="practice-content">
+      <header class="practice-heading">
+        <h1>{{ submitted || resultMode ? '练习结果' : route.query.from === 'mistakes' ? '错题重练' : '整组练习' }}</h1>
+        <p v-if="resultMode">查看本组表现，从错题开始复盘。</p>
+        <p v-else-if="!submitted">作答后统一交卷，可在题号区查看完成情况。</p>
+      </header>
 
-      <!-- 中间：题目区 / 结果区 -->
-      <section class="session-main">
-        <AsyncState :loading="loadLoading" :error="loadError" :empty="!practiceSet" empty-text="未找到本组训练" @retry="loadSet">
-          <template v-if="practiceSet">
-            <el-alert
-              v-if="practiceSet.status === 'GENERATING'"
-              title="题目仍在预生成中，请稍后刷新"
-              type="warning"
-              :closable="false"
-              show-icon
-            />
-            <el-alert
-              v-else-if="practiceSet.status === 'FAILED'"
-              title="本组题目生成失败，请返回训练主页重新生成"
-              type="error"
-              :closable="false"
-              show-icon
-            />
+      <AsyncState :loading="loadLoading" :retain="practiceSet?.id === setId" :error="loadError" :empty="!practiceSet || practiceSet.id !== setId" empty-text="未找到本组训练" @retry="loadSet">
+        <template v-if="practiceSet">
+          <WaitStatus v-if="practiceSet.status === 'GENERATING'" title="正在准备本组题目">
+            <template #actions><el-button size="small" :loading="loadLoading" @click="loadSet">刷新题组</el-button></template>
+          </WaitStatus>
+          <el-alert v-else-if="practiceSet.status === 'FAILED'" title="本组题目生成失败，请返回训练计划重新生成" type="error" show-icon :closable="false" />
 
-            <!-- 结果模式 -->
-            <template v-else-if="resultMode">
-              <section class="result-panel">
-                <div class="result-panel__overview">
-                  <div class="result-score">
-                    <strong>{{ result?.overallScore === null || result?.overallScore === undefined ? '-' : result.overallScore }}</strong>
-                    <span>综合得分</span>
+          <template v-else-if="resultMode && result">
+            <div class="session-grid">
+              <div class="review-column">
+                <section class="practice-card">
+                  <div class="practice-row"><h2>本组得分</h2><el-tag type="success" size="small">评估完成</el-tag></div>
+                  <div class="result-score"><strong>{{ result.overallScore ?? '—' }}</strong><span>/ 100</span></div>
+                  <p v-if="result.summary" class="result-summary">{{ result.summary }}</p>
+                  <div class="result-metrics">
+                    <div><span>客观题正确</span><strong>{{ objectiveSummary || '—' }}</strong></div>
+                    <div><span>主观题已评估</span><strong>{{ result.questionResults.filter(item => item.evaluation).length }}</strong></div>
+                    <div><span>待复盘题目</span><strong>{{ needsReview.length }}</strong></div>
                   </div>
-                  <div v-if="objectiveSummary" class="result-objective">
-                    客观题正确 <strong>{{ objectiveSummary }}</strong>
+                </section>
+                <section v-if="result.improvements.length || needsReview.length" class="practice-card">
+                  <h2>优先复盘</h2>
+                  <p v-if="result.improvements[0]" class="result-summary">{{ result.improvements[0] }}</p>
+                  <div v-if="needsReview.length">
+                    <el-button type="primary" :aria-pressed="reviewingMistakes" @click="reviewMistakes">{{ reviewingMistakes ? '查看全部题目' : '查看本组错题' }}</el-button>
                   </div>
-                  <el-button size="small" :icon="Refresh" :loading="resultLoading" @click="loadResult">刷新报告</el-button>
-                </div>
+                </section>
+              </div>
+              <aside class="practice-card">
+                <h2>本组反馈</h2>
+                <section class="review-section"><h3>表现稳定</h3>
+                  <ul v-if="result.strengths.length"><li v-for="(item, i) in result.strengths" :key="i">{{ item }}</li></ul>
+                  <p v-else class="muted">暂无优点反馈</p>
+                </section>
+                <section class="review-section"><h3>需要加强</h3>
+                  <ul v-if="result.improvements.length"><li v-for="(item, i) in result.improvements" :key="i">{{ item }}</li></ul>
+                  <p v-else class="muted">暂无改进建议</p>
+                </section>
+                <div class="practice-row"><el-button @click="leaveSession">返回训练计划</el-button><el-button link :loading="resultLoading" @click="loadResult">刷新结果</el-button></div>
                 <el-alert v-if="resultError" :title="errorMessage(resultError)" type="error" :closable="false" show-icon />
-                <p v-if="result?.summary" class="result-panel__summary">{{ result.summary }}</p>
-                <div class="result-panel__feedback">
-                  <section class="feedback-card feedback-card--strength">
-                    <h4>本次训练优点</h4>
-                    <ul v-if="result?.strengths.length"><li v-for="(item, index) in result.strengths" :key="index">{{ item }}</li></ul>
-                    <p v-else class="muted">暂无优点反馈</p>
-                  </section>
-                  <section class="feedback-card feedback-card--improvement">
-                    <h4>改进建议</h4>
-                    <ul v-if="result?.improvements.length"><li v-for="(item, index) in result.improvements" :key="index">{{ item }}</li></ul>
-                    <p v-else class="muted">暂无改进建议</p>
-                  </section>
-                </div>
-              </section>
+              </aside>
+            </div>
 
+            <section class="review-list" aria-label="逐题复盘">
+              <div class="practice-row"><h2>{{ reviewingMistakes ? '本组错题' : '逐题复盘' }}</h2><span class="muted">{{ visibleReviewQuestions.length }} 题</span></div>
               <section
-                v-for="question in questions"
-                :key="question.id"
+                v-for="question in visibleReviewQuestions"
+                :key="question.id" :id="'review-' + question.id"
                 class="result-question"
               >
                 <header class="result-question__heading">
-                  <h4>第 {{ question.index }} 题 · {{ ({ CHOICE: '选择题', FILL: '填空题', SUBJECTIVE: '主观题' } as Record<string, string>)[question.type] }}</h4>
+                  <h4>第 {{ question.index }} 题 · {{ allQuestionTypes[question.type] }}</h4>
                   <span v-if="questionResultOf(question.id)?.correct === true" class="result-tag result-tag--pass">回答正确</span>
                   <span v-else-if="questionResultOf(question.id)?.correct === false" class="result-tag result-tag--fail">回答错误</span>
                   <span v-else class="result-tag result-tag--evaluated">AI 已评估</span>
@@ -598,265 +547,134 @@ watch(setId, () => {
                   </template>
                 </div>
               </section>
-            </template>
+            </section>
+          </template>
 
-            <!-- 答题模式 -->
-            <template v-else-if="currentQuestion">
-              <div class="question-panel">
-                <div class="question-panel__heading">
-                  <span class="question-panel__position">第 {{ currentQuestion.index }} / {{ questions.length }} 题</span>
-                  <span class="muted">建议先完成客观题，再集中作答主观题</span>
-                </div>
+          <section v-else-if="submitted" class="practice-card evaluation-status">
+            <WaitStatus v-if="resultLoading" title="正在读取练习结果" />
+            <WaitStatus v-else-if="resultError" title="读取练习结果失败" :description="errorMessage(resultError)" state="error">
+              <template #actions><el-button size="small" @click="loadResult">重新读取结果</el-button></template>
+            </WaitStatus>
+            <TaskStatus
+              v-else-if="evaluationTaskId"
+              :task="evaluationTask"
+              :loading="evaluationTracker.loading.value || !evaluationTask"
+              :tracking-error="evaluationTracker.error.value"
+              :refreshing="evaluationTracker.refreshing.value"
+              :reasoning="evaluationTracker.reasoningText.value"
+              running-description="评估完成后会自动显示练习结果。"
+              @refresh="evaluationTracker.refresh"
+            >
+              <template #actions>
+                <el-button v-if="evaluationTask && canRetryTrackedTask(evaluationTask)" size="small" type="primary" :loading="retryingEvaluation" @click="retryEvaluation">重试评估</el-button>
+              </template>
+            </TaskStatus>
+            <WaitStatus v-else title="作答已提交" description="刷新题组后可查看当前状态和结果。" state="idle">
+              <template #actions><el-button size="small" :loading="loadLoading" @click="loadSet">刷新题组</el-button></template>
+            </WaitStatus>
+            <el-alert v-if="evaluationError" :title="evaluationError" type="error" show-icon :closable="false" />
+          </section>
+          <template v-else-if="currentQuestion">
+            <div class="session-grid">
+              <section class="practice-card question-panel">
                 <QuestionRenderer
                   :question="currentQuestion"
                   :answer="currentAnswer"
+                  :readonly="submitting || submitted"
                   @update:answer="value => { answers[value.questionId] = value }"
                 />
                 <footer class="question-panel__footer">
-                  <span class="muted footer-note">你的答案会自动保存</span>
+                  <span class="muted" aria-live="polite">
+                    {{ draftSaveFailed ? '草稿保存失败' : draftSavedAt ? '已自动保存' : '答案会自动保存' }}
+                  </span>
                   <div class="footer-actions">
                     <el-button :icon="ArrowLeft" :disabled="currentIndex === 0 || submitting" @click="goPrev">上一题</el-button>
-                    <el-button type="primary" :disabled="currentIndex >= questions.length - 1 || submitting" @click="goNext">
-                      下一题 <el-icon><ArrowRight /></el-icon>
-                    </el-button>
+                    <el-button v-if="currentIndex < questions.length - 1" :disabled="submitting" @click="goNext">下一题 <el-icon><ArrowRight /></el-icon></el-button>
+                    <el-button type="primary" :loading="submitting" @click="submitPaper">{{ submitting ? '正在交卷…' : '交卷并评估' }}</el-button>
                   </div>
                 </footer>
-              </div>
-            </template>
-            <el-empty v-else description="本组题目尚未就绪" />
+              </section>
+              <aside class="practice-card session-nav">
+                <h2>答题进度</h2>
+                <div class="practice-row"><strong class="nav-count">{{ answeredCount }} / {{ questions.length }}</strong><el-tag :type="unansweredCount ? 'info' : 'success'" size="small">{{ unansweredCount ? '还有 ' + unansweredCount + ' 题待作答' : '全部完成' }}</el-tag></div>
+                <div class="question-numbers">
+                  <button
+                    v-for="question in questions"
+                    :key="question.id"
+                    type="button"
+                    class="nav-number"
+                    :class="'nav-number--' + navStateOf(question)"
+                    :aria-label="'第 ' + question.index + ' 题' + (isAnswered(question) ? '，已答' : '，未答')"
+                    :aria-current="question.id === currentQuestionId ? 'true' : undefined"
+                    @click="goQuestion(question.id)"
+                  >{{ question.index }}</button>
+                </div>
+                <div class="nav-foot"><span>已用时 {{ elapsedLabel }}</span><span>客观题自动判分，主观题交卷后统一评估。</span></div>
+              </aside>
+            </div>
           </template>
-        </AsyncState>
-      </section>
+          <el-empty v-else description="本组题目尚未就绪" />
+        </template>
+      </AsyncState>
 
-      <!-- 右侧：本次训练概览 -->
-      <aside class="session-side">
-        <h3>本次训练</h3>
-        <p class="session-side__sub">
-          {{ practiceSet?.title || '专项训练' }}
-        </p>
-        <dl class="session-side__stats">
-          <div><dt>题目总数</dt><dd>{{ questions.length }} 题</dd></div>
-          <div><dt>已答 / 未答</dt><dd>{{ answeredCount }} / {{ unansweredCount }}</dd></div>
-          <div v-if="practiceSet?.config"><dt>题型分布</dt><dd>选择 {{ practiceSet.config.typeDistribution.choice }} · 填空 {{ practiceSet.config.typeDistribution.fill }} · 主观 {{ practiceSet.config.typeDistribution.subjective }}</dd></div>
-          <div v-if="practiceSet?.config"><dt>难度</dt><dd>{{ ({ EASY: '入门', MEDIUM: '进阶', HARD: '挑战', MIXED: '混合' } as Record<string, string>)[practiceSet.config.difficulty] || practiceSet.config.difficulty }}</dd></div>
-          <div><dt>预计时长</dt><dd>{{ practiceSet?.totalMinutes || '-' }} 分钟</dd></div>
-        </dl>
-        <div class="session-side__tip">
-          <el-icon><Finished /></el-icon>
-          <span>完成全部作答后点击右上角「交卷并AI评估」，客观题自动判分，主观题由 AI 深度评估并生成训练反馈报告。</span>
-        </div>
-      </aside>
-    </main>
-
-    <EvaluationLoadingDialog
-      :visible="evaluationVisible"
-      :stage="evaluationStage"
-      :has-objective="typeGroups.some(group => group.type !== 'SUBJECTIVE')"
-      :error="evaluationError"
-      @close="closeEvaluationDialog"
-    />
-
-    <div v-if="evaluationError" class="evaluation-retry">
-      <span>{{ evaluationError }}</span>
-      <el-button size="small" type="primary" :loading="submitting" @click="retryEvaluation">重试评估</el-button>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
-.practice-page {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  padding-bottom: 8px;
-}
-
-.practice-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-  padding: 14px 16px;
-  border: 1px solid $ai-border-light;
-  border-radius: $ai-radius-lg;
-  background: #fff;
-  box-shadow: $ai-shadow-card;
-}
-
-.practice-header__heading { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.practice-back { flex-shrink: 0; padding: 0; }
-.practice-header__title { min-width: 0; }
-.practice-header__title h1 { margin: 0; color: $ai-text-primary; font-size: 18px; line-height: 1.4; }
-.practice-header__sub { margin: 2px 0 0; color: $ai-text-tertiary; font-size: 12px; }
-
-.practice-header__actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
-.session-header__timer { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: $ai-bg-light; font-size: 13px; }
-.timer-label { color: $ai-text-secondary; }
-.session-header__save { display: inline-flex; align-items: center; gap: 6px; color: $ai-text-secondary; font-size: 12px; white-space: nowrap; }
-.save-dot { width: 7px; height: 7px; border-radius: 50%; background: $ai-success; }
-.save-dot--warn { background: $ai-warning; }
-
-.session-body {
-  display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 250px;
-  align-items: start;
-  gap: 14px;
-  width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 0 20px;
-  box-sizing: border-box;
-}
-
-.session-nav, .session-side {
-  position: sticky;
-  top: 96px;
-  padding: 16px;
-  border: 1px solid $ai-border-light;
-  border-radius: $ai-radius-lg;
-  background: #fff;
-  box-shadow: $ai-shadow-card;
-}
-
-.session-nav h3, .session-side h3 { margin: 0 0 4px; font-size: 15px; color: $ai-text-primary; }
-.session-nav__sub, .session-side__sub { margin: 0 0 12px; color: $ai-text-secondary; font-size: 12px; }
-.session-nav__progress { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 6px; font-size: 12px; color: $ai-text-secondary; }
-.session-nav__progress strong { color: $ai-primary; }
-.session-nav__group { margin-top: 14px; }
-.session-nav__group h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; color: $ai-text-primary; }
-.muted { color: $ai-text-tertiary; font-weight: 400; }
-.session-nav__numbers { display: flex; flex-wrap: wrap; gap: 8px; }
-.nav-number {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid $ai-border;
-  border-radius: 8px;
-  background: #fff;
-  color: $ai-text-secondary;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-
-  &:hover { border-color: $ai-primary; }
-}
-.nav-number--current { border-color: $ai-primary; color: #fff; background: $ai-primary; }
-.nav-number--answered { border-color: #a7f3d0; color: #047857; background: #ecfdf5; }
-.nav-number--answered:hover { border-color: $ai-success; }
-.nav-number--correct { border-color: $ai-success; color: #fff; background: $ai-success; }
-.nav-number--wrong { border-color: $ai-danger; color: #fff; background: $ai-danger; }
-.session-nav__legend { display: flex; align-items: center; gap: 6px; margin: 16px 0 0; color: $ai-text-tertiary; font-size: 11px; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; background: #ecfdf5; border: 1px solid #a7f3d0; }
-.legend-dot--answered { background: $ai-primary-light; border-color: $ai-primary; }
-
-.session-main { min-width: 0; }
-.question-panel, .result-panel, .result-question {
-  padding: 20px 22px;
-  border: 1px solid $ai-border-light;
-  border-radius: $ai-radius-lg;
-  background: #fff;
-  box-shadow: $ai-shadow-card;
-}
-.question-panel__heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.question-panel__position { color: $ai-text-secondary; font-size: 13px; }
-.question-panel__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid $ai-border-light;
-}
-.footer-note { font-size: 12px; }
-.footer-actions { display: flex; gap: 10px; }
-
-.result-panel { margin-bottom: 14px; }
-.result-panel__overview { display: flex; align-items: center; gap: 24px; }
-.result-score { display: grid; min-width: 92px; text-align: center; }
-.result-score strong { color: $ai-primary; font-size: 34px; line-height: 1.2; }
-.result-score span { color: $ai-text-secondary; font-size: 12px; }
-.result-objective { color: $ai-text-secondary; font-size: 13px; }
-.result-objective strong { color: $ai-success; }
-.result-panel__summary { margin: 14px 0 0; color: $ai-text-primary; font-size: 14px; line-height: 1.7; }
-.result-panel__feedback { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
-.feedback-card { padding: 14px; border-radius: $ai-radius; }
-.feedback-card h4, .feedback-card h5 { margin: 0 0 8px; font-size: 14px; }
-.feedback-card ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
-.feedback-card--strength { background: #ecfdf5; }
-.feedback-card--improvement { background: #fff7ed; }
-
-.result-question { margin-bottom: 14px; }
-.result-question__heading { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
-.result-question__heading h4 { margin: 0; font-size: 14px; }
-.result-tag { padding: 2px 10px; border-radius: 999px; font-size: 12px; }
-.result-tag--pass { color: $ai-success; background: #ecfdf5; }
-.result-tag--fail { color: $ai-danger; background: #fef2f2; }
-.result-tag--evaluated { color: $ai-primary; background: $ai-primary-light; }
-.result-question__comment { margin-top: 14px; padding: 14px; border-radius: $ai-radius; background: $ai-bg-page; }
-.result-question__comment p { margin: 0; color: $ai-text-primary; font-size: 13px; line-height: 1.7; }
-.evaluation-overview { display: flex; align-items: flex-start; gap: 20px; margin: 12px 0; }
-.evaluation-overview p { margin: 0; color: $ai-text-secondary; font-size: 13px; }
-.feedback-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-
-.session-side__stats { display: grid; gap: 10px; margin: 0 0 14px; }
-.session-side__stats div { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
-.session-side__stats dt { color: $ai-text-secondary; }
-.session-side__stats dd { margin: 0; color: $ai-text-primary; font-weight: 600; text-align: right; }
-.session-side__tip {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: $ai-radius;
-  background: $ai-primary-light;
-  color: #1e40af;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.session-side__tip .el-icon { margin-top: 2px; color: $ai-primary; }
-
-.evaluation-retry {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border: 1px solid #fecaca;
-  border-radius: $ai-radius;
-  background: #fff;
-  color: $ai-danger;
-  font-size: 13px;
-  box-shadow: $ai-shadow-hover;
-}
-
-.pre-wrap { white-space: pre-wrap; }
-
-@media (max-width: 1100px) {
-  .session-body { grid-template-columns: 200px minmax(0, 1fr); }
-  .session-side { display: none; }
-}
-@media (max-width: 760px) {
-  .practice-header { flex-direction: column; align-items: stretch; }
-  .practice-header__actions { flex-wrap: wrap; }
-  .session-body { grid-template-columns: 1fr; }
-  .session-nav { position: static; }
-  .session-header__save { display: none; }
-  .result-panel__feedback, .feedback-grid { grid-template-columns: 1fr; }
-}
+.practice-page { min-height:100%; color:$ai-text-primary; }
+.practice-top { position:sticky; top:0; z-index:10; }
+.practice-content { width:min(1152px, calc(100% - 40px)); margin:36px auto; }
+.practice-heading { margin-bottom:24px; }
+h1,h2,h3,p { margin:0; overflow-wrap:anywhere; }
+h1,h2,h3 { font-weight:700; }
+h1 { font-size:32px; line-height:1.35; letter-spacing:-.025em; }
+h2 { font-size:18px; }
+h3 { font-size:14px; }
+.practice-heading p,.muted { color:$ai-text-secondary; }
+.practice-heading p { margin-top:5px; line-height:1.65; }
+.session-grid { display:grid; align-items:start; grid-template-columns:minmax(0, 1.94fr) minmax(270px, 1fr); gap:24px; }
+.practice-card,.result-question { display:grid; gap:16px; min-width:0; padding:22px; border:1px solid $ai-border; border-radius:16px; background:$ai-bg-card; }
+.practice-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
+.question-panel__footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding-top:14px; border-top:1px solid $ai-border-light; }
+.question-panel__footer .muted { font-size:12px; }
+.footer-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.footer-actions :deep(.el-button) { margin-left:0; }
+.session-nav { position:sticky; top:88px; }
+.nav-count { font-size:26px; font-variant-numeric:tabular-nums; }
+.question-numbers { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; }
+.nav-number { min-height:39px; border:1px solid $ai-border-light; border-radius:8px; background:$ai-bg-light; color:$ai-text-secondary; font:inherit; font-weight:600; cursor:pointer; }
+.nav-number--answered { border-color:transparent; background:var(--ai-success-bg,#e5f6ee); color:var(--ai-success,#167953); }
+.nav-number--current { border-color:$ai-primary; color:$ai-primary; background:$ai-primary-light; }
+.nav-number:hover,.nav-number:focus-visible { border-color:$ai-primary; }
+.nav-foot { display:grid; gap:8px; padding-top:12px; border-top:1px solid $ai-border-light; color:$ai-text-secondary; font-size:12px; line-height:1.55; }
+.review-column,.review-list { display:grid; gap:16px; }
+.review-list { margin-top:24px; }
+.result-score { display:flex; align-items:baseline; gap:8px; color:$ai-text-secondary; }
+.result-score strong { color:$ai-primary; font-size:52px; line-height:1.05; font-variant-numeric:tabular-nums; }
+.result-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding-top:14px; border-top:1px solid $ai-border-light; }
+.result-metrics div { display:grid; gap:5px; border:1px solid $ai-border-light; padding:12px; border-radius:10px; }
+.result-metrics span { color:$ai-text-secondary; font-size:12px; }
+.result-metrics strong { font-size:20px; }
+.result-summary { color:$ai-text-secondary; line-height:1.7; }
+.review-section { padding-block:12px 0; border-top:1px solid $ai-border-light; }
+.review-section ul { padding-left:18px; margin-bottom:0; }
+.review-section li,.review-section p { margin-top:6px; color:$ai-text-secondary; line-height:1.65; }
+.result-question { scroll-margin-top:92px; }
+.result-question__heading { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.result-question__heading h4 { margin:0; }
+.result-tag { padding:4px 8px; border-radius:6px; font-size:12px; }
+.result-tag--pass { color:var(--ai-success,#167953); background:var(--ai-success-bg,#e5f6ee); }
+.result-tag--fail { color:$ai-danger; background:var(--ai-danger-bg,#fef2f2); }
+.result-tag--evaluated { color:$ai-primary; background:$ai-primary-light; }
+.result-question__comment { padding:14px; border-radius:8px; background:$ai-bg-page; }
+.evaluation-overview { display:flex; align-items:flex-start; gap:20px; margin:12px 0; }
+.overall-score { display:grid; flex-shrink:0; gap:4px; }
+.feedback-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.feedback-card { padding:12px; border:1px solid $ai-border-light; border-radius:8px; }
+.feedback-card h5 { margin:0 0 5px; }
+.feedback-card ul { margin:0; padding-left:18px; line-height:1.6; }
+.evaluation-status { display:grid; gap:12px; }
+@media(max-width:800px) { .session-grid { grid-template-columns:minmax(0,1fr); gap:16px; } .session-nav { position:static; } }
+@media(max-width:520px) { .practice-content { width:calc(100% - 28px); margin:24px auto; } h1 { font-size:26px; } .practice-card,.result-question { padding:15px; } .feedback-grid { grid-template-columns:1fr; } }
 </style>

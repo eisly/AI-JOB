@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -46,10 +47,12 @@ public class ResumeService {
     private final TaskMapper taskMapper;
     private final ProfileService profiles;
     private final AbilityService ability;
+    private final String internalBaseUrl;
 
     public ResumeService(ResumeMapper mapper, FileStorageService files, JsonService json, ApiView view,
                          IdempotencyService idempotency, TaskService tasks, TaskMapper taskMapper,
-                         ProfileService profiles, AbilityService ability) {
+                         ProfileService profiles, AbilityService ability,
+                         @Value("${app.files.internal-base-url}") String internalBaseUrl) {
         this.mapper = mapper;
         this.files = files;
         this.json = json;
@@ -59,6 +62,7 @@ public class ResumeService {
         this.taskMapper = taskMapper;
         this.profiles = profiles;
         this.ability = ability;
+        this.internalBaseUrl = internalBaseUrl;
     }
 
     public ResponseEntity<CommonResult<Object>> upload(String userId, String route, String key, MultipartFile file,
@@ -97,7 +101,8 @@ public class ResumeService {
                 versionNo = mapper.maxVersion(actualResumeId) + 1;
             }
             mapper.insertVersion(versionId, actualResumeId, userId, versionNo, stored.fileName(), stored.key(),
-                    stored.mimeType(), stored.bytes().length, stored.sha256(), stored.text(), stored.textSha256());
+                    stored.mimeType(), stored.bytes().length, stored.sha256(), stored.text(), stored.textSha256(),
+                    stored.layoutVersion());
             mapper.updateLatest(actualResumeId, versionId);
             Map<String, Object> row = mapper.resume(actualResumeId, userId);
             Map<String, Object> version = mapper.version(versionId, userId);
@@ -162,8 +167,20 @@ public class ResumeService {
         return new DownloadContent(resource, String.valueOf(version.get("file_name")), String.valueOf(version.get("mime_type")));
     }
 
-    public ResponseEntity<CommonResult<Object>> parse(String userId, String versionId, String route, String key) {
-        Map<String, Object> request = Map.of("versionId", versionId);
+    /**
+     * Agent 内部下载：带 owner 的签名 URL（HMAC 覆盖 owner:versionId:expires，不可伪造），
+     * 无需用户 Bearer 认证；用于 RESUME_OCR 任务获取原始 PDF。
+     */
+    public DownloadContent fileBySignature(String owner, String versionId, long expires, String signature) {
+        return file(owner, versionId, expires, signature);
+    }
+
+    public ResponseEntity<CommonResult<Object>> parse(String userId, String versionId, String route, String key,
+                                                       Boolean reparse) {
+        boolean forceReparse = Boolean.TRUE.equals(reparse);
+        Map<String, Object> request = forceReparse
+                ? Map.of("versionId", versionId, "reparse", true)
+                : Map.of("versionId", versionId);
         ResponseEntity<CommonResult<Object>> replay = tasks.replay(userId, "POST", route, key, request);
         if (replay != null) {
             return replay;
@@ -178,12 +195,54 @@ public class ResumeService {
             throw BusinessException.taskInProgress(latest.getId());
         }
 
-        if (Set.of("PARSED", "CONFIRMED").contains(status) && latest != null && "SUCCEEDED".equals(latest.getStatus())) {
+        if (!forceReparse && Set.of("PARSED", "CONFIRMED").contains(status) && latest != null && "SUCCEEDED".equals(latest.getStatus())) {
             return idempotency.executeTask(userId, "POST", route, key, request,
                     () -> new IdempotencyService.ActionResult(latest.getId(), tasks.vo(latest)));
         }
-        if (!Set.of("UPLOADED", "FAILED").contains(status)) {
+        // reparse 仅开放给待确认版本；已确认版本通过事实纠正或追加版本处理。
+        if (!Set.of("UPLOADED", "FAILED").contains(status) && !(forceReparse && "PARSED".equals(status))) {
             throw BusinessException.conflict("当前简历版本不能解析", "INVALID_STATE");
+        }
+        return createParseTask(userId, versionId, version, route, key, request);
+    }
+
+    /**
+     * 按版本当前文本状态创建解析或 OCR 任务：
+     * PDF 无文字层（文本为空或仅页码标记）时先走 RESUME_OCR，识别完成后再自动接续解析。
+     */
+    private ResponseEntity<CommonResult<Object>> createParseTask(String userId, String versionId,
+                                                                  Map<String, Object> version, String route,
+                                                                  String key, Map<String, Object> request) {
+        String text = version.get("extracted_text") == null ? null : String.valueOf(version.get("extracted_text"));
+        String mimeType = String.valueOf(version.get("mime_type"));
+        boolean pdfWithoutText = "application/pdf".equals(mimeType)
+                && (text == null || text.replaceAll("\\[page:\\d+]", "").isBlank());
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("versionId", versionId);
+        document.put("fileName", version.get("file_name"));
+        document.put("mimeType", mimeType);
+        document.put("sizeBytes", version.get("size_bytes"));
+        if (pdfWithoutText) {
+            document.put("downloadUrl", internalDownloadUrl(userId, versionId));
+            Map<String, Object> payload = Map.of("document", document);
+            return tasks.create(userId, "POST", route, key, request, "RESUME_OCR", "RESUME_VERSION", versionId,
+                    Map.of("resumeVersionId", versionId), payload, null, taskId -> { });
+        }
+        document.put("text", text);
+        Map<String, Object> payload = Map.of("document", document, "skillCatalog", profiles.agentSkillCatalog(userId));
+        return tasks.create(userId, "POST", route, key, request, "RESUME_PARSE", "RESUME_VERSION", versionId,
+                Map.of("resumeVersionId", versionId), payload, null,
+                taskId -> mapper.updateStatus(versionId, "PARSING"));
+    }
+
+    /**
+     * OCR 保存成功后的自动接续解析：复用已识别文本直接创建 RESUME_PARSE 任务。
+     * 接续失败时版本保持 UPLOADED，用户可手动发起解析。
+     */
+    public void startParseAfterOcr(String userId, String versionId, String ocrTaskId) {
+        Map<String, Object> version = mapper.version(versionId, userId);
+        if (version == null || !"UPLOADED".equals(String.valueOf(version.get("status")))) {
+            return;
         }
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("versionId", versionId);
@@ -192,8 +251,18 @@ public class ResumeService {
         document.put("sizeBytes", version.get("size_bytes"));
         document.put("text", version.get("extracted_text"));
         Map<String, Object> payload = Map.of("document", document, "skillCatalog", profiles.agentSkillCatalog(userId));
-        return tasks.create(userId, "POST", route, key, request, "RESUME_PARSE", "RESUME_VERSION", versionId,
-                Map.of("resumeVersionId", versionId), payload, taskId -> mapper.updateStatus(versionId, "PARSING"));
+        tasks.create(userId, "POST", "/internal/ai/ocr-followup/" + ocrTaskId, UUID.randomUUID().toString(),
+                Map.of("versionId", versionId), "RESUME_PARSE", "RESUME_VERSION", versionId,
+                Map.of("resumeVersionId", versionId), payload, null,
+                taskId -> mapper.updateStatus(versionId, "PARSING"));
+    }
+
+    private String internalDownloadUrl(String userId, String versionId) {
+        Instant expiresAt = Instant.now().plusSeconds(900);
+        String signature = files.signature(userId, versionId, expiresAt);
+        return internalBaseUrl + "/api/v1/resume-versions/" + versionId
+                + "/file?owner=" + userId
+                + "&expires=" + expiresAt.getEpochSecond() + "&signature=" + signature;
     }
 
     public ResponseEntity<CommonResult<Object>> confirm(String userId, String versionId, String route, String key,

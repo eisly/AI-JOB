@@ -58,7 +58,7 @@ const emit = defineEmits<{
   margin-top: 12px;
 }
 .muted {
-  color: #909399;
+  color: var(--ai-text-tertiary, #909399);
   font-size: 12px;
 }
 </style>

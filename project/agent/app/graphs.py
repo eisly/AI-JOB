@@ -24,13 +24,14 @@ from .operations import (
     PROJECT_RECOMMEND,
     RESUME_DIAGNOSE,
     RESUME_OPTIMIZE,
+    RESUME_OCR,
     RESUME_PARSE,
 )
 from .skills import get_skill
 
 GRAPH_VERSION = "career-orchestrator-v1"
 DOMAIN_OPERATIONS: dict[str, tuple[str, ...]] = {
-    "profile": (RESUME_PARSE, RESUME_DIAGNOSE, RESUME_OPTIMIZE),
+    "profile": (RESUME_PARSE, RESUME_OCR, RESUME_DIAGNOSE, RESUME_OPTIMIZE),
     "job": (JD_ANALYZE, JOB_MATCH, JOB_SEARCH),
     "learning": (
         LEARNING_PLAN,

@@ -409,7 +409,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handleDocumentKeyd
     }
 
     &.is-active {
-      background-color: $ai-primary;
+      background-color: var(--ai-primary-solid, $ai-primary);
       color: #fff;
       font-weight: 600;
     }

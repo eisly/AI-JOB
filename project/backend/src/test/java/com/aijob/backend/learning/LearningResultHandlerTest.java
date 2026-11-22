@@ -37,6 +37,17 @@ class LearningResultHandlerTest {
             ability, profiles, json);
 
     @Test
+    void practiceEvaluationRetryUpdatesTheTaskTrackedByTheSet() {
+        AiTask task = task("LEARNING_PRACTICE_EVALUATE", "practice-set");
+        when(mapper.practiceEvaluationRetried("practice-set", "new-task")).thenReturn(1, 0);
+
+        handler.prepareRetry(task, "new-task");
+
+        BusinessException error = assertThrows(BusinessException.class, () -> handler.prepareRetry(task, "new-task"));
+        assertEquals("INVALID_STATE", error.getErrorKey());
+    }
+
+    @Test
     void insufficientEvaluationDoesNotCompletePlanItem() {
         AiTask task = task("LEARNING_EVALUATE", "answer");
         Map<String, Object> answer = new LinkedHashMap<>();

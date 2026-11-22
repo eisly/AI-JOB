@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WaitStatus from '@/components/WaitStatus.vue'
 import ApplicationForm from '@/views/application/ApplicationForm.vue'
 import type { ApplicationCreatePayload } from '@/types/application'
 import JobSearchView from '@/views/job-search/JobSearchView.vue'
@@ -736,11 +737,11 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 </script>
 
 <template>
-  <div class="page job-match-page">
+  <div class="page job-match-page" :class="{ 'job-match-page--search': activeTab === 'search' }">
     <header class="page-header">
       <div>
-        <h1><el-icon><Aim /></el-icon> 岗位推荐与投递</h1>
-        <p>搜索岗位、比较匹配度，并将感兴趣的机会加入投递计划。</p>
+        <h1><el-icon v-if="activeTab !== 'search'"><Aim /></el-icon>岗位推荐与投递</h1>
+        <p v-if="activeTab !== 'search'">搜索岗位、比较匹配度，并将感兴趣的机会加入投递计划。</p>
       </div>
       <div v-if="activeTab !== 'search'" class="page-header__actions">
         <el-tag v-if="selectedJobIds.length" type="primary" effect="plain">已选 {{ selectedJobIds.length }} / 20 个岗位</el-tag>
@@ -752,7 +753,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
     <el-tabs v-model="activeTab" class="job-tabs">
       <el-tab-pane label="AI 搜索" name="search" />
       <el-tab-pane label="可信岗位" name="trusted" />
-      <el-tab-pane label="个人JD" name="personal" />
+      <el-tab-pane label="个人 JD" name="personal" />
       <el-tab-pane label="收藏" name="favorites" />
       <el-tab-pane label="匹配结果" name="matches" />
     </el-tabs>
@@ -800,15 +801,11 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
           <el-button v-if="importTask?.status === 'SUCCEEDED' && importedJobId" size="small" :loading="importRetrying" @click="retryImportedJob">重新读取岗位详情</el-button>
           <el-button v-else-if="lastImportBody && (!importTask || canRetryTrackedTask(importTask))" size="small" :loading="importRetrying" @click="retryImport">按原参数重试</el-button>
         </el-alert>
-        <TaskStatus v-if="importTask" :task="importTask" :reasoning="importTracker.reasoningText.value">
+        <TaskStatus v-if="importTaskId" :task="importTask" :loading="importTracker.loading.value" :reasoning="importTracker.reasoningText.value" :tracking-error="importTrackingError" :refreshing="importTracker.refreshing.value" @refresh="importTracker.refresh">
           <template #actions>
-            <el-button v-if="canRetryTrackedTask(importTask)" size="small" type="primary" :loading="importRetrying" @click="retryImport">按原参数重试</el-button>
+            <el-button v-if="importTask && canRetryTrackedTask(importTask)" size="small" type="primary" :loading="importRetrying" @click="retryImport">按原参数重试</el-button>
           </template>
         </TaskStatus>
-        <div v-if="importTrackingError" class="tracking-error">
-          <span>{{ errorMessage(importTrackingError) }}</span>
-          <el-button size="small" @click="importTracker.restart">恢复任务跟踪</el-button>
-        </div>
       </section>
 
       <section class="panel">
@@ -892,15 +889,11 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         <el-alert v-if="matchActionError" class="task-alert" :title="errorMessage(matchActionError)" type="error" :closable="false" show-icon>
           <el-button v-if="lastMatchBody && (!matchTask || canRetryTrackedTask(matchTask))" size="small" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
         </el-alert>
-        <TaskStatus v-if="matchTask" :task="matchTask" :reasoning="matchTracker.reasoningText.value">
+        <TaskStatus v-if="matchTaskId" :task="matchTask" :loading="matchTracker.loading.value" :reasoning="matchTracker.reasoningText.value" :tracking-error="matchTrackingError" :refreshing="matchTracker.refreshing.value" @refresh="matchTracker.refresh">
           <template #actions>
-            <el-button v-if="canRetryTrackedTask(matchTask)" size="small" type="primary" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
+            <el-button v-if="matchTask && canRetryTrackedTask(matchTask)" size="small" type="primary" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
           </template>
         </TaskStatus>
-        <div v-if="matchTrackingError" class="tracking-error">
-          <span>{{ errorMessage(matchTrackingError) }}</span>
-          <el-button size="small" @click="matchTracker.restart">恢复任务跟踪</el-button>
-        </div>
       </section>
 
       <div class="match-layout">
@@ -909,7 +902,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
             <h2>历史批次</h2>
             <el-button :icon="Refresh" :loading="matchesLoading" @click="loadMatches">刷新</el-button>
           </div>
-          <AsyncState :loading="matchesLoading" :error="matchesError" :empty="!matchBatches.records.length" empty-text="暂无匹配批次" @retry="loadMatches">
+          <AsyncState :loading="matchesLoading" :retain="matchBatches.records.length > 0" :error="matchesError" :empty="!matchBatches.records.length" empty-text="暂无匹配批次" @retry="loadMatches">
             <div class="list-stack">
               <button v-for="batch in matchBatches.records" :key="batch.id" type="button" class="batch-card" :class="{ 'batch-card--active': selectedMatch?.id === batch.id }" @click="loadMatch(batch.id)">
                 <span class="batch-card__top">
@@ -1158,16 +1151,12 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
           </div>
         </el-form>
         <el-alert v-if="planActionError" :title="errorMessage(planActionError)" type="error" :closable="false" show-icon />
-        <div v-if="planAuthorityLoading" class="authority-loading" v-loading="true">正在读取已生成的训练计划</div>
-        <TaskStatus v-if="planTask" :task="planTask" :reasoning="planTracker.reasoningText.value">
+        <WaitStatus v-if="planAuthorityLoading" title="正在读取训练计划" />
+        <TaskStatus v-else-if="planTaskId" :task="planTask" :loading="planTracker.loading.value" :reasoning="planTracker.reasoningText.value" :tracking-error="planTrackingError" :refreshing="planTracker.refreshing.value" @refresh="planTracker.refresh">
           <template #actions>
-            <el-button v-if="canRetryTrackedTask(planTask)" size="small" type="primary" :loading="planRetrying" @click="retryPlan">按原参数重试</el-button>
+            <el-button v-if="planTask && canRetryTrackedTask(planTask)" size="small" type="primary" :loading="planRetrying" @click="retryPlan">按原参数重试</el-button>
           </template>
         </TaskStatus>
-        <div v-if="planTrackingError" class="tracking-error">
-          <span>{{ errorMessage(planTrackingError) }}</span>
-          <el-button size="small" @click="planTracker.restart">恢复任务跟踪</el-button>
-        </div>
       </div>
       <template #footer>
         <el-button @click="planDialogVisible = false">关闭</el-button>
@@ -1182,20 +1171,27 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 <style scoped lang="scss">
 .job-match-page { padding-bottom: 28px; }
 .page-header h1 { display: flex; align-items: center; gap: 10px; }
-.job-tabs { margin-bottom: 16px; padding: 0 16px; border: 1px solid #e8f0fa; border-radius: $ai-radius-lg; background: #fff; }
+.job-tabs { margin-bottom: 16px; padding: 0 16px; border: 1px solid var(--ai-border-light, #e8f0fa); border-radius: $ai-radius-lg; background: var(--ai-bg-card, #fff); }
+.job-match-page--search .job-tabs { margin-bottom: 30px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.job-match-page--search .job-tabs :deep(.el-tabs__header) { margin: 0; }
+.job-match-page--search .job-tabs :deep(.el-tabs__nav-wrap::after) { height: 1px; }
+.job-match-page--search .job-tabs :deep(.el-tabs__item) { font-size: 15px; }
+@media (min-width: 1061px) {
+  .job-match-page--search { padding: 10px 24px 28px; }
+  .job-match-page--search .page-header h1 { font-size: 30px; font-weight: 700; }
+}
 .filter-keyword { width: min(320px, 100%); }
 .filter-control { width: 170px; }
 .filter-note { margin: 0; color: $ai-text-secondary; font-size: 13px; }
 .task-alert { margin: 16px 0; }
 .task-alert :deep(.el-alert__content) { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.tracking-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: $ai-danger; font-size: 13px; }
 .reference-failures { display: grid; gap: 8px; margin-bottom: 16px; }
-.job-card { display: flex; gap: 12px; padding: 18px; border: 1px solid $ai-border; border-radius: $ai-radius; background: #fff; transition: border-color .2s, box-shadow .2s; }
-.job-card:hover { border-color: #b8ccf4; box-shadow: $ai-shadow-hover; }
+.job-card { display: flex; gap: 12px; padding: 18px; border: 1px solid $ai-border; border-radius: $ai-radius; background: var(--ai-bg-card, #fff); transition: border-color .2s, box-shadow .2s; }
+.job-card:hover { border-color: var(--ai-accent-border, #b8ccf4); box-shadow: $ai-shadow-hover; }
 .job-card__selector { padding-top: 4px; }
 .job-card__content { min-width: 0; flex: 1; }
 .job-card__heading { display: flex; justify-content: space-between; gap: 16px; }
-.job-card__heading h3 { margin: 0 0 6px; color: #101d4b; font-size: 18px; }
+.job-card__heading h3 { margin: 0 0 6px; color: var(--ai-text-primary, #101d4b); font-size: 18px; }
 .job-card__heading p { margin: 0; color: $ai-text-secondary; }
 .job-card__tags, .skill-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .job-card__meta, .job-card__source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 12px; color: $ai-text-secondary; font-size: 13px; }
@@ -1208,7 +1204,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .match-setup__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
 .match-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); align-items: start; gap: 14px; }
 .match-history { position: sticky; top: 14px; }
-.batch-card { display: grid; gap: 8px; width: 100%; padding: 13px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: #fff; cursor: pointer; }
+.batch-card { display: grid; gap: 8px; width: 100%; padding: 13px; border: 1px solid $ai-border; border-radius: $ai-radius; color: inherit; text-align: left; background: var(--ai-bg-card, #fff); cursor: pointer; }
 .batch-card:hover, .batch-card--active { border-color: $ai-primary; background: $ai-primary-light; }
 .batch-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .batch-card__id { overflow: hidden; color: $ai-text-tertiary; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1223,14 +1219,14 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .match-group__heading { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid $ai-border; }
 .match-group__heading h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 7px; font-size: 17px; }
 .match-group__heading p { margin: 0; color: $ai-text-secondary; line-height: 1.6; }
-.match-item { padding: 16px; border: 1px solid $ai-border; border-radius: $ai-radius; background: #fff; }
+.match-item { padding: 16px; border: 1px solid $ai-border; border-radius: $ai-radius; background: var(--ai-bg-card, #fff); }
 .match-item__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-.match-item__heading h4 { margin: 0 0 6px; color: #101d4b; font-size: 17px; }
+.match-item__heading h4 { margin: 0 0 6px; color: var(--ai-text-primary, #101d4b); font-size: 17px; }
 .match-score { display: grid; flex: 0 0 76px; text-align: center; }
 .match-score strong { color: $ai-primary; font-size: 26px; line-height: 1.2; }
 .match-score span { color: $ai-text-secondary; font-size: 12px; }
 .detail-block { margin-top: 16px; overflow-x: auto; }
-.detail-block h5 { margin: 0 0 10px; color: #101d4b; font-size: 15px; }
+.detail-block h5 { margin: 0 0 10px; color: var(--ai-text-primary, #101d4b); font-size: 15px; }
 .detail-block :deep(.el-table) { min-width: 600px; }
 .reason-list { display: grid; gap: 6px; margin: 0; padding-left: 20px; line-height: 1.65; }
 .gap-list { display: grid; gap: 10px; }
@@ -1241,11 +1237,11 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .source-block p { margin: 0 0 7px; }
 .match-item__actions { padding-top: 14px; border-top: 1px solid $ai-border; }
 .drawer-job-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
-.drawer-job-heading h2 { margin: 0 0 8px; color: #101d4b; }
+.drawer-job-heading h2 { margin: 0 0 8px; color: var(--ai-text-primary, #101d4b); }
 .drawer-job-heading p { margin: 0; color: $ai-text-secondary; }
 .drawer-actions { margin-bottom: 16px; }
 .drawer-section { margin-top: 24px; }
-.drawer-section h3 { margin: 0 0 12px; color: #101d4b; font-size: 17px; }
+.drawer-section h3 { margin: 0 0 12px; color: var(--ai-text-primary, #101d4b); font-size: 17px; }
 .drawer-section h4 { margin: 18px 0 10px; font-size: 14px; }
 .drawer-section .skill-tags { justify-content: flex-start; }
 .jd-full-text { max-height: 420px; overflow-y: auto; padding: 14px; border-radius: $ai-radius; background: $ai-bg-page; }
@@ -1255,7 +1251,6 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .quote-list p { margin: 6px 0 0; }
 .source-link { margin: 12px 0; }
 .plan-dialog-content { display: grid; gap: 16px; }
-.authority-loading { min-height: 70px; padding: 24px; text-align: center; color: $ai-text-secondary; }
 :global(.job-drawer) { max-width: 100%; }
 :global(.responsive-dialog) { max-width: calc(100vw - 24px); }
 @media (max-width: 1100px) {

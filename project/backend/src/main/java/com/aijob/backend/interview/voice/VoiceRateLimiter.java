@@ -9,7 +9,7 @@ import com.aijob.backend.common.BusinessException;
 
 /**
  * 语音接口频次控制。
- * 与登录限流不同：Redis 故障时放行并告警，避免可选能力阻断面试主链路。
+ * Redis 故障时放行并告警，避免可选能力阻断面试主链路。
  */
 @Service
 public class VoiceRateLimiter {

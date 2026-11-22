@@ -46,10 +46,22 @@ def build_model_input(
             "skillCatalog": payload.get("skillCatalog") or [],
             "documentText": context.get("document_text", ""),
         }
+    if operation == "RESUME_OCR":
+        return {
+            "document": {
+                "fileName": payload.get("document", {}).get("fileName"),
+                "mimeType": payload.get("document", {}).get("mimeType"),
+            },
+        }
     if operation == "RESUME_DIAGNOSE":
         return {
             "profileVersion": payload.get("profileVersion"),
             "documentText": context.get("document_text", ""),
+            "diagnosisDate": context.get("diagnosis_date"),
+            "timelineLevel": context.get("timeline_level"),
+            "documentTextLayoutVersion": payload.get("document", {}).get("textLayoutVersion"),
+            "documentReadOrderVerified": payload.get("document", {}).get("readOrderVerified"),
+            "assessmentRules": payload.get("assessmentRules") or context.get("assessment_rules"),
         }
     if operation == "RESUME_OPTIMIZE":
         return {
@@ -174,7 +186,23 @@ def build_model_input(
         }
     if operation == "PROJECT_RECOMMEND":
         match_item = payload.get("matchItem") or {}
+        candidates = []
+        for item in context.get("repository_candidates") or []:
+            candidates.append({
+                "sourceUrl": item.get("sourceUrl"),
+                "platform": item.get("platform"),
+                "path": item.get("path"),
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+                "skillCodes": item.get("skillCodes") or [],
+                "license": item.get("license"),
+                "stars": item.get("stars"),
+                "readmeUrl": item.get("readmeUrl"),
+                "stackEvidence": item.get("stackEvidence") or [],
+            })
         return {
+            "query": payload.get("query"),
+            "sources": payload.get("sources") or [],
             "profile": payload.get("profile") or {},
             "allowedSkillCodes": payload.get("allowedSkillCodes") or [],
             "matchItem": {
@@ -188,6 +216,7 @@ def build_model_input(
             else None,
             "difficulty": payload.get("difficulty"),
             "maxDurationWeeks": payload.get("maxDurationWeeks"),
+            "repositoryCandidates": candidates,
         }
     if operation == "JOB_SEARCH":
         return {
@@ -198,8 +227,19 @@ def build_model_input(
             "limits": payload.get("limits") or {},
         }
     if operation == "PROJECT_PLAN":
+        recommendation = payload.get("recommendation") or {}
         return {
-            "recommendation": payload.get("recommendation") or {},
+            "recommendation": {
+                "title": recommendation.get("title"),
+                "summary": recommendation.get("summary"),
+                "skillCodes": recommendation.get("skillCodes") or [],
+                "difficulty": recommendation.get("difficulty"),
+                "estimatedWeeks": recommendation.get("estimatedWeeks"),
+                "reason": recommendation.get("reason"),
+                "gettingStarted": recommendation.get("gettingStarted") or [],
+                "deliverables": recommendation.get("deliverables") or [],
+                "primarySource": recommendation.get("primarySource"),
+            },
             "weeklyHours": payload.get("weeklyHours"),
         }
     raise ValueError(f"unknown operation {operation}")

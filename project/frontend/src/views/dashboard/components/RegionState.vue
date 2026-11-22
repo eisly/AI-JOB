@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from '@/components/LoadingSkeleton.vue'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import type { ApiError, NavigationTarget, RegionStatus } from '@/types/workbench'
@@ -51,12 +52,7 @@ function go(target: NavigationTarget): void {
 
 <template>
   <div class="region-state">
-    <div v-if="isLoading" class="region-loading" role="status">
-      <span class="region-loading__line region-loading__line--wide" />
-      <span class="region-loading__line" />
-      <span class="region-loading__line region-loading__line--short" />
-      <p class="region-loading__text">{{ loadingText || '正在加载…' }}</p>
-    </div>
+    <LoadingSkeleton v-if="isLoading" :label="loadingText || '正在加载'" />
 
     <div v-else-if="status === 'ERROR'" class="region-error" role="alert">
       <p>{{ errorText }}</p>
@@ -81,19 +77,13 @@ function go(target: NavigationTarget): void {
 
 <style scoped lang="scss">
 .region-state { min-height: 105px; }
-.region-loading { display: flex; flex-direction: column; gap: 10px; padding: 18px 4px; }
-.region-loading__line { display: block; height: 14px; width: 72%; border-radius: 6px; background: linear-gradient(90deg, #eef4fb 25%, #f7fbff 37%, #eef4fb 63%); background-size: 400% 100%; animation: region-skeleton 1.4s ease infinite; }
-.region-loading__line--wide { width: 92%; height: 18px; }
-.region-loading__line--short { width: 46%; }
-.region-loading__text { color: #8495b1; font-size: 13px; }
-@keyframes region-skeleton { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
-.region-error { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: #7184a6; padding: 10px 4px; }
-.region-error__reference { color: #9aa9c2; font-size: 12px; }
-.region-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 4px; color: #7184a6; }
-.region-empty__text { color: #33456f; font-weight: 600; }
+.region-error { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--ai-text-secondary, #7184a6); padding: 10px 4px; }
+.region-error__reference { color: var(--ai-text-tertiary, #9aa9c2); font-size: 12px; }
+.region-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 4px; color: var(--ai-text-secondary, #7184a6); }
+.region-empty__text { color: var(--ai-text-secondary, #33456f); font-weight: 600; }
 .region-empty__hint { line-height: 1.5; }
-.region-refresh-line { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, #0c5cf5, transparent); background-size: 50% 100%; animation: region-refresh 1.1s linear infinite; }
+.region-refresh-line { height: 2px; margin-bottom: 10px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--ai-primary-solid, #0c5cf5), transparent); background-size: 50% 100%; animation: region-refresh 1.1s linear infinite; }
 @keyframes region-refresh { 0% { background-position: -50% 0; } 100% { background-position: 150% 0; } }
-.action-button { border: 0; cursor: pointer; padding: 9px 16px; border-radius: 7px; background: #0c5cf5; color: #fff; font-weight: 600; }
-.action-button:hover { background: #084ed5; }
+.action-button { border: 0; cursor: pointer; padding: 9px 16px; border-radius: 7px; background: var(--ai-primary-solid, #0c5cf5); color: #fff; font-weight: 600; }
+.action-button:hover { background: var(--ai-primary-solid-hover, #084ed5); }
 </style>

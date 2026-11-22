@@ -45,16 +45,16 @@ const refreshedText = computed(() => formatRefreshedAt(props.refreshedAt))
 </template>
 
 <style scoped lang="scss">
-.welcome-hero { padding: 0 14px 4px; color: #61749b; font-size: 16px; }
+.welcome-hero { padding: 0 14px 4px; color: var(--ai-text-secondary, #61749b); font-size: 16px; }
 .welcome-hero__greeting { margin: 0; }
 .welcome-hero__title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.welcome-hero h1 { color: #09143e; font-size: 30px; line-height: 1.3; margin: 8px 0; font-weight: 750; }
+.welcome-hero h1 { color: var(--ai-text-primary, #09143e); font-size: 30px; line-height: 1.3; margin: 8px 0; font-weight: 750; }
 .welcome-hero__description { font-size: 17px; margin: 0; }
-.refresh-button { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 8px 12px; border: 1px solid #d8e5f6; border-radius: 8px; background: #fff; color: #33456f; cursor: pointer; white-space: nowrap; }
-.refresh-button small { color: #8495b1; font-size: 12px; }
+.refresh-button { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--ai-accent-border, #d8e5f6); border-radius: 8px; background: var(--ai-bg-card, #fff); color: var(--ai-text-secondary, #33456f); cursor: pointer; white-space: nowrap; }
+.refresh-button small { color: var(--ai-text-tertiary, #8495b1); font-size: 12px; }
 .refresh-button:disabled { cursor: not-allowed; opacity: 0.7; }
-.identity-error { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid #ffd7d5; border-radius: 8px; background: #fff4f3; color: #b43c35; font-size: 14px; }
-.identity-error__retry { border: 0; background: transparent; color: #0c5cf5; font-weight: 600; cursor: pointer; }
+.identity-error { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--ai-danger-border, #ffd7d5); border-radius: 8px; background: var(--ai-danger-bg, #fff4f3); color: var(--ai-danger, #b43c35); font-size: 14px; }
+.identity-error__retry { border: 0; background: transparent; color: var(--ai-primary, #0c5cf5); font-weight: 600; cursor: pointer; }
 @media (max-width: 700px) {
   .welcome-hero { padding-left: 0; }
   .welcome-hero__title-row { flex-direction: column; }

@@ -538,27 +538,91 @@ def _resume_diagnose(request: LLMRequest) -> dict[str, Any]:
         "简历", "教育", "经历", "项目", "技能", "工作", "实习",
         "resume", "education", "experience", "project", "skill", "developer", "internship",
     )):
-        return {"items": []}
-    quote = next(
-        (
-            line
-            for line in lines
-            if any(keyword in line for keyword in ("经历", "项目", "实习", "工作", "技能"))
-        ),
-        lines[0],
-    )[:1000]
-    return {
+        return {"items": [], "assessment": None}
+    quote_lines = [
+        line
+        for line in lines
+        if any(keyword in line for keyword in ("经历", "项目", "实习", "工作", "技能"))
+    ]
+    quote = (quote_lines[0] if quote_lines else lines[0])[:1000]
+    extra_quotes = [line[:1000] for line in quote_lines[1:3] if line[:1000] != quote]
+    assessment = {
+        "ruleVersion": "resume-quality-v2",
+        "dimensions": [
+            {
+                "code": "EXPERIENCE_PROJECTS",
+                "score": 18,
+                "rationale": "原文包含经历描述，但成果与个人贡献不够明确。",
+                "quote": quote,
+            },
+            {
+                "code": "SKILLS_EVIDENCE",
+                "score": 12,
+                "rationale": "技能描述较具体，且能在经历描述中找到部分支撑。",
+                "quote": quote,
+                "quotes": extra_quotes[:1],
+            },
+            {
+                "code": "CONTENT_COMPLETENESS",
+                "score": 14,
+                "rationale": "教育、经历、技能信息基本齐全，可理解候选人背景。",
+                "quote": quote,
+            },
+            {
+                "code": "STRUCTURE_CLARITY",
+                "score": 10,
+                "rationale": "章节与时间线基本清楚，层级稍显混乱。",
+                "quote": quote,
+            },
+            {
+                "code": "EXPRESSION_PROFESSIONALISM",
+                "score": 9,
+                "rationale": "表述总体具体，个别术语使用不一致。",
+                "quote": quote,
+            },
+        ],
+        "strengths": [
+            {
+                "title": "具备相关经历描述",
+                "quote": quote,
+                "quotes": extra_quotes[:1],
+                "approach": "在项目中使用该技能完成对应实现",
+                "contribution": "原文描述由本人完成该段工作",
+                "result": "原文未给出可核实结果",
+                "description": "原文包含与目标方向相关的经历描述，可作为面试追问的基础。",
+            }
+        ],
+    }
+    result = {
         "items": [
             {
                 "priority": "SUGGESTION",
                 "title": "补充可核实的经历结果",
                 "issue": "该段主要呈现经历或技能描述，结果信息不够明确",
                 "quote": quote,
+                "quotes": extra_quotes[:1],
                 "rationale": "原文没有为该段提供清晰的结果说明，阅读者难以核对实际贡献",
+                "impact": "招聘方难以判断该段经历的实际贡献与成效",
                 "suggestion": "仅补充本人能够核实的实际结果；没有可靠结果时保留原表述，不添加量化数据",
+                "example": None,
+                "pendingVerification": ["实际结果与量化指标"],
             }
-        ]
+        ],
+        "assessment": assessment,
     }
+    rules = _payload(request).get("assessmentRules") or {}
+    assessment["ruleVersion"] = rules.get("ruleVersion", "resume-quality-v2")
+    if assessment["ruleVersion"] == "resume-quality-v3":
+        assessment["summary"] = "简历已列出主要经历。优先补足个人职责与可核实成果。"
+        checks_by_code = {rule["code"]: rule["checks"] for rule in rules["dimensions"]}
+        for dimension in assessment["dimensions"]:
+            dimension["levels"] = {check["code"]: 3 for check in checks_by_code[dimension["code"]]}
+            timeline = request.context.get("timeline_level")
+            if timeline is not None and "timeline" in dimension["levels"]:
+                dimension["levels"]["timeline"] = timeline
+        result["items"][0]["dimensionCode"] = "EXPERIENCE_PROJECTS"
+        result["items"][0]["checkCode"] = "outcomes"
+    return result
 
 
 def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
@@ -595,23 +659,25 @@ def _project_recommend(request: LLMRequest) -> dict[str, Any]:
         for item in gaps
         if isinstance(item, dict) and item.get("skillCode") in allowed
     ]
-    selected = gap_skills[:1] or allowed[:1]
-    skill = selected[0] if selected else "general"
     max_weeks = int(payload.get("maxDurationWeeks") or 12)
     difficulty = str(payload.get("difficulty") or "INTERMEDIATE")
-    return {
-        "items": [
-            {
-                "title": f"{skill} 核心功能实战",
-                "summary": f"围绕 {skill} 完成一个边界清晰、可演示和可自测的学习项目",
-                "skillCodes": selected,
-                "difficulty": difficulty,
-                "estimatedWeeks": min(2, max_weeks),
-                "reason": "依据确认画像、授权技能目录和已提供的匹配差距形成学习建议，不代表用户已有项目经验",
-                "deliverables": ["项目说明与核心功能演示", "实现源码与自测记录"],
-            }
-        ]
-    }
+    items = []
+    for candidate in (payload.get("repositoryCandidates") or [])[:2]:
+        matched = [str(code) for code in candidate.get("skillCodes") or [] if str(code) in allowed]
+        selected = matched[:1] or gap_skills[:1] or allowed[:1]
+        items.append({
+            "sourceUrl": candidate.get("sourceUrl"),
+            "skillCodes": selected or ["general"],
+            "difficulty": difficulty,
+            "estimatedWeeks": min(2, max_weeks),
+            "reason": "依据真实仓库资料与目标技能形成入门学习建议，不代表用户已有项目经验",
+            "gettingStarted": [
+                "阅读仓库 README 和目录结构，确认运行方式",
+                "运行官方示例或最小 demo，记录依赖与启动步骤",
+            ],
+            "deliverables": ["项目说明与核心功能演示", "实现源码与自测记录"],
+        })
+    return {"items": items}
 
 
 def _job_search(request: LLMRequest) -> dict[str, Any]:

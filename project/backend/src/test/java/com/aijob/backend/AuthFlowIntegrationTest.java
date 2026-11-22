@@ -15,10 +15,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,10 +55,6 @@ class AuthFlowIntegrationTest {
     @BeforeEach
     void setUp() {
         client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-        Set<String> rateKeys = redisTemplate.keys("career:rate:login:*");
-        if (rateKeys != null && !rateKeys.isEmpty()) {
-            redisTemplate.delete(rateKeys);
-        }
     }
 
     private Resp send(String method, String path, String json, Map<String, String> headers) throws Exception {
@@ -268,25 +262,24 @@ class AuthFlowIntegrationTest {
     }
 
     @Test
-    void rateLimitsRepeatedLoginFailures() throws Exception {
+    void acceptsCorrectPasswordAfterRepeatedLoginFailures() throws Exception {
         String email = uniqueEmail();
         register(email, PASSWORD);
-        List<Integer> statuses = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
             Resp resp = send("POST", "/api/v1/auth/login",
                     """
                             {"email":"%s","password":"%s"}
                             """.formatted(email, WRONG_PASSWORD), Map.of());
-            statuses.add(resp.status());
+            assertThat(resp.status()).isEqualTo(401);
+            assertThat(resp.json(objectMapper).at("/code").asInt()).isEqualTo(40101);
         }
-        assertThat(statuses.subList(0, 5)).containsOnly(401);
-        assertThat(statuses.get(5)).isEqualTo(429);
-        Resp limited = send("POST", "/api/v1/auth/login",
+        Resp login = send("POST", "/api/v1/auth/login",
                 """
                         {"email":"%s","password":"%s"}
-                        """.formatted(email, WRONG_PASSWORD), Map.of());
-        assertThat(limited.status()).isEqualTo(429);
-        assertThat(limited.json(objectMapper).at("/code").asInt()).isEqualTo(42901);
+                        """.formatted(email, PASSWORD), Map.of());
+        assertThat(login.status()).isEqualTo(200);
+        assertThat(login.json(objectMapper).at("/data/accessToken").asText()).isNotBlank();
+        assertThat(refreshTokenOf(login)).isNotBlank();
     }
 
     @Test

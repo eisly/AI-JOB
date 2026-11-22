@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from app.errors import HandlerValidationError
+from app.errors import HandlerError, HandlerValidationError
 from app.handlers import (
     FIXED_RUBRIC_WEIGHTS,
     GrowthAnalyzeHandler,
@@ -27,6 +29,7 @@ from app.handlers import (
     quote_in_text,
     utcnow_iso,
 )
+from app.llm import LLMResponse
 from app.schemas import (
     AIGrowthResult,
     AIJDResult,
@@ -168,10 +171,14 @@ def _resume_case():
 def test_resume_validate_dedupes_and_strips_unmapped():
     payload, output, prepared = _resume_case()
     result = ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
-    assert len(result.facts.skills) == 1
-    assert result.facts.skills[0].confirmed is False
+    # 模型识别 java（两条重复去重为一条）+ 目录补漏 redis/mysql（原文明确出现）= 3 项
+    assert [skill.skill_code for skill in result.facts.skills] == ["java", "redis", "mysql"]
+    assert all(skill.confirmed is False for skill in result.facts.skills)
+    assert result.facts.skills[0].location.startswith("page:1;line:")
     assert result.facts.warnings == ["w"]
-    assert result.unmapped_skills == ["保留"]
+    # 目录外候选必须能定位原文依据；"保留" 不在原文中，不得作为候选展示
+    assert result.unmapped_skills == []
+    assert result.unmapped_details == []
     assert result.text_hash == "hash"
 
 
@@ -190,25 +197,93 @@ def test_resume_keeps_internship_and_award_quotes_for_review():
     assert result.facts.awards[0].confirmed is False
 
 
-def test_resume_rejects_award_quote_outside_document():
+def test_resume_discards_award_quote_outside_document():
     payload, output, prepared = _resume_case()
     output.facts.awards = [ResumeEvidenceFact(
         claim="金奖", quote="不存在的金奖", location="paragraph:4",
     )]
-    with pytest.raises(HandlerValidationError, match="awards 的 quote 不在简历原文中"):
-        ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
+    result = ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
+    assert result.facts.awards == []
+    assert result.facts.internships
 
 
-def test_resume_rejects_unknown_skill_and_foreign_quote():
+@pytest.mark.asyncio
+async def test_resume_recovers_bad_skill_quotes_without_another_model_call():
     payload, output, prepared = _resume_case()
-    output.facts.skills[0].skill_code = "python"
-    with pytest.raises(HandlerValidationError, match="不在 skillCatalog"):
-        ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
+    data = output.model_dump(by_alias=True)
+    data["facts"]["skills"] = [
+        {"skillCode": "java", "claim": "c", "quote": "原文不存在的话", "location": "page:9"},
+        {"skillCode": "redis", "claim": "c", "quote": ""},
+        {"skillCode": "mysql", "claim": "c", "quote": "了解 MySQL 索引优化", "location": "page:9"},
+        {"skillCode": "python", "claim": "c", "quote": "参与Java接口开发", "location": "page:9"},
+    ]
+    requests = []
 
+    async def complete(request):
+        requests.append(request)
+        return LLMResponse(text=json.dumps(data), model="stub", prompt_version="")
+
+    result, meta = await ResumeParseHandler().execute(_resume_execution_ctx(payload, complete), prepared)
+    assert len(requests) == meta["attempts"] == 1
+    assert requests[0].thinking is False
+    skills = {skill["skillCode"]: skill for skill in result["facts"]["skills"]}
+    assert set(skills) == {"java", "redis", "mysql"}
+    assert "Java" in skills["java"]["quote"]
+    assert skills["mysql"]["quote"] == "了解MySQL索引优化"
+    for skill in skills.values():
+        assert skill["quote"] in prepared["document_text"]
+        assert skill["location"].startswith("page:1;line:")
+
+
+def _resume_execution_ctx(payload, complete):
+    async def emit_stage(name, progress):
+        pass
+
+    return SimpleNamespace(payload=payload, llm=SimpleNamespace(complete=complete), emit_stage=emit_stage,
+                           emit_reasoning=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken_output", ['{broken', '{"facts": {}}'])
+async def test_resume_repairs_an_unusable_model_response_only_once(broken_output):
     payload, output, prepared = _resume_case()
-    output.facts.skills[0].quote = "原文不存在的话"
-    with pytest.raises(HandlerValidationError, match="quote 不在简历原文中"):
-        ResumeParseHandler().validate_business(_ctx(payload), output, prepared, {})
+    prepared["document_text"] = "参与使用字典整理资料。"
+    responses = iter([broken_output, broken_output])
+    requests = []
+
+    async def complete(request):
+        requests.append(request)
+        return LLMResponse(text=next(responses), model="stub", prompt_version="")
+
+    with pytest.raises(HandlerError) as failed:
+        await ResumeParseHandler().execute(_resume_execution_ctx(payload, complete), prepared)
+    assert failed.value.code == "MODEL_OUTPUT_INVALID"
+    assert len(requests) == 2
+    assert all(request.thinking is False for request in requests)
+
+
+@pytest.mark.asyncio
+async def test_resume_budget_cancels_a_slow_repair_without_a_third_request(monkeypatch):
+    payload, _, prepared = _resume_case()
+    handler = ResumeParseHandler()
+    monkeypatch.setattr(handler, "timeout_seconds", 0.1)
+    requests = []
+    cancelled = False
+
+    async def complete(request):
+        nonlocal cancelled
+        requests.append(request)
+        if len(requests) == 1:
+            return LLMResponse(text='{broken', model="stub", prompt_version="")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled = True
+
+    with pytest.raises(HandlerError, match="超时") as failed:
+        await handler.execute(_resume_execution_ctx(payload, complete), prepared)
+    assert failed.value.retryable is True
+    assert cancelled and len(requests) == 2
 
 
 def test_resume_rejects_out_of_range_fields():

@@ -50,8 +50,11 @@ public class TaskRetryService {
                 throw BusinessException.conflict("该资源已成功处理，不能重试旧失败任务", "INVALID_STATE");
             }
         }
+        Map<String, Object> payload = json.map(original.getInputSnapshotJson());
+        boolean discoveryContinuation = "PROJECT_RECOMMEND".equals(original.getOperation())
+                && payload.get("discoveryRound") instanceof Number page && page.intValue() > 0;
         boolean retryCancelled = "CANCELLED".equals(original.getStatus())
-                && Set.of("INTERVIEW_TURN", "LEARNING_EVALUATE").contains(original.getOperation());
+                && (discoveryContinuation || Set.of("INTERVIEW_TURN", "LEARNING_EVALUATE", "LEARNING_PRACTICE_EVALUATE").contains(original.getOperation()));
         if (!Set.of("FAILED", "EXPIRED").contains(original.getStatus()) && !retryCancelled) {
             throw BusinessException.conflict("仅失败、过期或允许重试的已取消任务可以重试", "INVALID_STATE");
         }
@@ -59,7 +62,6 @@ public class TaskRetryService {
                 .filter(item -> item.operations().contains(original.getOperation())).findFirst()
                 .orElseThrow(() -> BusinessException.conflict("该任务类型不支持通用重试", "INVALID_STATE"));
         Map<String, Object> versions = json.map(original.getInputVersionsJson());
-        Map<String, Object> payload = json.map(original.getInputSnapshotJson());
         if ("INTERVIEW_TURN".equals(original.getOperation())) {
             Map<String, Object> session = interviews.lockSession(original.getResourceId(), userId);
             if (session == null) {

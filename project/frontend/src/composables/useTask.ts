@@ -1,6 +1,5 @@
 import { computed, getCurrentScope, onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { taskApi } from '@/api/tasks'
-import { ApiError } from '@/api/request'
 import { apiUrl } from '@/api/request'
 import { createAuthHeaders } from '@/api/session'
 import type { TaskStatus, TaskVO } from '@/api/types'
@@ -34,6 +33,7 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
   const deltaText = ref('')
   const reasoningText = ref('')
   const loading = ref(false)
+  const refreshing = ref(false)
   const connected = ref(false)
   const error = ref<unknown>(null)
   const lastSeq = ref(0)
@@ -42,7 +42,8 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
   let reconnectTimer: number | undefined
   let generation = 0
   let reconnects = 0
-  let polling = false
+  let authorityRequest: { run: number; promise: Promise<TaskVO> } | undefined
+  let streamedStage: { stage: string; seq: number } | undefined
   let notifiedTerminal = ''
   const seen = new Set<string>()
 
@@ -67,7 +68,14 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
   }
 
   async function finish(run: number, value: TaskVO) {
-    if (run !== generation) return
+    if (run !== generation || value.id !== taskId.value) return
+    const previous = task.value
+    if (isTerminalTask(previous?.status) && !isTerminalTask(value.status)) return
+    if (previous?.status === 'CANCEL_REQUESTED' && ['QUEUED', 'RUNNING'].includes(value.status)) return
+    if (previous?.status === 'RUNNING' && value.status === 'QUEUED') return
+    if (value.status === 'RUNNING' && streamedStage) {
+      value = { ...value, stage: streamedStage.stage, lastEventId: Math.max(value.lastEventId, streamedStage.seq) }
+    }
     applyTask(value)
     if (!isTerminalTask(value.status)) return
     clearTimers()
@@ -80,25 +88,27 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
     if (run === generation && value.status === 'SUCCEEDED') await options.onDone?.(value)
   }
 
-  async function refreshAuthority(run: number) {
-    try {
-      const value = await taskApi.get(taskId.value)
+  function refreshAuthority(run: number) {
+    if (authorityRequest?.run === run) return authorityRequest.promise
+    const promise = taskApi.get(taskId.value).then(async value => {
       if (run !== generation) return value
+      error.value = null
       await finish(run, value)
       return value
-    } catch (reason) {
+    }, reason => {
       if (run === generation) error.value = reason
       throw reason
-    }
+    }).finally(() => {
+      if (authorityRequest?.promise === promise) authorityRequest = undefined
+    })
+    authorityRequest = { run, promise }
+    return promise
   }
 
   function scheduleReconnect(run: number) {
     if (run !== generation || isTerminalTask(task.value?.status)) return
     const maximum = options.maxReconnects ?? 3
-    if (reconnects >= maximum) {
-      error.value = new ApiError('事件流已断开，已停止自动重连；任务仍会通过轮询恢复', { key: 'SSE_RECONNECT_LIMIT', retryable: true })
-      return
-    }
+    if (reconnects >= maximum) return
     reconnects += 1
     const delay = 1000 * 2 ** (reconnects - 1)
     reconnectTimer = window.setTimeout(() => void openStream(run), delay)
@@ -119,8 +129,13 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
     seen.add(key)
     lastSeq.value = seq
     const payload = data.payload || {}
-    if (eventName === 'stage' && task.value) {
-      applyTask({ ...task.value, stage: payload.name ?? task.value.stage, progress: payload.progress ?? null, lastEventId: Math.max(task.value.lastEventId, seq) })
+    if (eventName === 'stage' && payload.name) {
+      streamedStage = { stage: payload.name, seq }
+      if (task.value?.status === 'RUNNING') {
+        applyTask({ ...task.value, stage: payload.name, lastEventId: Math.max(task.value.lastEventId, seq) })
+      } else if (!isTerminalTask(task.value?.status)) {
+        await poll(run)
+      }
     } else if (eventName === 'delta') {
       deltaText.value += payload.text || ''
     } else if (eventName === 'reasoning') {
@@ -178,6 +193,7 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
       if (run !== generation) return
       if (response.status === 410) {
         const value = await refreshAuthority(run)
+        if (run !== generation) return
         if (!isTerminalTask(value.status)) {
           lastSeq.value = value.lastEventId
           seen.clear()
@@ -192,43 +208,51 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
         return
       }
       if (!response.ok) {
-        let message = `事件流连接失败（HTTP ${response.status}）`
-        let traceId = response.headers.get('x-trace-id') || ''
-        try {
-          const payload = await response.json()
-          message = payload.msg || message
-          traceId = payload.traceId || traceId
-        } catch {
-          message = `事件流连接失败（HTTP ${response.status}）`
-        }
-        error.value = new ApiError(message, { status: response.status, traceId, retryable: response.status === 429 || response.status >= 500 })
         if (response.status === 429 || response.status >= 500) scheduleReconnect(run)
         return
       }
-      if (!response.body) throw new ApiError('事件流响应为空', { key: 'EMPTY_SSE', retryable: true })
+      if (!response.body) {
+        scheduleReconnect(run)
+        return
+      }
       connected.value = true
-      error.value = null
       await consumeStream(run, response.body)
+      if (run !== generation) return
       connected.value = false
-      if (run === generation && !isTerminalTask(task.value?.status)) scheduleReconnect(run)
+      scheduleReconnect(run)
     } catch (reason) {
-      connected.value = false
       if (run !== generation || (reason instanceof DOMException && reason.name === 'AbortError')) return
-      error.value = reason
+      connected.value = false
       scheduleReconnect(run)
     }
   }
 
   async function poll(run: number) {
-    if (polling || run !== generation || isTerminalTask(task.value?.status)) return
-    polling = true
+    if (run !== generation || isTerminalTask(task.value?.status)) return
     try {
       await refreshAuthority(run)
     } catch {
       return
-    } finally {
-      polling = false
     }
+  }
+
+  async function refresh() {
+    if (!taskId.value || refreshing.value) return
+    const run = generation
+    refreshing.value = true
+    try {
+      await refreshAuthority(run)
+    } catch {
+      // 保留最后一次任务状态，由调用方展示刷新入口。
+    } finally {
+      if (run === generation) refreshing.value = false
+    }
+  }
+
+  async function acceptSnapshot(value: TaskVO) {
+    if (value.id !== taskId.value) return
+    error.value = null
+    await finish(generation, value)
   }
 
   async function start() {
@@ -241,19 +265,21 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
     connected.value = false
     lastSeq.value = 0
     reconnects = 0
+    streamedStage = undefined
     notifiedTerminal = ''
     seen.clear()
+    refreshing.value = false
+    loading.value = false
     if (!taskId.value) return
     loading.value = true
+    pollTimer = window.setInterval(() => void poll(run), options.pollInterval ?? 4000)
     try {
-      const value = await refreshAuthority(run)
-      if (run !== generation || isTerminalTask(value.status)) return
-      void openStream(run)
-      pollTimer = window.setInterval(() => void poll(run), options.pollInterval ?? 4000)
-    } catch {
-      return
+      await poll(run)
     } finally {
-      if (run === generation) loading.value = false
+      if (run === generation) {
+        loading.value = false
+        void openStream(run)
+      }
     }
   }
 
@@ -265,9 +291,12 @@ export function useTask(taskIdSource: MaybeRefOrGetter<string | null | undefined
     deltaText,
     reasoningText,
     loading,
+    refreshing,
     connected,
     error,
     lastSeq,
+    refresh,
+    acceptSnapshot,
     restart: start,
     stop,
   }

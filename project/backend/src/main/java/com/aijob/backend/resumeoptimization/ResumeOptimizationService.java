@@ -19,6 +19,7 @@ import com.aijob.backend.common.Data;
 import com.aijob.backend.common.JsonService;
 import com.aijob.backend.common.PageResult;
 import com.aijob.backend.job.JobMapper;
+import com.aijob.backend.resume.FileStorageService;
 import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.IdempotencyService;
 import com.aijob.backend.task.TaskService;
@@ -26,24 +27,30 @@ import com.aijob.backend.task.TaskService;
 @Service
 public class ResumeOptimizationService {
 
+    private static final Map<String, Object> ASSESSMENT_RULES = ResumeAssessmentRules.currentPayload();
+    private static final List<String> PRIORITIES = List.of("IMPORTANT", "SUGGESTION", "NOTICE");
+    private static final Map<String, String> PRIORITY_LABELS = Map.of(
+            "IMPORTANT", "高优先级", "SUGGESTION", "中优先级", "NOTICE", "低优先级");
     private final ResumeOptimizationMapper mapper;
     private final ResumeMapper resumes;
     private final JobMapper jobs;
     private final TaskService tasks;
     private final IdempotencyService idempotency;
     private final ResumeExportService exports;
+    private final FileStorageService files;
     private final JsonService json;
     private final ApiView view;
 
     public ResumeOptimizationService(ResumeOptimizationMapper mapper, ResumeMapper resumes, JobMapper jobs,
                                      TaskService tasks, IdempotencyService idempotency, ResumeExportService exports,
-                                     JsonService json, ApiView view) {
+                                     FileStorageService files, JsonService json, ApiView view) {
         this.mapper = mapper;
         this.resumes = resumes;
         this.jobs = jobs;
         this.tasks = tasks;
         this.idempotency = idempotency;
         this.exports = exports;
+        this.files = files;
         this.json = json;
         this.view = view;
     }
@@ -65,7 +72,10 @@ public class ResumeOptimizationService {
             throw BusinessException.conflict("简历尚无可用解析原文", "INVALID_STATE");
         }
         String diagnosisId = UUID.randomUUID().toString();
-        Map<String, Object> payload = Map.of("document", document(version));
+        TextSnapshot snapshot = snapshot(userId, version);
+        Map<String, Object> payload = Map.of("document",
+                document(version, snapshot.text(), snapshot.layoutVersion(), snapshot.readOrderVerified()),
+                "assessmentRules", ASSESSMENT_RULES);
         return tasks.create(userId, "POST", route, key, body, "RESUME_DIAGNOSE", "RESUME_DIAGNOSIS", diagnosisId,
                 Map.of("resumeVersionId", resumeVersionId), payload,
                 taskId -> mapper.insertDiagnosis(diagnosisId, userId, resumeVersionId, taskId));
@@ -112,6 +122,9 @@ public class ResumeOptimizationService {
             throw BusinessException.conflict("岗位必须可见且已完成分析", "INVALID_STATE");
         }
         Map<String, Object> diagnosisPayload = null;
+        String text = String.valueOf(version.get("extracted_text"));
+        String layoutVersion = layoutVersion(version.get("text_layout_version"));
+        boolean readOrderVerified = false;
         if (diagnosisId != null) {
             Map<String, Object> diagnosis = mapper.diagnosis(diagnosisId, userId);
             if (diagnosis == null) {
@@ -122,10 +135,16 @@ public class ResumeOptimizationService {
                 throw BusinessException.conflict("诊断不属于该简历或尚未就绪", "INVALID_STATE");
             }
             diagnosisPayload = Map.of("items", diagnosisAgentItems(diagnosis));
+            if (diagnosis.get("source_text") != null
+                    && !String.valueOf(diagnosis.get("source_text")).isBlank()) {
+                text = String.valueOf(diagnosis.get("source_text"));
+                layoutVersion = layoutVersion(diagnosis.get("text_layout_version"));
+                readOrderVerified = truthy(diagnosis.get("read_order_verified"));
+            }
         }
         int jobVersion = ((Number) job.get("job_version")).intValue();
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("document", document(version));
+        payload.put("document", document(version, text, layoutVersion, readOrderVerified));
         payload.put("jobId", jobId);
         payload.put("jobVersion", jobVersion);
         payload.put("jdText", job.get("jd_text"));
@@ -230,14 +249,45 @@ public class ResumeOptimizationService {
         return optimizationVo(mapper.optimization(optimizationId, userId));
     }
 
-    private Map<String, Object> document(Map<String, Object> version) {
+    private Map<String, Object> document(Map<String, Object> version, String text, String layoutVersion,
+                                         boolean readOrderVerified) {
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("versionId", version.get("id"));
         document.put("fileName", version.get("file_name"));
         document.put("mimeType", version.get("mime_type"));
         document.put("sizeBytes", version.get("size_bytes"));
-        document.put("text", version.get("extracted_text"));
+        document.put("text", text);
+        document.put("textLayoutVersion", layoutVersion);
+        document.put("readOrderVerified", readOrderVerified);
         return document;
+    }
+
+    private TextSnapshot snapshot(String userId, Map<String, Object> version) {
+        String storedText = String.valueOf(version.get("extracted_text"));
+        FileStorageService.ExtractedText extracted = files.reExtract(userId,
+                version.get("storage_key") == null ? null : String.valueOf(version.get("storage_key")),
+                version.get("mime_type") == null ? null : String.valueOf(version.get("mime_type")));
+        if (extracted != null && extracted.text() != null && !extracted.text().isBlank()) {
+            return new TextSnapshot(extracted.text(), extracted.layoutVersion(), true);
+        }
+        return new TextSnapshot(storedText, layoutVersion(version.get("text_layout_version")), false);
+    }
+
+    private String layoutVersion(Object stored) {
+        if (stored == null || String.valueOf(stored).isBlank()) {
+            return FileStorageService.LEGACY_LAYOUT_VERSION;
+        }
+        return String.valueOf(stored);
+    }
+
+    private boolean truthy(Object value) {
+        if (value instanceof Boolean flag) {
+            return flag;
+        }
+        if (value instanceof Number number) {
+            return number.intValue() != 0;
+        }
+        return value != null && "true".equalsIgnoreCase(String.valueOf(value));
     }
 
     private List<Map<String, Object>> diagnosisAgentItems(Map<String, Object> diagnosis) {
@@ -252,11 +302,179 @@ public class ResumeOptimizationService {
     private Map<String, Object> diagnosisVo(Map<String, Object> row) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", row.get("id"));
+        result.put("taskId", row.get("task_id"));
         result.put("resumeVersionId", row.get("resume_version_id"));
         result.put("status", row.get("status"));
         result.put("items", row.get("items_json") == null ? List.of()
                 : json.convert(json.parse(String.valueOf(row.get("items_json"))), Object.class));
+        result.put("assessment", assessmentVo(row.get("assessment_json")));
+        result.put("readOrderVerified", truthy(row.get("read_order_verified")));
+        result.put("textLayoutVersion", row.get("text_layout_version"));
         result.put("createdAt", view.value(row.get("created_at")));
+        return result;
+    }
+
+    private Map<String, Object> assessmentVo(Object assessmentJson) {
+        if (assessmentJson == null) {
+            return null;
+        }
+        Map<String, Object> assessment = json.convert(json.parse(String.valueOf(assessmentJson)), Map.class);
+        List<Map<String, Object>> dimensions = new ArrayList<>();
+        for (Object raw : json.convert(assessment.get("dimensions"), List.class)) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> dimension = (Map<String, Object>) raw;
+            Map<String, Object> vo = new LinkedHashMap<>(dimension);
+            ResumeAssessmentRules.Dimension rule = ResumeAssessmentRules.dimension(String.valueOf(dimension.get("code")));
+            if (rule != null) {
+                vo.put("label", rule.label());
+                vo.put("maxScore", rule.maxScore(String.valueOf(assessment.get("ruleVersion"))));
+            }
+            dimensions.add(vo);
+        }
+        Map<String, Object> vo = new LinkedHashMap<>(assessment);
+        vo.put("dimensions", dimensions);
+        return vo;
+    }
+
+    public ExportContent exportDiagnosis(String userId, String diagnosisId) {
+        Map<String, Object> row = mapper.diagnosis(diagnosisId, userId);
+        if (row == null) {
+            throw BusinessException.notFound();
+        }
+        if (!"READY".equals(String.valueOf(row.get("status"))) || row.get("assessment_json") == null) {
+            throw BusinessException.conflict("诊断尚未就绪或没有评分结果", "INVALID_STATE");
+        }
+        Map<String, Object> assessment = assessmentVo(row.get("assessment_json"));
+        List<Map<String, Object>> items = row.get("items_json") == null ? List.of()
+                : json.convert(json.parse(String.valueOf(row.get("items_json"))), List.class);
+        String fileName = "resume-assessment-" + diagnosisId + ".pdf";
+        return new ExportContent(assessmentPdf(row, assessment, items), fileName, "application/pdf");
+    }
+
+    @SuppressWarnings("unchecked")
+    private byte[] assessmentPdf(Map<String, Object> row, Map<String, Object> assessment,
+                                 List<Map<String, Object>> items) {
+        StringBuilder summary = new StringBuilder();
+        summary.append("简历版本：").append(row.get("resume_version_id")).append('\n');
+        summary.append("评分时间：").append(assessment.get("assessedAt")).append('\n');
+        summary.append("评分规则：").append(assessment.get("ruleVersion")).append('\n');
+        summary.append("总分：").append(assessment.get("totalScore")).append(" / 100").append('\n');
+        appendField(summary, "综合评价", assessment.get("summary"));
+        summary.append("阅读顺序：").append(truthy(row.get("read_order_verified"))
+                ? "已按页面位置复核"
+                : "未复核（原文件不可用，使用已保存文本，章节顺序可能不准确）");
+        List<Map<String, Object>> sections = new ArrayList<>();
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("title", "评分概览");
+        header.put("content", summary.toString());
+        sections.add(header);
+        List<Map<String, Object>> dimensions = (List<Map<String, Object>>) assessment.get("dimensions");
+        for (Map<String, Object> dimension : dimensions) {
+            StringBuilder content = new StringBuilder();
+            content.append("得分：").append(dimension.get("score")).append('/')
+                    .append(dimension.get("maxScore")).append('\n');
+            content.append("评分理由：").append(dimension.get("rationale")).append('\n');
+            if (dimension.get("criteria") instanceof List<?> criteria) {
+                for (Object raw : criteria) {
+                    Map<?, ?> check = (Map<?, ?>) raw;
+                    content.append("  ").append(check.get("label")).append("：")
+                            .append(check.get("score")).append('/').append(check.get("maxScore")).append('\n');
+                }
+            }
+            if (dimension.get("quote") != null && !String.valueOf(dimension.get("quote")).isBlank()) {
+                content.append("原文依据：").append(dimension.get("quote")).append('\n');
+            }
+            for (String quote : stringList(dimension.get("quotes"))) {
+                content.append("补充依据：").append(quote).append('\n');
+            }
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("title", String.valueOf(dimension.get("label")) + "（"
+                    + dimension.get("score") + "/" + dimension.get("maxScore") + "）");
+            section.put("content", content.toString());
+            sections.add(section);
+        }
+        List<Map<String, Object>> strengths = (List<Map<String, Object>>) assessment.get("strengths");
+        if (strengths != null && !strengths.isEmpty()) {
+            StringBuilder content = new StringBuilder();
+            for (Map<String, Object> strength : strengths) {
+                content.append("· ").append(strength.get("title")).append('\n');
+                content.append("  原文依据：").append(strength.get("quote")).append('\n');
+                for (String quote : stringList(strength.get("quotes"))) {
+                    content.append("  补充依据：").append(quote).append('\n');
+                }
+                appendField(content, "具体做法", strength.get("approach"));
+                appendField(content, "本人贡献", strength.get("contribution"));
+                appendField(content, "已有结果", strength.get("result"));
+                content.append("  ").append(strength.get("description")).append('\n');
+            }
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("title", "优势");
+            section.put("content", content.toString());
+            sections.add(section);
+        }
+        if (!items.isEmpty()) {
+            StringBuilder content = new StringBuilder();
+            List<Map<String, Object>> ordered = items.stream().sorted(java.util.Comparator.comparingInt(item -> {
+                int index = PRIORITIES.indexOf(String.valueOf(item.get("priority")));
+                return index < 0 ? PRIORITIES.size() : index;
+            })).toList();
+            for (Map<String, Object> item : ordered) {
+                content.append("· ");
+                String priority = PRIORITY_LABELS.get(String.valueOf(item.get("priority")));
+                if (priority != null) {
+                    content.append(priority).append(" · ");
+                }
+                ResumeAssessmentRules.Dimension dimension = ResumeAssessmentRules.dimension(String.valueOf(item.get("dimensionCode")));
+                if (dimension != null) {
+                    content.append(dimension.label()).append(" · ");
+                    if (item.get("checkCode") instanceof String checkCode) {
+                        Map<?, ?> check = ResumeAssessmentRules.scoredCheck(assessment, dimension.code(), checkCode);
+                        if (!check.isEmpty()) {
+                            content.append(check.get("label")).append(' ')
+                                    .append(check.get("score")).append('/').append(check.get("maxScore")).append(" · ");
+                        }
+                    }
+                }
+                content.append(item.get("title")).append('\n');
+                content.append("  问题：").append(item.get("issue")).append('\n');
+                content.append("  原文依据：").append(item.get("quote")).append('\n');
+                for (String quote : stringList(item.get("quotes"))) {
+                    content.append("  补充依据：").append(quote).append('\n');
+                }
+                appendField(content, "依据", item.get("rationale"));
+                appendField(content, "影响", item.get("impact"));
+                appendField(content, "修改动作（待本人核对）", item.get("suggestion"));
+                appendField(content, "示例（基于原文改写）", item.get("example"));
+                List<String> pending = stringList(item.get("pendingVerification"));
+                if (!pending.isEmpty()) {
+                    content.append("  待核实：").append(String.join("；", pending)).append('\n');
+                }
+            }
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("title", "优先改进建议（按影响排序）");
+            section.put("content", content.toString());
+            sections.add(section);
+        }
+        return exports.pdf("简历评分报告", sections);
+    }
+
+    private static void appendField(StringBuilder content, String label, Object value) {
+        if (value != null && !String.valueOf(value).isBlank()) {
+            content.append("  ").append(label).append("：").append(value).append('\n');
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                result.add(String.valueOf(item));
+            }
+        }
         return result;
     }
 
@@ -291,5 +509,8 @@ public class ResumeOptimizationService {
     }
 
     public record ExportContent(byte[] bytes, String fileName, String mediaType) {
+    }
+
+    private record TextSnapshot(String text, String layoutVersion, boolean readOrderVerified) {
     }
 }

@@ -8,7 +8,7 @@ import type { TaskStatus as TaskStatusType, TaskVO } from '@/api/types'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
-import { errorMessage, formatDate, taskErrorSummary, taskOutcomeLabels, taskStageLabels, taskStatusLabels, taskTypeLabels } from '@/utils/format'
+import { errorMessage, formatDate, taskErrorSummary, taskOutcomeLabels, taskStageText, taskStatusLabels, taskTypeLabels } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -165,13 +165,13 @@ async function handleTerminalTask() {
 }
 
 async function cancelTask(task: TaskVO) {
-  if (isTerminalTask(task.status) || cancelingId.value) return
+  if (!canCancelTask(task.status) || cancelingId.value) return
   cancelingId.value = task.id
   actionError.value = null
   try {
     const cancelled = await taskApi.cancel(task.id)
     mergeTask(cancelled)
-    if (tracker.task.value?.id === cancelled.id) tracker.task.value = cancelled
+    await tracker.acceptSnapshot(cancelled)
     ElMessage.success(cancelled.status === 'CANCEL_REQUESTED' ? '已请求取消，正在等待任务停止' : '任务状态已更新')
     await loadTasks(false)
   } catch (reason) {
@@ -180,6 +180,10 @@ async function cancelTask(task: TaskVO) {
   } finally {
     cancelingId.value = ''
   }
+}
+
+function canCancelTask(status: TaskStatusType) {
+  return status === 'QUEUED' || status === 'RUNNING'
 }
 
 function canRetryTask(task: TaskVO) {
@@ -254,17 +258,17 @@ onBeforeUnmount(() => {
 
       <el-alert v-if="actionError && !drawerVisible" class="list-action-error" :title="errorMessage(actionError)" type="error" show-icon @close="actionError = null" />
 
-      <AsyncState :loading="listLoading" :error="listError" :empty="!tasks.length" empty-text="当前筛选条件下暂无任务" @retry="loadTasks()">
+      <AsyncState :loading="listLoading" :retain="tasks.length > 0" :error="listError" :empty="!tasks.length" empty-text="当前筛选条件下暂无任务" @retry="loadTasks()">
         <div class="task-mobile-list">
           <article v-for="task in tasks" :key="task.id" class="task-mobile-card">
             <div class="task-mobile-card__heading"><strong>{{ taskTypeLabels[task.type] || '处理任务' }}</strong><el-tag :type="tagType(task.status)" size="small">{{ taskStatusLabels[task.status] }}</el-tag></div>
             <p class="muted">{{ formatDate(task.createdAt) }}</p>
             <el-tag v-if="task.result?.outcome" :type="outcomeTagType(task.result.outcome)" size="small">{{ taskOutcomeLabels[task.result.outcome] || '结果待核对' }}</el-tag>
             <p v-if="task.error" class="task-mobile-card__error">{{ taskErrorSummary(task.error) }}</p>
-            <el-progress v-if="!isTerminalTask(task.status) && task.progress !== null" :percentage="Math.max(0, Math.min(100, task.progress))" />
+            <p v-if="task.status === 'RUNNING'" class="muted">{{ taskStageText(task) }}</p>
             <div class="row-actions">
               <el-button size="small" @click="selectTask(task)">实时详情</el-button>
-              <el-button v-if="!isTerminalTask(task.status)" size="small" :loading="cancelingId === task.id" @click="cancelTask(task)">取消</el-button>
+              <el-button v-if="canCancelTask(task.status)" size="small" :loading="cancelingId === task.id" @click="cancelTask(task)">取消</el-button>
               <el-button v-if="task.status === 'SUCCEEDED' && task.result" size="small" type="primary" @click="goToBusiness(task)">查看结果</el-button>
               <el-button v-if="canRetryTask(task)" size="small" :loading="retryingId === task.id" @click="retryTask(task)">重试</el-button>
               <el-button v-else-if="['FAILED', 'CANCELLED', 'EXPIRED'].includes(task.status)" size="small" @click="goToBusiness(task)">前往处理</el-button>
@@ -293,13 +297,7 @@ onBeforeUnmount(() => {
               </template>
             </el-table-column>
             <el-table-column label="阶段" min-width="150">
-              <template #default="{ row }">{{ taskStageLabels[row.stage] || row.stage || '—' }}</template>
-            </el-table-column>
-            <el-table-column label="进度" width="150">
-              <template #default="{ row }">
-                <el-progress v-if="row.progress !== null" :percentage="Math.max(0, Math.min(100, row.progress))" :status="row.status === 'FAILED' ? 'exception' : row.status === 'SUCCEEDED' ? 'success' : undefined" />
-                <span v-else class="muted">—</span>
-              </template>
+              <template #default="{ row }">{{ row.status === 'RUNNING' ? taskStageText(row) : '—' }}</template>
             </el-table-column>
             <el-table-column label="错误" min-width="180">
               <template #default="{ row }">
@@ -319,7 +317,7 @@ onBeforeUnmount(() => {
               <template #default="{ row }">
                 <div class="row-actions">
                   <el-button size="small" @click="selectTask(taskRow(row))">实时详情</el-button>
-                  <el-button v-if="!isTerminalTask(row.status)" size="small" type="warning" plain :loading="cancelingId === row.id" @click="cancelTask(taskRow(row))">取消</el-button>
+                  <el-button v-if="canCancelTask(row.status)" size="small" type="warning" plain :loading="cancelingId === row.id" @click="cancelTask(taskRow(row))">取消</el-button>
                   <el-button v-if="row.status === 'SUCCEEDED' && row.result" size="small" type="primary" plain @click="goToBusiness(taskRow(row))">查看结果</el-button>
                   <el-button v-if="canRetryTask(taskRow(row))" size="small" type="primary" :loading="retryingId === row.id" @click="retryTask(taskRow(row))">重试</el-button>
                   <el-button v-if="['FAILED', 'CANCELLED', 'EXPIRED'].includes(row.status) && !canRetryTask(taskRow(row))" size="small" @click="goToBusiness(taskRow(row))">前往处理</el-button>
@@ -347,19 +345,17 @@ onBeforeUnmount(() => {
       <div class="drawer-content">
         <el-alert title="关闭详情只会停止实时订阅，不会取消业务任务。" type="info" :closable="false" show-icon />
         <el-alert v-if="actionError" :title="errorMessage(actionError)" type="error" show-icon @close="actionError = null" />
-        <AsyncState v-if="!selectedTask" :loading="tracker.loading.value" :error="tracker.error.value" empty-text="未找到任务详情" @retry="tracker.restart" />
+        <AsyncState v-if="!selectedTask" :loading="tracker.loading.value" :error="tracker.error.value" empty-text="未找到任务详情" @retry="tracker.refresh" />
         <template v-else>
           <div class="detail-heading">
             <div>
               <strong>{{ taskTypeLabels[selectedTask.type] || selectedTask.type }}</strong>
               <span>{{ selectedTask.id }}</span>
             </div>
-            <el-tag v-if="isTerminalTask(selectedTask.status)" type="info" size="small">已结束</el-tag>
-            <el-tag v-else :type="tracker.connected.value ? 'success' : 'info'" size="small">{{ tracker.connected.value ? '实时连接中' : '轮询恢复中' }}</el-tag>
           </div>
-          <TaskStatus :task="selectedTask" :reasoning="selectedReasoning">
+          <TaskStatus :task="selectedTask" :reasoning="selectedReasoning" :tracking-error="tracker.error.value" :refreshing="tracker.refreshing.value" @refresh="tracker.refresh">
             <template #actions>
-              <el-button v-if="!isTerminalTask(selectedTask.status)" type="warning" plain :loading="cancelingId === selectedTask.id" @click="cancelTask(selectedTask)">取消任务</el-button>
+              <el-button v-if="canCancelTask(selectedTask.status)" type="warning" plain :loading="cancelingId === selectedTask.id" @click="cancelTask(selectedTask)">取消任务</el-button>
               <el-button v-if="selectedTask.status === 'SUCCEEDED' && selectedTask.result" type="primary" @click="goToBusiness(selectedTask)">查看结果</el-button>
               <el-button v-if="canRetryTask(selectedTask)" type="primary" :loading="retryingId === selectedTask.id" @click="retryTask(selectedTask)">按原参数重试</el-button>
               <el-button v-if="['FAILED', 'CANCELLED', 'EXPIRED'].includes(selectedTask.status) && !canRetryTask(selectedTask)" @click="goToBusiness(selectedTask)">前往处理</el-button>
@@ -369,9 +365,6 @@ onBeforeUnmount(() => {
             <strong>实时增量（尚未保存为业务结果）</strong>
             <div class="pre-wrap">{{ selectedDelta }}</div>
           </div>
-          <el-alert v-if="tracker.error.value" :title="errorMessage(tracker.error.value)" type="warning" :closable="false" show-icon>
-            <el-button class="reconnect-button" size="small" @click="tracker.restart">重新连接</el-button>
-          </el-alert>
           <dl class="task-metadata">
             <div><dt>任务 ID</dt><dd>{{ selectedTask.id }}</dd></div>
             <div><dt>任务类型</dt><dd>{{ selectedTask.type }}</dd></div>
@@ -418,16 +411,15 @@ onBeforeUnmount(() => {
 .drawer-content { display: grid; gap: 16px; }
 .detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .detail-heading > div { display: grid; gap: 5px; min-width: 0; }
-.detail-heading strong { color: #101d4b; font-size: 18px; }
+.detail-heading strong { color: var(--ai-text-primary, #101d4b); font-size: 18px; }
 .detail-heading span { overflow-wrap: anywhere; color: $ai-text-secondary; font-size: 12px; }
 .delta-panel { display: grid; gap: 8px; padding: 14px; border: 1px dashed $ai-primary; border-radius: $ai-radius; background: $ai-primary-light; }
 .delta-panel strong { color: $ai-primary; }
-.reconnect-button { margin-top: 8px; }
 .task-metadata, .input-versions dl { display: grid; gap: 0; margin: 0; }
 .task-metadata > div, .input-versions dl > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid $ai-border-light; }
 .task-metadata dt, .input-versions dt { color: $ai-text-secondary; }
 .task-metadata dd, .input-versions dd { margin: 0; overflow-wrap: anywhere; }
-.input-versions h3 { margin: 0 0 8px; color: #101d4b; font-size: 15px; }
+.input-versions h3 { margin: 0 0 8px; color: var(--ai-text-primary, #101d4b); font-size: 15px; }
 @media (max-width: 900px) {
   .filter-bar { align-items: flex-start; }
   .filter-bar .el-radio-group { display: flex; flex-wrap: wrap; }

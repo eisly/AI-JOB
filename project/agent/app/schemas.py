@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 Education = Literal["HIGH_SCHOOL", "ASSOCIATE", "BACHELOR", "MASTER", "DOCTOR"]
@@ -64,10 +64,28 @@ class ResumeFacts(APIModel):
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
+class UnmappedSkillDetail(APIModel):
+    name: str = Field(min_length=1, max_length=100)
+    quote: str = Field(min_length=1, max_length=1000)
+    location: str = Field(min_length=1, max_length=200)
+
+
 class AIParseResult(APIModel):
     facts: ResumeFacts
     text_hash: str
     unmapped_skills: list[str] = Field(default_factory=list, max_length=50)
+    unmapped_details: list[UnmappedSkillDetail] = Field(default_factory=list, max_length=50)
+
+
+class AIResumeOcrResult(APIModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    text_hash: str = Field(min_length=64, max_length=64)
+    text_layout_version: str = Field(default="pdf-ocr-v1", min_length=1, max_length=32)
+    text_source: str = Field(default="OCR", min_length=1, max_length=16)
+    native_pages: list[int] = Field(default_factory=list, max_length=100)
+    ocr_pages: list[int] = Field(default_factory=list, max_length=100)
+    empty_pages: list[int] = Field(default_factory=list, max_length=100)
+    duration_ms: int = Field(default=0, ge=0)
 
 
 class Requirement(APIModel):
@@ -256,19 +274,76 @@ class AIInterviewReportResult(APIModel):
 
 ResumeDiagnosisPriority = Literal["IMPORTANT", "SUGGESTION", "NOTICE"]
 ProjectDifficulty = Literal["BEGINNER", "INTERMEDIATE", "ADVANCED"]
+ResumeAssessmentDimensionCode = Literal[
+    "EXPERIENCE_PROJECTS",
+    "SKILLS_EVIDENCE",
+    "CONTENT_COMPLETENESS",
+    "STRUCTURE_CLARITY",
+    "EXPRESSION_PROFESSIONALISM",
+]
 
 
 class ResumeDiagnosisItem(APIModel):
     priority: ResumeDiagnosisPriority
+    dimension_code: ResumeAssessmentDimensionCode | None = None
+    check_code: str | None = Field(default=None, min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=200)
     issue: str = Field(min_length=1, max_length=2000)
     quote: str = Field(min_length=1, max_length=1000)
+    quotes: list[str] = Field(default_factory=list, max_length=2)
     rationale: str = Field(min_length=1, max_length=2000)
+    impact: str | None = Field(default=None, max_length=1000)
     suggestion: str = Field(min_length=1, max_length=2000)
+    example: str | None = Field(default=None, max_length=2000)
+    pending_verification: list[str] = Field(default_factory=list, max_length=5)
 
 
-class AIResumeDiagnoseResult(APIModel):
-    items: list[ResumeDiagnosisItem] = Field(min_length=1, max_length=20)
+RESUME_ASSESSMENT_RULE_VERSION = "resume-quality-v2"
+RESUME_ASSESSMENT_RUBRIC_VERSION = "resume-quality-v3"
+RESUME_ASSESSMENT_SUPPORTED_RULE_VERSIONS = frozenset({
+    "resume-quality-v1", "resume-quality-v2", RESUME_ASSESSMENT_RUBRIC_VERSION,
+})
+
+
+class ResumeAssessmentDimension(APIModel):
+    code: ResumeAssessmentDimensionCode
+    score: int | None = Field(default=None, ge=0)
+    levels: dict[str, Annotated[int, Field(strict=True, ge=0, le=5)]] = Field(default_factory=dict)
+    rationale: str = Field(min_length=1, max_length=2000)
+    quote: str | None = Field(default=None, max_length=1000)
+    quotes: list[str] = Field(default_factory=list, max_length=2)
+
+
+class ResumeAssessmentStrength(APIModel):
+    title: str = Field(min_length=1, max_length=200)
+    quote: str = Field(min_length=1, max_length=1000)
+    quotes: list[str] = Field(default_factory=list, max_length=2)
+    description: str = Field(min_length=1, max_length=2000)
+    approach: str | None = Field(default=None, max_length=1000)
+    contribution: str | None = Field(default=None, max_length=1000)
+    result: str | None = Field(default=None, max_length=1000)
+
+
+class ResumeAssessment(APIModel):
+    rule_version: str = Field(min_length=1, max_length=64)
+    summary: str | None = Field(default=None, max_length=600)
+    dimensions: list[ResumeAssessmentDimension] = Field(min_length=5, max_length=5)
+    strengths: list[ResumeAssessmentStrength] = Field(default_factory=list, max_length=10)
+
+
+class ResumeDiagnosisInput(APIModel):
+    items: list[ResumeDiagnosisItem] = Field(max_length=20)
+    assessment: ResumeAssessment | None = None
+
+
+class AIResumeDiagnoseResult(ResumeDiagnosisInput):
+    @model_validator(mode="after")
+    def _requires_legacy_items(self) -> "AIResumeDiagnoseResult":
+        if not self.items and (
+            self.assessment is None or self.assessment.rule_version != RESUME_ASSESSMENT_RUBRIC_VERSION
+        ):
+            raise ValueError("旧版诊断必须包含至少一条建议")
+        return self
 
 
 class ResumeOptimizeSection(APIModel):
@@ -284,6 +359,31 @@ class AIResumeOptimizeResult(APIModel):
     sections: list[ResumeOptimizeSection] = Field(min_length=1, max_length=20)
 
 
+RepoPlatform = Literal["GITHUB", "GITEE", "GITCODE"]
+RepoSourceStatus = Literal["SUCCEEDED", "FAILED"]
+
+
+class RepositorySource(APIModel):
+    platform: RepoPlatform
+    path: str = Field(min_length=1, max_length=300)
+    url: str = Field(min_length=1, max_length=2048)
+    license: str = Field(min_length=1, max_length=64)
+    readme_url: str | None = Field(default=None, max_length=2048)
+
+
+class RepositorySourceRun(APIModel):
+    platform: RepoPlatform
+    status: RepoSourceStatus
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ProjectStackEvidence(APIModel):
+    keyword: str = Field(min_length=1, max_length=64)
+    status: Literal["VERIFIED", "DOCUMENTED"]
+    path: str = Field(min_length=1, max_length=240)
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class ProjectRecommendationItem(APIModel):
     title: str = Field(min_length=1, max_length=200)
     summary: str = Field(min_length=1, max_length=2000)
@@ -291,11 +391,35 @@ class ProjectRecommendationItem(APIModel):
     difficulty: ProjectDifficulty
     estimated_weeks: int = Field(ge=1, le=12)
     reason: str = Field(min_length=1, max_length=2000)
+    getting_started: list[str] = Field(default_factory=list, max_length=5)
+    deliverables: list[str] = Field(min_length=1, max_length=10)
+    primary_source: RepositorySource | None = None
+    alternate_sources: list[RepositorySource] = Field(default_factory=list, max_length=5)
+    stack_evidence: list[ProjectStackEvidence] = Field(default_factory=list, max_length=5)
+
+
+class ProjectRecommendSuggestion(APIModel):
+    """模型只对检索层返回的真实仓库补充学习建议，不得自行生成仓库或链接。"""
+
+    source_url: str = Field(min_length=1, max_length=2048)
+    skill_codes: list[str] = Field(min_length=1, max_length=10)
+    difficulty: ProjectDifficulty
+    estimated_weeks: int = Field(ge=1, le=12)
+    reason: str = Field(min_length=1, max_length=2000)
+    getting_started: list[str] = Field(min_length=1, max_length=5)
     deliverables: list[str] = Field(min_length=1, max_length=10)
 
 
+class ProjectRecommendModelOutput(APIModel):
+    items: list[ProjectRecommendSuggestion] = Field(default_factory=list, max_length=6)
+
+
 class AIProjectRecommendResult(APIModel):
-    items: list[ProjectRecommendationItem] = Field(min_length=1, max_length=6)
+    mode: Literal["REPOSITORY", "LEGACY_IDEA"] = "REPOSITORY"
+    source_runs: list[RepositorySourceRun] = Field(default_factory=list, max_length=3)
+    items: list[ProjectRecommendationItem] = Field(default_factory=list, max_length=24)
+    search_cursor: dict[str, int] | None = None
+    discovered_keys: list[str] = Field(default_factory=list, max_length=72)
 
 
 class ProjectPlanTask(APIModel):
@@ -325,6 +449,24 @@ class AIProjectPlanResult(APIModel):
 class ParseModelOutput(APIModel):
     facts: ResumeFacts
     unmapped_skills: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("facts", mode="before")
+    @classmethod
+    def discard_malformed_evidence(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        facts = dict(value)
+        for key, model in (("skills", SkillFact), ("internships", ResumeEvidenceFact), ("awards", ResumeEvidenceFact)):
+            rows = facts.get(key)
+            if isinstance(rows, list):
+                valid = []
+                for row in rows:
+                    try:
+                        valid.append(model.model_validate(row))
+                    except ValidationError:
+                        continue
+                facts[key] = valid
+        return facts
 
 
 class MatchItemModelOutput(APIModel):
@@ -421,6 +563,7 @@ class AIRequestEnvelope(APIModel):
 class SkillCatalogItem(APIModel):
     code: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=128)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
 
 
 class DocumentRef(APIModel):
@@ -430,6 +573,8 @@ class DocumentRef(APIModel):
     size_bytes: int = Field(ge=0, le=100 * 1024 * 1024)
     download_url: str | None = Field(default=None, max_length=2048)
     text: str | None = Field(default=None, max_length=200_000)
+    text_layout_version: str | None = Field(default=None, max_length=32)
+    read_order_verified: bool | None = None
 
     @model_validator(mode="after")
     def _has_source(self) -> "DocumentRef":
@@ -441,6 +586,10 @@ class DocumentRef(APIModel):
 class ResumeParsePayload(APIModel):
     document: DocumentRef
     skill_catalog: list[SkillCatalogItem] = Field(default_factory=list, max_length=500)
+
+
+class ResumeOcrPayload(APIModel):
+    document: DocumentRef
 
 
 class JDIdPayload(APIModel):
@@ -867,14 +1016,82 @@ class InterviewReportPayload(APIModel):
     skill_snapshot: list[SkillSnapshotItem] = Field(default_factory=list, max_length=100)
 
 
+class ResumeAssessmentCheck(APIModel):
+    code: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=120)
+    max_score: Literal[5, 10]
+
+
+class ResumeAssessmentRuleDimension(APIModel):
+    code: ResumeAssessmentDimensionCode
+    max_score: int = Field(ge=1, le=100)
+    criteria: str = Field(min_length=1, max_length=1000)
+    checks: list[ResumeAssessmentCheck] = Field(default_factory=list, max_length=4)
+
+
+class ResumeAssessmentRules(APIModel):
+    rule_version: str = Field(min_length=1, max_length=64)
+    dimensions: list[ResumeAssessmentRuleDimension] = Field(min_length=5, max_length=5)
+
+    @model_validator(mode="after")
+    def _validate_rubric(self) -> "ResumeAssessmentRules":
+        if self.rule_version == RESUME_ASSESSMENT_RUBRIC_VERSION:
+            if sum(d.max_score for d in self.dimensions) != 100:
+                raise ValueError("评分维度满分之和必须为 100")
+            for dimension in self.dimensions:
+                checks = dimension.checks
+                if len({check.code for check in checks}) != len(checks) or sum(
+                    check.max_score for check in checks
+                ) != dimension.max_score:
+                    raise ValueError(f"评分点配置有误: {dimension.code}")
+        return self
+
+
+RESUME_ASSESSMENT_DEFAULT_RULES = ResumeAssessmentRules(
+    rule_version=RESUME_ASSESSMENT_RULE_VERSION,
+    dimensions=[
+        ResumeAssessmentRuleDimension(
+            code="EXPERIENCE_PROJECTS",
+            max_score=30,
+            criteria="按阅读顺序复核后的文本判断职责、个人贡献、解决的问题及成果是否说清楚",
+        ),
+        ResumeAssessmentRuleDimension(
+            code="SKILLS_EVIDENCE",
+            max_score=20,
+            criteria="技能描述是否具体，能否在经历或项目中找到支撑",
+        ),
+        ResumeAssessmentRuleDimension(
+            code="CONTENT_COMPLETENESS",
+            max_score=20,
+            criteria="教育、经历、技能等信息是否足以理解候选人的背景",
+        ),
+        ResumeAssessmentRuleDimension(
+            code="STRUCTURE_CLARITY",
+            max_score=15,
+            criteria="章节、层级和时间线是否清楚，跨页内容是否归入正确章节",
+        ),
+        ResumeAssessmentRuleDimension(
+            code="EXPRESSION_PROFESSIONALISM",
+            max_score=15,
+            criteria="表述是否具体、简洁，术语是否一致",
+        ),
+    ],
+)
+
+
 class ResumeDiagnosePayload(APIModel):
     document: DocumentRef
     profile_version: int | None = Field(default=None, ge=1)
+    assessment_rules: ResumeAssessmentRules | None = None
 
     @model_validator(mode="after")
     def _requires_authorized_text(self) -> "ResumeDiagnosePayload":
         if self.document.text is None or not self.document.text.strip():
             raise ValueError("document.text 必须提供非空简历授权原文")
+        if self.assessment_rules is not None and len(
+            {dimension.code for dimension in self.assessment_rules.dimensions}
+        ) != len(self.assessment_rules.dimensions):
+            raise ValueError("assessmentRules.dimensions 维度编码不得重复")
         return self
 
 
@@ -883,7 +1100,7 @@ class ResumeOptimizePayload(APIModel):
     job_id: UUID
     job_version: int = Field(ge=1)
     jd_text: str = Field(min_length=1, max_length=30000)
-    diagnosis: AIResumeDiagnoseResult | None = None
+    diagnosis: ResumeDiagnosisInput | None = None
 
     @model_validator(mode="after")
     def _requires_authorized_text(self) -> "ResumeOptimizePayload":
@@ -896,7 +1113,13 @@ class ProjectRecommendPayload(APIModel):
     profile: ProfileSnapshot
     allowed_skill_codes: list[str] = Field(min_length=1, max_length=20)
     match_item: MatchItemInput | None = None
-    difficulty: ProjectDifficulty = "INTERMEDIATE"
+    query: str | None = Field(default=None, max_length=120)
+    sources: list[RepoPlatform] = Field(default_factory=list, max_length=3)
+    tech_stack_keywords: list[str] = Field(default_factory=list, max_length=5)
+    discovery_round: int | None = Field(default=None, ge=0, le=10)
+    search_cursor: dict[str, int] = Field(default_factory=dict, max_length=9)
+    seen_repository_keys: list[str] = Field(default_factory=list, max_length=720)
+    difficulty: ProjectDifficulty | None = None
     max_duration_weeks: int = Field(default=12, ge=1, le=12)
 
     @field_validator("allowed_skill_codes")
@@ -906,6 +1129,37 @@ class ProjectRecommendPayload(APIModel):
         for item in value:
             if item not in cleaned:
                 cleaned.append(item)
+        return cleaned
+
+    @field_validator("query")
+    @classmethod
+    def _clean_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("sources")
+    @classmethod
+    def _unique_sources(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for item in value:
+            if item not in cleaned:
+                cleaned.append(item)
+        return cleaned
+
+    @field_validator("tech_stack_keywords")
+    @classmethod
+    def _clean_tech_stack_keywords(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for item in value:
+            keyword = item.strip()
+            if not keyword:
+                raise ValueError("技术栈关键词不能为空白")
+            if len(keyword) > 64:
+                raise ValueError("单个技术栈关键词不能超过 64 个字符")
+            if all(keyword.lower() != existing.lower() for existing in cleaned):
+                cleaned.append(keyword)
         return cleaned
 
 

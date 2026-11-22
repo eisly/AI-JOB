@@ -153,7 +153,7 @@ async function copyCode(content: string) {
 </template>
 
 <style scoped lang="scss">
-.question-renderer { display: grid; gap: 10px; }
+.question-renderer { display: grid; gap: 12px; }
 
 .question-renderer__meta {
   display: flex;
@@ -176,14 +176,14 @@ async function copyCode(content: string) {
   white-space: nowrap;
 }
 .q-tag--type { color: $ai-primary; background: $ai-primary-light; font-weight: 600; }
-.q-tag--skill { color: #475569; background: $ai-bg-light; }
-.q-tag--plain { color: $ai-text-secondary; border: 1px solid $ai-border; background: #fff; }
+.q-tag--skill { color: var(--ai-text-secondary, #475569); background: $ai-bg-light; }
+.q-tag--plain { color: $ai-text-secondary; border: 1px solid $ai-border; background: var(--ai-bg-card, #fff); }
 
-.question-renderer__stem-label { margin: 6px 0 0; font-size: 13px; color: $ai-text-tertiary; font-weight: 500; }
+.question-renderer__stem-label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .question-renderer__stem {
   margin: 0;
-  color: #101d4b;
-  font-size: 17px;
+  color: var(--ai-text-primary, #101d4b);
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.7;
   white-space: pre-wrap;
@@ -201,16 +201,16 @@ async function copyCode(content: string) {
 .question-code__block {
   margin: 8px 0 0;
   padding: 12px 14px;
-  border: 1px solid #dbe7fa;
+  border: 1px solid var(--ai-accent-border, #dbe7fa);
   border-radius: 8px;
-  background: #f4f7fd;
+  background: var(--ai-bg-light, #f4f7fd);
   overflow-x: auto;
 }
 .question-code__block code {
   font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
   font-size: 13px;
   line-height: 1.6;
-  color: #1f3576;
+  color: var(--ai-text-secondary, #1f3576);
   white-space: pre;
 }
 
@@ -223,7 +223,7 @@ async function copyCode(content: string) {
   padding: 13px 15px;
   border: 1px solid $ai-border;
   border-radius: $ai-radius;
-  background: #fff;
+  background: var(--ai-bg-card, #fff);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
@@ -238,7 +238,7 @@ async function copyCode(content: string) {
 
   &--correct {
     border-color: $ai-success;
-    background: #ecfdf5;
+    background: var(--ai-success-bg, #ecfdf5);
   }
 
   &:disabled { cursor: default; }
@@ -255,9 +255,9 @@ async function copyCode(content: string) {
   font-size: 12px;
   font-weight: 700;
 }
-.choice-option--selected .choice-option__key { border-color: $ai-primary; color: #fff; background: $ai-primary; }
-.choice-option--correct .choice-option__key { border-color: $ai-success; color: #fff; background: $ai-success; }
-.choice-option__content { color: #1f2937; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+.choice-option--selected .choice-option__key { border-color: $ai-primary; color: #fff; background: var(--ai-primary-solid, $ai-primary); }
+.choice-option--correct .choice-option__key { border-color: $ai-success; color: var(--ai-on-status, #fff); background: $ai-success; }
+.choice-option__content { color: var(--ai-text-primary, #1f2937); font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
 .choice-option__badge { margin-left: auto; color: $ai-success; font-size: 12px; white-space: nowrap; }
 
 .fill-group { display: grid; gap: 10px; margin-top: 10px; }
