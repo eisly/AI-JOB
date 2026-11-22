@@ -12,6 +12,8 @@ _MP3_SILENCE = _MP3_SILENCE_FRAME * 38
 class FakeAsrProvider(AsrProvider):
     """离线可控的识别实现：同字节输入得到同一文本，便于断言与联调。"""
 
+    name = "fake"
+
     async def transcribe(self, audio: AudioInput, *, language: str = "zh") -> AsrResult:
         if len(audio.data) < 2048 or audio.duration_ms < 1000:
             return AsrResult(text="", provider="fake", model="fake-asr")
@@ -25,5 +27,7 @@ class FakeAsrProvider(AsrProvider):
 
 
 class FakeTtsProvider(TtsProvider):
+    name = "fake"
+
     async def synthesize(self, text: str, *, voice: str = "fake", fmt: str = "mp3") -> AudioOutput:
         return AudioOutput(data=_MP3_SILENCE, mime_type="audio/mpeg", provider="fake", format=fmt)

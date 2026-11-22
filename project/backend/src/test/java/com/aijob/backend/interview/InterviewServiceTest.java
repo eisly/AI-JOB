@@ -62,7 +62,8 @@ class InterviewServiceTest {
         Map<String, Object> frozen = Map.of("profile", Map.of("profileVersion", 1),
                 "job", Map.of("id", "job", "jobVersion", 1, "jdText", "frozen"));
         when(mapper.lockSession(interviewId, userId)).thenReturn(Map.of("id", interviewId, "version", 3,
-                "status", "WAITING_ANSWER", "input_snapshot_json", json.stringify(frozen)));
+                "status", "WAITING_ANSWER", "question_limit", 5, "question_count_rule", "MAIN_ONLY",
+                "input_snapshot_json", json.stringify(frozen)));
         when(mapper.latestQuestion(interviewId)).thenReturn(Map.of("id", questionId, "question_no", 1, "follow_up_no", 0));
         when(mapper.answerByQuestion(questionId, interviewId)).thenReturn(Map.of("id", "answer", "content", "原始回答"));
         AiTask original = new AiTask();
@@ -88,5 +89,37 @@ class InterviewServiceTest {
         assertEquals(3, versions.getValue().get("interviewVersion"));
         verify(mapper, never()).insertMessage(anyString(), anyString(), anyInt(), anyString(), anyString(), anyString(),
                 anyInt(), anyInt(), any(), anyString(), anyString());
+    }
+
+    @Test
+    void lastQuestionStillAcceptsAnswerWhenBudgetExhausted() {
+        InterviewMapper mapper = mock(InterviewMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        TaskService tasks = mock(TaskService.class);
+        JsonService json = new JsonService(JsonMapper.builder().build());
+        InterviewService service = new InterviewService(mapper, mock(JobMapper.class), mock(ResumeMapper.class),
+                mock(LearningMapper.class), mock(ProfileService.class), mock(AbilityService.class), tasks, taskMapper,
+                json, new ApiView(json), mock(com.aijob.backend.interview.voice.VoiceMapper.class));
+        String userId = "user";
+        String interviewId = "interview";
+        String questionId = "60000000-0000-4000-8000-000000000002";
+        Map<String, Object> body = Map.of("questionMessageId", questionId, "content", "最后一题的回答",
+                "expectedVersion", 5);
+        Map<String, Object> frozen = Map.of("profile", Map.of("profileVersion", 1),
+                "job", Map.of("id", "job", "jobVersion", 1, "jdText", "frozen"));
+        when(mapper.lockSession(interviewId, userId)).thenReturn(Map.of("id", interviewId, "version", 5,
+                "status", "WAITING_ANSWER", "question_limit", 5, "question_count_rule", "TOTAL_ASKED",
+                "profile_version", 1, "resume_version_id", "resume", "job_version", 1,
+                "input_snapshot_json", json.stringify(frozen)));
+        when(mapper.latestQuestion(interviewId)).thenReturn(Map.of("id", questionId, "question_no", 5, "follow_up_no", 0));
+        when(mapper.answerByQuestion(questionId, interviewId)).thenReturn(null);
+        when(mapper.askedQuestions(interviewId)).thenReturn(5);
+        when(mapper.messages(interviewId)).thenReturn(List.of());
+        when(mapper.nextSeq(interviewId)).thenReturn(11);
+
+        service.answer(userId, interviewId, "/interviews/" + interviewId + "/answers", "key", body);
+
+        verify(tasks).create(eq(userId), eq("POST"), eq("/interviews/" + interviewId + "/answers"), eq("key"),
+                eq(body), eq("INTERVIEW_TURN"), eq("INTERVIEW"), eq(interviewId), any(), any(), any());
     }
 }

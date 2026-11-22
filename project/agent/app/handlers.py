@@ -1148,11 +1148,19 @@ class InterviewTurnHandler(BaseHandler):
         main_questions = len(
             [item for item in payload.messages if item.role == "ASSISTANT" and (item.follow_up_no or 0) == 0]
         )
+        assistant_total = len([item for item in payload.messages if item.role == "ASSISTANT"])
+        asked_effective = max(payload.asked_count, assistant_total)
+        remaining_effective = max(0, payload.question_limit - asked_effective)
+        if payload.remaining_questions is not None:
+            remaining_effective = min(remaining_effective, payload.remaining_questions)
         return {
             "profile_skills": profile_skills,
             "current_question": current,
             "is_first": is_first,
             "main_questions": main_questions,
+            "rule": payload.question_count_rule,
+            "asked_effective": asked_effective,
+            "remaining_effective": remaining_effective,
         }
 
     def _turn_question(
@@ -1216,6 +1224,48 @@ class InterviewTurnHandler(BaseHandler):
             reference_fallback="",
         )
         answer_evaluation = AIEvaluateResult(evaluation=evaluation, skill_scores=skill_scores)
+
+        if prepared.get("rule") == "TOTAL_ASKED":
+            # 总提问预算：主问题与追问共用 question_limit；额度耗尽时只保留评价并结束。
+            if prepared.get("remaining_effective", payload.question_limit - prepared.get("asked_effective", 0)) <= 0:
+                return AIInterviewTurnResult(
+                    action="FINISH",
+                    question=None,
+                    answer_evaluation=answer_evaluation,
+                    stop_reason="LIMIT_REACHED",
+                )
+            if output.needs_follow_up and follow_up_no < payload.max_follow_ups:
+                question = self._turn_question(
+                    output.follow_up_question,
+                    question_no=question_no,
+                    follow_up_no=follow_up_no + 1,
+                    allowed=allowed,
+                )
+                return AIInterviewTurnResult(
+                    action="FOLLOW_UP",
+                    question=question,
+                    answer_evaluation=answer_evaluation,
+                    stop_reason=None,
+                )
+            if output.next_question is not None:
+                question = self._turn_question(
+                    output.next_question,
+                    question_no=question_no + 1,
+                    follow_up_no=0,
+                    allowed=allowed,
+                )
+                return AIInterviewTurnResult(
+                    action="ASK",
+                    question=question,
+                    answer_evaluation=answer_evaluation,
+                    stop_reason=None,
+                )
+            return AIInterviewTurnResult(
+                action="FINISH",
+                question=None,
+                answer_evaluation=answer_evaluation,
+                stop_reason="LIMIT_REACHED",
+            )
 
         if output.needs_follow_up and follow_up_no < payload.max_follow_ups:
             question = self._turn_question(

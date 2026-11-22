@@ -131,6 +131,11 @@ public class BusinessException extends RuntimeException {
         return new BusinessException(415, 41501, "仅支持 PDF 或 DOCX 文件", "UNSUPPORTED_FILE_TYPE", false, null);
     }
 
+    /** 415 UNSUPPORTED_FILE_TYPE，用于语音录音容器不在允许范围或与声明 MIME 不一致。 */
+    public static BusinessException unsupportedAudioType() {
+        return new BusinessException(415, 41501, "仅支持 WebM、OGG 或 M4A 录音", "UNSUPPORTED_FILE_TYPE", false, null);
+    }
+
     public static BusinessException eventCursorExpired() {
         return new BusinessException(410, 41001, "事件游标已过期", "EVENT_CURSOR_EXPIRED", false, null);
     }

@@ -20,7 +20,7 @@ const props = defineProps<{
   submitting?: boolean
 }>()
 const emit = defineEmits<{
-  submit: [payload: { content: string; transcriptionId: string }]
+  submit: [payload: { content: string; answerSource: 'TEXT' | 'VOICE'; transcriptionId: string }]
   'switch-text': []
 }>()
 
@@ -58,7 +58,8 @@ watch(
 
 const transcribing = computed(() => answer.state.value === 'TRANSCRIBING')
 const showEditor = computed(() => ['EDITING', 'SUBMITTING'].includes(answer.state.value) || text.value.length > 0)
-const canSubmit = computed(() => text.value.trim().length > 0 && text.value.length <= 10000 && !props.disabled)
+const canSubmit = computed(() => text.value.trim().length > 0 && text.value.length <= 10000 && !props.disabled
+  && (!voiceMode.value || !!answer.transcriptionId.value))
 
 async function agree() {
   consentLoading.value = true
@@ -106,7 +107,20 @@ async function transcribe() {
     ElMessage.warning('录音时间过短，请至少录制 2 秒')
     return
   }
-  await answer.transcribe(blob, recorder.mimeType.value, recorder.durationMs.value)
+  await runTranscription(() => answer.transcribe(blob, recorder.mimeType.value, recorder.durationMs.value))
+}
+
+async function retryTranscription() {
+  await runTranscription(() => answer.retryLastAudio())
+}
+
+async function runTranscription(action: () => Promise<void>) {
+  await action()
+  if (answer.notice.value) {
+    ElMessage.warning(answer.notice.value)
+    answer.clearNotice()
+    return
+  }
   if (answer.state.value === 'ANSWERABLE' && answer.error.value) {
     ElMessage.error(answer.error.value instanceof Error ? answer.error.value.message : '语音识别失败，请重试或改用文字')
   }
@@ -124,6 +138,7 @@ function submit() {
 
   emit('submit', {
     content: text.value.trim(),
+    answerSource: voiceMode.value ? 'VOICE' : 'TEXT',
     transcriptionId: voiceMode.value ? answer.transcriptionId.value : '',
   })
 }
@@ -193,6 +208,16 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
       <el-alert v-if="recorder.state.value === 'denied'" class="voice-panel__error" title="麦克风权限被拒绝" description="请在浏览器地址栏的权限设置中允许麦克风后重试，或直接改用文字作答。" type="error" :closable="false" show-icon />
       <el-alert v-else-if="recorder.state.value === 'unavailable'" class="voice-panel__error" title="当前设备无法录音" description="请检查麦克风是否被其他程序占用，或改用文字作答。" type="error" :closable="false" show-icon />
       <el-alert v-if="recorder.error.value && recorder.state.value === 'idle'" class="voice-panel__error" :title="recorder.error.value instanceof Error ? recorder.error.value.message : '录音失败'" type="error" :closable="false" show-icon />
+      <div v-if="recorder.state.value === 'recorded' && answer.state.value === 'ANSWERABLE' && answer.error.value" class="voice-panel__error">
+        <el-alert
+          :title="answer.error.value instanceof Error ? answer.error.value.message : '语音识别失败'"
+          description="录音已保留，可直接重试识别，或改用文字作答。"
+          type="error"
+          :closable="false"
+          show-icon
+        />
+        <el-button size="small" type="primary" plain :disabled="disabled || submitting" @click="retryTranscription">重试识别</el-button>
+      </div>
       <TranscriptionEditor
         v-if="showEditor"
         v-model="text"

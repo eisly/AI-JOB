@@ -303,20 +303,35 @@ def _profile() -> dict[str, Any]:
     }
 
 
-def interview_turn_first_envelope(task_id: UUID) -> dict[str, Any]:
+def _apply_question_budget(payload: dict[str, Any], question_count_rule: str | None,
+                           asked_count: int | None, remaining_questions: int | None) -> None:
+    """仅在显式传入时写入总提问字段，保证既有工厂输出逐字不变。"""
+    if question_count_rule is not None:
+        payload["questionCountRule"] = question_count_rule
+    if asked_count is not None:
+        payload["askedCount"] = asked_count
+    if remaining_questions is not None:
+        payload["remainingQuestions"] = remaining_questions
+
+
+def interview_turn_first_envelope(task_id: UUID, *, question_count_rule: str | None = None,
+                                  asked_count: int | None = None,
+                                  remaining_questions: int | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "interviewId": INTERVIEW_ID,
+        "expectedVersion": 1,
+        "questionLimit": 5,
+        "maxFollowUps": 2,
+        "profile": _profile(),
+        "job": {"id": JOB_ID, "jobVersion": 1, "jdText": "Java后端，熟悉Redis"},
+        "messages": [],
+        "latestAnswer": None,
+        "questionRubricVersion": "technical-answer-v1",
+    }
+    _apply_question_budget(payload, question_count_rule, asked_count, remaining_questions)
     return envelope(
         task_id,
-        {
-            "interviewId": INTERVIEW_ID,
-            "expectedVersion": 1,
-            "questionLimit": 5,
-            "maxFollowUps": 2,
-            "profile": _profile(),
-            "job": {"id": JOB_ID, "jobVersion": 1, "jdText": "Java后端，熟悉Redis"},
-            "messages": [],
-            "latestAnswer": None,
-            "questionRubricVersion": "technical-answer-v1",
-        },
+        payload,
         {"profileVersion": 3, "resumeVersionId": RESUME_VERSION_ID, "jobVersion": 1, "interviewVersion": 1},
     )
 
@@ -343,25 +358,30 @@ def _turn_messages(answer: str) -> list[dict[str, Any]]:
     ]
 
 
-def interview_turn_followup_envelope(task_id: UUID, *, answer: str | None = None) -> dict[str, Any]:
+def interview_turn_followup_envelope(task_id: UUID, *, answer: str | None = None,
+                                     question_count_rule: str | None = None,
+                                     asked_count: int | None = None,
+                                     remaining_questions: int | None = None) -> dict[str, Any]:
     content = answer if answer is not None else "我用Redis做过缓存，解决了热点查询。"
+    payload: dict[str, Any] = {
+        "interviewId": INTERVIEW_ID,
+        "expectedVersion": 2,
+        "questionLimit": 5,
+        "maxFollowUps": 2,
+        "profile": _profile(),
+        "job": {"id": JOB_ID, "jobVersion": 1, "jdText": "Java后端，熟悉Redis"},
+        "messages": _turn_messages(content),
+        "latestAnswer": {
+            "messageId": USER_MESSAGE_ID,
+            "questionMessageId": ASSISTANT_MESSAGE_ID,
+            "content": content,
+        },
+        "questionRubricVersion": "technical-answer-v1",
+    }
+    _apply_question_budget(payload, question_count_rule, asked_count, remaining_questions)
     return envelope(
         task_id,
-        {
-            "interviewId": INTERVIEW_ID,
-            "expectedVersion": 2,
-            "questionLimit": 5,
-            "maxFollowUps": 2,
-            "profile": _profile(),
-            "job": {"id": JOB_ID, "jobVersion": 1, "jdText": "Java后端，熟悉Redis"},
-            "messages": _turn_messages(content),
-            "latestAnswer": {
-                "messageId": USER_MESSAGE_ID,
-                "questionMessageId": ASSISTANT_MESSAGE_ID,
-                "content": content,
-            },
-            "questionRubricVersion": "technical-answer-v1",
-        },
+        payload,
         {"profileVersion": 3, "resumeVersionId": RESUME_VERSION_ID, "jobVersion": 1, "interviewVersion": 2},
     )
 

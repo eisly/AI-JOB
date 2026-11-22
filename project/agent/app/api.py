@@ -39,6 +39,7 @@ from .runner import RunService
 from .schemas import AIRequestEnvelope, AIRunVO
 from .security import Principal, verify_internal_token
 from .speech.router import build_speech_router
+from .speech.qwen import QwenAsrProvider
 from .speech.service import SpeechService
 from .storage import RunRecord, RunRepository, build_repository, utcnow
 
@@ -95,14 +96,19 @@ def create_app(
     llm_client = llm_client or create_llm(settings)
     callbacks = CallbackDispatcher(repository, settings, callback_transport)
     service = RunService(settings, repository, llm_client, callbacks, FileFetcher(settings))
+    speech_asr = QwenAsrProvider(settings) if settings.effective_asr_provider == "qwen" else None
+    speech_service = SpeechService(settings, asr=speech_asr)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await service.start()
+        logger.info("speech configuration sources=%s", settings.speech_config_origins)
         logger.info(
-            "agent started provider=%s model=%s storage=%s callback=%s auth=%s",
+            "agent started provider=%s model=%s asr=%s tts=%s storage=%s callback=%s auth=%s",
             settings.effective_llm_provider,
             settings.effective_model_name,
+            speech_service.asr_provider_name,
+            speech_service.tts_provider_name,
             settings.storage_backend,
             settings.callback_enabled,
             settings.auth_mode,
@@ -110,6 +116,7 @@ def create_app(
         try:
             yield
         finally:
+            await speech_service.close()
             await service.stop()
             logger.info("agent stopped")
 
@@ -547,6 +554,7 @@ def create_app(
             },
         )
 
-    app.include_router(build_speech_router(settings, SpeechService(settings), speech_principal_dependency))
+    app.state.speech = speech_service
+    app.include_router(build_speech_router(settings, speech_service, speech_principal_dependency))
 
     return app

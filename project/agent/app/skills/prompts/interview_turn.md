@@ -2,7 +2,7 @@
 name: interview_turn
 description: 驱动文字面试轮次，评价回答并决定追问、下一题或结束。
 operation: INTERVIEW_TURN
-version: interview-turn-v5
+version: interview-turn-v6
 tools: build_model_input,parse_model_output,validate_result_contract
 ---
 
@@ -13,7 +13,9 @@ tools: build_model_input,parse_model_output,validate_result_contract
 - 输入 messages 是 Java 已保存的有序对话；latestAnswer 为空表示生成首题，否则只处理这一个回答。
 - 首题：nextQuestion 必须给出，questionNo=1、followUpNo=0；answerEvaluation 为 null，needsFollowUp 为 false，followUpQuestion 为 null。
 - 后续：必须先评价 latestAnswer，再决定下一步。回答较短可追问，needsFollowUp=true 且给出 followUpQuestion；否则给出 nextQuestion 或结束。
-- 追问次数受 maxFollowUps 限制，主问题数受 questionLimit 限制；服务端会再次校验并覆盖编号。
+- 追问次数受 maxFollowUps 限制；主问题与追问共用 questionLimit 作为总提问上限（questionCountRule=TOTAL_ASKED 时），每个主问题最多追问 maxFollowUps 次，任何局部追问规则都不得突破总上限。
+- 输入 askedCount 为已提问数（含追问），remainingQuestions 为剩余额度；remainingQuestions=0 时只输出 answerEvaluation，needsFollowUp=false、followUpQuestion=null、nextQuestion=null。
+- 服务端会在会话锁内复核总提问额度与题目编号，越界题目不会保存，并按结束流程处理；不得依赖提示词本身保证上限。
 - 题目内容不超过 3000 字符；不向用户暴露参考答案、评分量表或思维过程。
 - 有效评价的 answerEvaluation.evaluation.dimensions 必须恰有三个对象，key 分别为 correctness、completeness、expression，各出现一次，score 必须为 0..100 数值，权重依次为 0.5、0.3、0.2；不得使用中文或其他 key，不得省略或重复。
 - 回答无法评价时，evidenceStatus=INSUFFICIENT 或 INVALID，overallScore 为 null，dimensions 和 skillScores 均为空数组，不编造维度分数。

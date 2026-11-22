@@ -3,6 +3,9 @@ package com.aijob.backend.interview.voice;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
+
+import tools.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,18 +118,37 @@ public class SpeechAgentClient {
         return (Map<String, Object>) data;
     }
 
-    private BusinessException unavailable(RuntimeException ex, String message) {
+    static BusinessException unavailable(RuntimeException ex, String message) {
         if (ex instanceof BusinessException business) {
             return business;
         }
         if (ex instanceof WebClientResponseException response) {
             int status = response.getStatusCode().value();
             if (status == 413) return BusinessException.payloadTooLarge();
-            if (status == 415) return BusinessException.unsupportedFileType();
+            if (status == 415) return BusinessException.unsupportedAudioType();
             if (status == 429) return BusinessException.rateLimited(30);
-            if (status == 401 || status == 403) return BusinessException.dependencyUnavailable("语音服务鉴权失败");
+            String key = "";
+            try {
+                key = new ObjectMapper().readTree(response.getResponseBodyAsString())
+                        .path("error").path("key").asText("");
+            } catch (Exception ignored) {
+                // Never log an upstream body: it can contain sensitive details.
+            }
+            if (status == 401 || status == 403 || "SPEECH_AUTH_FAILED".equals(key)) {
+                return BusinessException.dependencyUnavailable("语音服务鉴权失败", Map.of("reason", "AUTH"));
+            }
+            if (status == 504 || "SPEECH_TIMEOUT".equals(key)) {
+                return BusinessException.dependencyUnavailable(message, Map.of("reason", "TIMEOUT"));
+            }
+            return BusinessException.dependencyUnavailable(message, Map.of("reason", "UPSTREAM"));
         }
-        return BusinessException.dependencyUnavailable(message, Map.of("reason", "TIMEOUT"));
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            if (cause instanceof TimeoutException || cause instanceof java.net.SocketTimeoutException
+                    || cause instanceof io.netty.handler.timeout.TimeoutException) {
+                return BusinessException.dependencyUnavailable(message, Map.of("reason", "TIMEOUT"));
+            }
+        }
+        return BusinessException.dependencyUnavailable(message, Map.of("reason", "CONNECTION"));
     }
 
     private static String describe(RuntimeException ex) {

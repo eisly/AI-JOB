@@ -1062,3 +1062,118 @@ def test_growth_validate_dedupes_and_checks_evidence():
     output = AIGrowthResult(suggestions=["s"], citedEvidenceIds=[str(uuid4())])
     with pytest.raises(HandlerValidationError, match="citedEvidenceIds 含输入中不存在的证据"):
         handler.validate_business(_ctx(payload), output, {}, {})
+
+# ---------------------------------------------------------------------------
+# 总提问数量预算（TOTAL_ASKED）
+# ---------------------------------------------------------------------------
+
+
+def _budget_payload(*, rule: str = "TOTAL_ASKED", limit: int = 5, asked: int = 4,
+                    follow_up: int = 1) -> InterviewTurnPayload:
+    """模拟 2 个主问题 + 2 次追问已保存（当前是第 2 个主问题的第 1 次追问）。"""
+    q1, a1, q1f1, a2, q2, a3, q2f1, a4 = (str(uuid4()) for _ in range(8))
+    body = interview_turn_followup_envelope(uuid4())["payload"]
+    body["messages"] = [
+        {"id": q1, "seq": 1, "role": "ASSISTANT", "content": "第一题", "questionNo": 1,
+         "followUpNo": 0, "skillCodes": ["redis"]},
+        {"id": a1, "seq": 2, "role": "USER", "content": "答一", "questionNo": 1, "followUpNo": 0},
+        {"id": q1f1, "seq": 3, "role": "ASSISTANT", "content": "追问一", "questionNo": 1,
+         "followUpNo": 1, "skillCodes": ["redis"]},
+        {"id": a2, "seq": 4, "role": "USER", "content": "答二", "questionNo": 1, "followUpNo": 1},
+        {"id": q2, "seq": 5, "role": "ASSISTANT", "content": "第二题", "questionNo": 2,
+         "followUpNo": 0, "skillCodes": ["redis"]},
+        {"id": a3, "seq": 6, "role": "USER", "content": "答三", "questionNo": 2, "followUpNo": 0},
+        {"id": q2f1, "seq": 7, "role": "ASSISTANT", "content": "追问二", "questionNo": 2,
+         "followUpNo": 1, "skillCodes": ["redis"]},
+        {"id": a4, "seq": 8, "role": "USER", "content": "答四", "questionNo": 2, "followUpNo": follow_up},
+    ]
+    body["latestAnswer"] = {"messageId": a4, "questionMessageId": q2f1, "content": "答四"}
+    body["questionCountRule"] = rule
+    body["questionLimit"] = limit
+    body["askedCount"] = asked
+    body["remainingQuestions"] = max(0, limit - asked)
+    return InterviewTurnPayload.model_validate(body)
+
+
+@pytest.mark.asyncio
+async def test_prepare_computes_effective_total_asked_budget():
+    payload = _budget_payload(asked=4)
+    prepared = await InterviewTurnHandler().prepare(_ctx(payload))
+    assert prepared["rule"] == "TOTAL_ASKED"
+    assert prepared["main_questions"] == 2
+    assert prepared["asked_effective"] == 4
+    assert prepared["remaining_effective"] == 1
+
+
+@pytest.mark.asyncio
+async def test_total_asked_two_main_three_follow_ups():
+    payload = _budget_payload(asked=4)
+    prepared = await InterviewTurnHandler().prepare(_ctx(payload))
+    output = TurnModelOutput(
+        answerEvaluation=_evaluation_output(),
+        needsFollowUp=True,
+        followUpQuestion=TurnQuestionModelOutput(content="第二个主问题的第二次追问", skillCodes=["redis"]),
+        nextQuestion=TurnQuestionModelOutput(content="下一个主问题", skillCodes=["redis"]),
+    )
+    result = InterviewTurnHandler().validate_business(_ctx(payload), output, prepared, {"model": "m"})
+    assert result.action == "FOLLOW_UP"
+    assert result.question.question_no == 2
+    assert result.question.follow_up_no == 2
+
+
+@pytest.mark.asyncio
+async def test_total_asked_last_slot_follow_up():
+    payload = interview_turn_followup_envelope(
+        uuid4(), question_count_rule="TOTAL_ASKED", asked_count=4, remaining_questions=1,
+    )["payload"]
+    payload = InterviewTurnPayload.model_validate(payload)
+    prepared = await InterviewTurnHandler().prepare(_ctx(payload))
+    assert prepared["remaining_effective"] == 1
+    output = TurnModelOutput(
+        answerEvaluation=_evaluation_output(),
+        needsFollowUp=True,
+        followUpQuestion=TurnQuestionModelOutput(content="占用最后一个额度的追问", skillCodes=["redis"]),
+    )
+    result = InterviewTurnHandler().validate_business(_ctx(payload), output, prepared, {"model": "m"})
+    assert result.action == "FOLLOW_UP"
+    assert result.question.question_no == 1
+    assert result.question.follow_up_no == 1
+
+
+@pytest.mark.asyncio
+async def test_total_asked_zero_budget_drops_questions():
+    payload = interview_turn_followup_envelope(
+        uuid4(), question_count_rule="TOTAL_ASKED", asked_count=5, remaining_questions=0,
+    )["payload"]
+    payload = InterviewTurnPayload.model_validate(payload)
+    prepared = await InterviewTurnHandler().prepare(_ctx(payload))
+    assert prepared["remaining_effective"] == 0
+    output = TurnModelOutput(
+        answerEvaluation=_evaluation_output(),
+        needsFollowUp=True,
+        followUpQuestion=TurnQuestionModelOutput(content="额度耗尽后仍给出的追问", skillCodes=["redis"]),
+        nextQuestion=TurnQuestionModelOutput(content="额度耗尽后仍给出的下一题", skillCodes=["redis"]),
+    )
+    result = InterviewTurnHandler().validate_business(_ctx(payload), output, prepared, {"model": "m"})
+    assert result.action == "FINISH"
+    assert result.question is None
+    assert result.stop_reason == "LIMIT_REACHED"
+    assert result.answer_evaluation.evaluation.overall_score == 80.0
+
+
+@pytest.mark.asyncio
+async def test_main_only_budget_behavior_unchanged():
+    payload = interview_turn_followup_envelope(
+        uuid4(), question_count_rule="MAIN_ONLY", asked_count=4,
+    )["payload"]
+    payload = InterviewTurnPayload.model_validate(payload)
+    prepared = await InterviewTurnHandler().prepare(_ctx(payload))
+    assert prepared["rule"] == "MAIN_ONLY"
+    output = TurnModelOutput(
+        answerEvaluation=_evaluation_output(),
+        nextQuestion=TurnQuestionModelOutput(content="旧规则下的下一主问题", skillCodes=["redis"]),
+    )
+    result = InterviewTurnHandler().validate_business(_ctx(payload), output, prepared, {"model": "m"})
+    assert result.action == "ASK"
+    assert result.question.question_no == 2
+    assert result.question.follow_up_no == 0

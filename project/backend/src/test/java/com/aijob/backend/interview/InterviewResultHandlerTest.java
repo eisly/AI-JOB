@@ -28,7 +28,8 @@ class InterviewResultHandlerTest {
         task.setId("task"); task.setUserId("user"); task.setResourceId("interview"); task.setOperation("INTERVIEW_TURN");
         task.setInputSnapshotJson(json.stringify(Map.of("latestAnswer", Map.of("messageId", "answer", "questionMessageId", "question"))));
         when(mapper.lockSession("interview", "user")).thenReturn(Map.of("status", "GENERATING", "question_limit", 3,
-                "current_question_no", 1, "current_follow_up_no", 2, "version", 6));
+                "current_question_no", 1, "current_follow_up_no", 2, "version", 6,
+                "pending_task_id", "task", "question_count_rule", "MAIN_ONLY"));
         when(mapper.message("answer", "interview", "user")).thenReturn(Map.of("role", "USER"));
         when(mapper.message("question", "interview", "user")).thenReturn(Map.of("role", "ASSISTANT",
                 "question_no", 1, "follow_up_no", 2, "skill_codes_json", "[]"));

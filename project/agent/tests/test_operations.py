@@ -7,6 +7,12 @@ import pytest
 from tests.factories import OPERATION_CASES, wait_for_run
 
 
+def test_interview_turn_prompt_version_is_v6():
+    from app.operations import INTERVIEW_TURN, PROMPT_VERSIONS
+
+    assert PROMPT_VERSIONS[INTERVIEW_TURN] == "interview-turn-v6"
+
+
 @pytest.mark.parametrize(
     "path,operation,factory,required_keys",
     OPERATION_CASES,

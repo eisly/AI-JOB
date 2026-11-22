@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from .speech_config import FIELDS, resolve_speech_config
 
 AGENT_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -13,6 +14,26 @@ DEFAULT_JWT_SECRET = "dev-only-internal-jwt-secret-change-me"
 
 
 class Settings(BaseSettings):
+    speech_config_origins: dict[str, str] = Field(default_factory=dict, exclude=True, repr=False)
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        def speech_source():
+            explicit = init_settings.init_kwargs
+            paths = dotenv_settings.env_file
+            if isinstance(paths, (str, Path)):
+                paths = (paths,)
+            values, origins = resolve_speech_config(
+                paths, overrides=explicit,
+                app_env=explicit.get("app_env"),
+            )
+            values["speech_config_origins"] = origins
+            return values
+        speech_keys = set(FIELDS) | {key for aliases in FIELDS.values() for key in aliases}
+        def other_settings(source):
+            return lambda: {key: value for key, value in source().items() if key not in speech_keys}
+        return (init_settings, speech_source, other_settings(env_settings),
+                other_settings(dotenv_settings), other_settings(file_secret_settings))
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
         env_file=(str(PROJECT_ROOT / ".env"), str(AGENT_DIR / ".env")),
@@ -81,8 +102,11 @@ class Settings(BaseSettings):
     llm_trust_env: bool = False
     llm_provider_max_retries: int = 1
 
-    # 语音能力（首版逐题整段录音）：密钥只允许存在于 Agent 进程环境变量
+    # 语音能力（首版逐题整段录音）：密钥只允许存在于 Agent 进程环境变量。
+    # speech_provider 为兼容旧配置的总开关；asr/tts 可按能力独立选择，具体项优先于总开关。
     speech_provider: Literal["auto", "fake", "qwen"] = "auto"
+    speech_asr_provider: Literal["auto", "fake", "qwen"] = "auto"
+    speech_tts_provider: Literal["auto", "fake", "qwen"] = "auto"
     speech_api_key: str | None = Field(
         default=None,
         repr=False,
@@ -93,7 +117,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AI_BAILIAN_BASE_URL", "SPEECH_BASE_URL"),
     )
     speech_asr_model: str = Field(
-        default="paraformer-v2",
+        default="qwen-audio-3.1-asr-flash",
         validation_alias=AliasChoices("SPEECH_ASR_MODEL", "AGENT_SPEECH_ASR_MODEL"),
     )
     speech_tts_model: str = Field(
@@ -106,6 +130,7 @@ class Settings(BaseSettings):
     )
     speech_timeout_seconds: float = Field(default=8.0, gt=0)
     speech_tts_timeout_seconds: float = Field(default=6.0, gt=0)
+    speech_trust_env: bool = False
     speech_max_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     speech_min_audio_ms: int = Field(default=2000, gt=0)
     speech_max_audio_ms: int = Field(default=180_000, gt=0)
@@ -225,11 +250,25 @@ class Settings(BaseSettings):
             return self.deepseek_model
         return "fake-llm"
 
-    @property
-    def effective_speech_provider(self) -> str:
+    def _resolve_speech_provider(self, specific: str) -> str:
+        if specific != "auto":
+            return specific
         if self.speech_provider != "auto":
             return self.speech_provider
         return "qwen" if self.speech_api_key else "fake"
+
+    @property
+    def effective_asr_provider(self) -> str:
+        return self._resolve_speech_provider(self.speech_asr_provider)
+
+    @property
+    def effective_tts_provider(self) -> str:
+        return self._resolve_speech_provider(self.speech_tts_provider)
+
+    @property
+    def effective_speech_provider(self) -> str:
+        """兼容旧字段：历史上该值同时代表 ASR/TTS，现在返回 ASR 的选择结果。"""
+        return self.effective_asr_provider
 
     def validate_runtime_security(self) -> None:
         if self.app_env != "prod":
@@ -240,5 +279,12 @@ class Settings(BaseSettings):
             raise RuntimeError("AGENT_JWT_SECRET must be a strong secret in prod")
         if self.effective_llm_provider == "deepseek" and not self.deepseek_api_key:
             raise RuntimeError("DEEPSEEK_API_KEY is required when the deepseek provider is used")
-        if self.effective_speech_provider == "fake":
-            raise RuntimeError("AGENT_SPEECH_PROVIDER=fake is forbidden in prod; configure AI_BAILIAN_API_KEY")
+        if self.effective_asr_provider == "fake":
+            raise RuntimeError(
+                "AGENT_SPEECH_ASR_PROVIDER=fake is forbidden in prod; configure qwen and AI_BAILIAN_API_KEY"
+            )
+
+        if self.effective_asr_provider == "qwen" and not self.speech_api_key:
+            raise RuntimeError("SPEECH_API_KEY is required when the qwen ASR provider is used")
+        if self.effective_tts_provider == "qwen" and not self.speech_api_key:
+            raise RuntimeError("SPEECH_API_KEY is required when the qwen TTS provider is used")

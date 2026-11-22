@@ -807,6 +807,12 @@ export interface InterviewVO {
   /** 语音面试：会话作答模式；历史数据为 TEXT */
   mode?: 'TEXT' | 'VOICE'
   questionLimit: number
+  /** 总提问数量口径：TOTAL_ASKED=主问题+追问共用上限；历史会话/缺省为 MAIN_ONLY */
+  questionCountRule?: 'MAIN_ONLY' | 'TOTAL_ASKED' | null
+  /** 已提问数量（含追问），以已保存的 ASSISTANT 消息为准 */
+  askedQuestionCount?: number | null
+  /** 剩余提问额度，始终 >= 0 */
+  remainingQuestionCount?: number | null
   version: number
   pendingTaskId: string | null
   messages: MessageVO[]
@@ -838,9 +844,19 @@ export interface VoiceTranscriptionVO {
   questionMessageId: string
   interviewVersion: number
   durationMs: number
+  attempt?: number
   expiresAt: string
   reused?: boolean
 }
+
+/** 与后端 VoiceReasons 保持一致：失效原因固定为这组值，禁止由状态拼接。 */
+export type VoiceTranscriptionReason =
+  | 'QUESTION_CHANGED'
+  | 'TRANSCRIPTION_NOT_FOUND'
+  | 'TRANSCRIPTION_CONSUMED'
+  | 'TRANSCRIPTION_DISCARDED'
+  | 'TRANSCRIPTION_EXPIRED'
+  | 'SUPERSEDED'
 
 export interface VoiceConsentVO {
   agreed: boolean
@@ -857,6 +873,10 @@ export interface InterviewReportVO {
   skillEvidenceStatus?: 'AVAILABLE' | 'NO_SKILL_SCORES' | 'NO_VALID_ANSWER'
   skillEvidenceMessage?: string
   answeredQuestionCount: number
+  /** 总提问口径（含追问）的报告字段；仅新规则会话返回 */
+  answeredAskCount?: number | null
+  askedQuestionCount?: number | null
+  questionCountRule?: 'MAIN_ONLY' | 'TOTAL_ASKED' | null
   completionType: 'NORMAL' | 'EARLY_END' | 'NO_VALID_ANSWER'
 }
 

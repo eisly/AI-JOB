@@ -154,6 +154,9 @@ const interview: InterviewVO = {
   id: '60000000-0000-4000-8000-000000000001',
   status: 'WAITING_ANSWER',
   questionLimit: 5,
+  questionCountRule: 'TOTAL_ASKED',
+  askedQuestionCount: 3,
+  remainingQuestionCount: 2,
   createdAt: isoHoursAgo(3),
 }
 

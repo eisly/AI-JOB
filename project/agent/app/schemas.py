@@ -828,6 +828,9 @@ class InterviewTurnPayload(APIModel):
     interview_id: UUID
     expected_version: int = Field(ge=1)
     question_limit: int = Field(ge=1, le=10)
+    question_count_rule: Literal["MAIN_ONLY", "TOTAL_ASKED"] = "MAIN_ONLY"
+    asked_count: int = Field(default=0, ge=0, le=62)
+    remaining_questions: int | None = Field(default=None, ge=0, le=10)
     max_follow_ups: int = Field(ge=0, le=2)
     profile: ProfileSnapshot
     job: InterviewJobInput | None = None

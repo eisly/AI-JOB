@@ -9,6 +9,7 @@ from ..config import Settings
 from ..logging_config import log_context
 from ..security import Principal
 from .service import SpeechService
+from ..errors import too_large
 
 PrincipalDependency = Callable[..., Awaitable[Principal]]
 
@@ -42,7 +43,12 @@ def build_speech_router(
         principal: Principal = Depends(principal_dependency),
     ) -> JSONResponse:
         principal.assert_task(request_id)
-        data = await audio.read()
+        try:
+            data = await audio.read(settings.speech_max_bytes + 1)
+            if len(data) > settings.speech_max_bytes:
+                raise too_large("录音文件超出大小限制")
+        finally:
+            await audio.close()
         with log_context(trace=_trace(request), user=user_id, op="SPEECH_ASR"):
             result = await service.transcribe(data, mime_type, duration_ms, language)
         return _result(result.model_dump(by_alias=True, mode="json"), trace_id=_trace(request))

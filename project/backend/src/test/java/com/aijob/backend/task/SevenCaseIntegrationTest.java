@@ -22,7 +22,7 @@ import com.aijob.backend.learning.*;
 import com.aijob.backend.profile.ProfileService;
 
 @SpringBootTest(properties = {
-    "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/career_business_test?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true",
+    "spring.datasource.url=${BUDGET_TEST_DB_URL:jdbc:mysql://127.0.0.1:3307/career_business_test?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}",
     "app.agent.scheduler-enabled=false"
 })
 @EnabledIfSystemProperty(named = "integration-tests", matches = "true")
@@ -137,6 +137,7 @@ class SevenCaseIntegrationTest {
         interviewMapper.insertMessage(answer, session, 2, "USER", "TEXT", "测试回答", 1, 0, question, "[]", null);
         AiTask turn = task("INTERVIEW_TURN", "INTERVIEW", session, Map.of(),
                 Map.of("latestAnswer", Map.of("messageId", answer, "questionMessageId", question)));
+        interviewMapper.updateTaskStatus(session, "GENERATING", turn.getId());
         Map<String, Object> evaluation = Map.of("evidenceStatus", mode.equals("INVALID") ? "INVALID" : "VALID",
                 "rubricVersion", AbilityService.RUBRIC, "modelVersion", "fixture-only", "promptVersion", "fixture-v1",
                 "dimensions", List.of(Map.of("key", "correctness", "score", 80, "weight", 0.5),

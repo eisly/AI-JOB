@@ -17,15 +17,15 @@ public interface InterviewMapper {
 
     @Insert("""
             INSERT INTO interview_session (id,user_id,job_id,job_version,resume_version_id,profile_version,input_snapshot_json,
-              status,question_limit,pending_task_id,plan_item_id)
+              status,question_limit,question_count_rule,pending_task_id,plan_item_id)
             VALUES (#{id},#{userId},#{jobId},#{jobVersion},#{resumeVersionId},#{profileVersion},#{snapshotJson},
-              'PREPARING',#{questionLimit},#{taskId},#{planItemId})
+              'PREPARING',#{questionLimit},#{questionCountRule},#{taskId},#{planItemId})
             """)
     int insertSession(@Param("id") String id, @Param("userId") String userId, @Param("jobId") String jobId,
                       @Param("jobVersion") int jobVersion, @Param("resumeVersionId") String resumeVersionId,
                       @Param("profileVersion") long profileVersion, @Param("snapshotJson") String snapshotJson,
-                      @Param("questionLimit") int questionLimit, @Param("taskId") String taskId,
-                      @Param("planItemId") String planItemId);
+                      @Param("questionLimit") int questionLimit, @Param("questionCountRule") String questionCountRule,
+                      @Param("taskId") String taskId, @Param("planItemId") String planItemId);
 
     @Select("SELECT * FROM interview_session WHERE id=#{id} AND user_id=#{userId}")
     Map<String,Object> session(@Param("id") String id, @Param("userId") String userId);
@@ -38,7 +38,9 @@ public interface InterviewMapper {
     @Select("""
             SELECT i.*, jv.title AS job_title, ir.completion_type,
               (SELECT COUNT(*) FROM interview_turn_evaluation e
-                WHERE e.interview_id=i.id AND e.overall_score IS NOT NULL) AS answered_count
+                WHERE e.interview_id=i.id AND e.overall_score IS NOT NULL) AS answered_count,
+              (SELECT COUNT(*) FROM interview_message m
+                WHERE m.interview_id=i.id AND m.role='ASSISTANT') AS asked_count
             FROM interview_session i
             LEFT JOIN job_version jv ON jv.job_id=i.job_id AND jv.version_no=i.job_version
             LEFT JOIN interview_report ir ON ir.interview_id=i.id
@@ -102,6 +104,10 @@ public interface InterviewMapper {
 
     @Select("SELECT * FROM interview_message WHERE interview_id=#{interviewId} AND role='ASSISTANT' ORDER BY seq DESC LIMIT 1")
     Map<String,Object> latestQuestion(@Param("interviewId") String interviewId);
+
+    /** 总提问数量的权威值：主问题与追问都计为一条 ASSISTANT 消息，走 idx_interview_id_role_seq。 */
+    @Select("SELECT COUNT(*) FROM interview_message WHERE interview_id=#{interviewId} AND role='ASSISTANT'")
+    int askedQuestions(@Param("interviewId") String interviewId);
 
     @Select("SELECT * FROM interview_message WHERE question_message_id=#{questionMessageId} AND interview_id=#{interviewId}")
     Map<String,Object> answerByQuestion(@Param("questionMessageId") String questionMessageId,

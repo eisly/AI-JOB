@@ -85,7 +85,8 @@ app:
     sse-heartbeat-seconds: ${AI_TASK_SSE_HEARTBEAT_SECONDS:15}
   voice:
     asr-enabled: ${APP_VOICE_ASR_ENABLED:true}
-    tts-enabled: ${APP_VOICE_TTS_ENABLED:true}
+    # 本次仅接入真实 ASR；TTS 仍为 Fake，默认关闭入口，避免把模拟音频当成真实语音服务。
+    tts-enabled: ${APP_VOICE_TTS_ENABLED:false}
     consent-required: ${APP_VOICE_CONSENT_REQUIRED:true}
     transcribe-timeout: ${APP_VOICE_TRANSCRIBE_TIMEOUT:12s}
     synthesize-timeout: ${APP_VOICE_SYNTHESIZE_TIMEOUT:10s}

@@ -23,7 +23,7 @@ _ALLOWED_MIME = {
 }
 
 
-def _detect_format(data: bytes, declared: str) -> str | None:
+def _detect_format(data: bytes) -> str | None:
     if data[:4] == b"\x1a\x45\xdf\xa3":
         return "webm"
     if data[:4] == b"OggS":
@@ -34,19 +34,51 @@ def _detect_format(data: bytes, declared: str) -> str | None:
         return "mp3"
     if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
         return "wav"
-    return _ALLOWED_MIME.get(declared.lower().split(";")[0].strip())
+    return None
 
 
 class SpeechService:
     def __init__(self, settings: Settings, asr: AsrProvider | None = None, tts: TtsProvider | None = None) -> None:
         self.settings = settings
-        if settings.effective_speech_provider == "qwen" and (asr is None or tts is None):
+        asr_provider = settings.effective_asr_provider
+        tts_provider = settings.effective_tts_provider
+        if asr is None:
+            if asr_provider != "fake":
+                raise RuntimeError("speech ASR provider=%s 未注入真实实现" % asr_provider)
+            asr = FakeAsrProvider()
+        elif asr_provider != "fake" and getattr(asr, "name", "fake") != asr_provider:
             raise RuntimeError(
-                "speech_provider=qwen 尚未接入真实 Provider（M2-01）；请使用 fake 或显式注入实现"
+                "speech ASR provider=%s 与注入实现 %s 不一致" % (asr_provider, getattr(asr, "name", "unknown"))
             )
-        self.asr = asr or FakeAsrProvider()
-        self.tts = tts or FakeTtsProvider()
+        if tts is None:
+            if tts_provider != "fake":
+                raise RuntimeError("speech TTS provider=%s 未注入真实实现" % tts_provider)
+            tts = FakeTtsProvider()
+        elif tts_provider != "fake" and getattr(tts, "name", "fake") != tts_provider:
+            raise RuntimeError(
+                "speech TTS provider=%s 与注入实现 %s 不一致" % (tts_provider, getattr(tts, "name", "unknown"))
+            )
+        if settings.app_env == "prod":
+            if getattr(asr, "name", "fake") == "fake":
+                raise RuntimeError("prod 不允许使用 Fake ASR Provider；请注入真实实现")
+            if getattr(tts, "name", "fake") == "fake":
+                logger.warning("prod 使用 Fake TTS：仅 ASR 为真实，TTS 入口必须保持关闭")
+        self.asr = asr
+        self.tts = tts
         self._semaphore = asyncio.Semaphore(settings.speech_concurrency)
+
+    @property
+    def asr_provider_name(self) -> str:
+        return getattr(self.asr, "name", self.settings.effective_asr_provider)
+
+    @property
+    def tts_provider_name(self) -> str:
+        return getattr(self.tts, "name", self.settings.effective_tts_provider)
+
+    async def close(self) -> None:
+        closer = getattr(self.asr, "aclose", None)
+        if closer is not None:
+            await closer()
 
     async def transcribe(self, data: bytes, mime_type: str, duration_ms: int, language: str = "zh") -> TranscribeResult:
         if len(data) == 0:
@@ -56,7 +88,7 @@ class SpeechService:
         normalized_mime = mime_type.lower().split(";")[0].strip()
         if normalized_mime not in _ALLOWED_MIME:
             raise ApiError(415, 41501, "不支持的录音格式", "UNSUPPORTED_FILE_TYPE")
-        detected = _detect_format(data, normalized_mime)
+        detected = _detect_format(data)
         if detected is None:
             raise ApiError(415, 41501, "录音内容与声明格式不符", "UNSUPPORTED_FILE_TYPE")
         if duration_ms < self.settings.speech_min_audio_ms or duration_ms > self.settings.speech_max_audio_ms:

@@ -28,6 +28,8 @@ def settings(request: pytest.FixtureRequest, tmp_path) -> Settings:
         event_poll_seconds=0.02,
         heartbeat_seconds=0.2,
         llm_provider="fake",
+        speech_asr_provider="fake",
+        speech_tts_provider="fake",
         log_level="WARNING",
     )
     if backend == "sqlite":

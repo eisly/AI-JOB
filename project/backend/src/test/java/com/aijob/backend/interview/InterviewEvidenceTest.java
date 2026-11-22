@@ -27,7 +27,7 @@ class InterviewEvidenceTest {
         var task = new AiTask();
         task.setId("task"); task.setUserId("user"); task.setResourceId("session");
         task.setOperation("INTERVIEW_REPORT"); task.setInputSnapshotJson("{\"completionType\":\"NORMAL\"}");
-        when(mapper.lockSession("session", "user")).thenReturn(Map.of("status", "ENDING"));
+        when(mapper.lockSession("session", "user")).thenReturn(Map.of("status", "ENDING", "pending_task_id", "task"));
         var evaluation = Map.of("evidenceStatus", status, "rubricVersion", AbilityService.RUBRIC,
                 "dimensions", List.of(Map.of("key", "correctness", "score", 80, "weight", 0.5),
                 Map.of("key", "completeness", "score", 60, "weight", 0.3),

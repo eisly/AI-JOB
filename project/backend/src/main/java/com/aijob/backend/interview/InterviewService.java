@@ -21,6 +21,7 @@ import com.aijob.backend.common.PageResult;
 import com.aijob.backend.job.JobMapper;
 import com.aijob.backend.learning.LearningMapper;
 import com.aijob.backend.interview.voice.VoiceMapper;
+import com.aijob.backend.interview.voice.VoiceReasons;
 import com.aijob.backend.profile.ProfileService;
 import com.aijob.backend.resume.ResumeMapper;
 import com.aijob.backend.task.AiTask;
@@ -89,12 +90,14 @@ public class InterviewService {
         int jobVersion = ((Number) job.get("job_version")).intValue();
         String interviewId = UUID.randomUUID().toString();
         Map<String, Object> jobInput = Map.of("id", jobId, "jobVersion", jobVersion, "jdText", job.get("jd_text"));
-        Map<String, Object> payload = turnPayload(interviewId, 1, limit, profile, jobInput, List.of(), null);
+        Map<String, Object> payload = turnPayload(interviewId, 1, limit, QuestionCountRule.TOTAL_ASKED, 0, profile,
+                jobInput, List.of(), null);
         Map<String, Object> versions = Map.of("profileVersion", profileVersion, "resumeVersionId", resumeId,
                 "jobVersion", jobVersion, "interviewVersion", 1);
         return tasks.create(userId, "POST", route, key, body, "INTERVIEW_TURN", "INTERVIEW", interviewId,
                 versions, payload, taskId -> mapper.insertSession(interviewId, userId, jobId, jobVersion, resumeId,
-                        profileVersion, json.stringify(Map.of("profile", profile, "job", jobInput)), limit, taskId, planItemId));
+                        profileVersion, json.stringify(Map.of("profile", profile, "job", jobInput)), limit,
+                        QuestionCountRule.TOTAL_ASKED.name(), taskId, planItemId));
     }
 
     public Map<String, Object> detail(String userId, String interviewId) {
@@ -137,6 +140,10 @@ public class InterviewService {
         if (!"WAITING_ANSWER".equals(String.valueOf(session.get("status")))) {
             throw BusinessException.conflict("当前面试状态不能回答", "INVALID_STATE");
         }
+        // 总提问数量只作展示与 Agent 参考：最后一题必须允许回答，这里不校验额度。
+        QuestionCountRule rule = QuestionCountRule.parse(session.get("question_count_rule"));
+        int limit = ((Number) session.get("question_limit")).intValue();
+        int asked = mapper.askedQuestions(interviewId);
         Map<String, Object> latest = mapper.latestQuestion(interviewId);
         if (latest == null || !questionMessageId.equals(String.valueOf(latest.get("id")))) {
             throw BusinessException.conflict("只能回答当前问题", "INVALID_STATE");
@@ -156,12 +163,17 @@ public class InterviewService {
             }
             if ("VOICE".equals(answerSource)) {
                 if (!"SUCCEEDED".equals(String.valueOf(transcription.get("status")))) {
-                    throw BusinessException.stale("转写不可用",
-                            Map.of("reason", "TRANSCRIPTION_" + transcription.get("status")));
-                }
-                if (expired(transcription)) {
                     voice.expireIfStale(transcriptionId);
-                    throw BusinessException.stale("转写已过期，请重新录音", Map.of("reason", "TRANSCRIPTION_EXPIRED"));
+                    transcription = voice.findById(transcriptionId, userId, interviewId);
+                    if (transcription == null) {
+                        throw BusinessException.stale("转写记录不存在或不属于当前问题",
+                                Map.of("reason", VoiceReasons.NOT_FOUND));
+                    }
+                }
+                String status = String.valueOf(transcription.get("status"));
+                if (!"SUCCEEDED".equals(status)) {
+                    throw BusinessException.stale("转写不可用，请重新录音或改用文字",
+                            Map.of("reason", VoiceReasons.forStatus(status)));
                 }
             }
         }
@@ -177,6 +189,9 @@ public class InterviewService {
             }
             Map<String, Object> payload = json.map(original.getInputSnapshotJson());
             payload.put("expectedVersion", actual);
+            payload.put("questionCountRule", rule.name());
+            payload.put("askedCount", asked);
+            payload.put("remainingQuestions", rule.remaining(limit, asked));
             payload.put("messages", agentMessages(interviewId));
             Map<String, Object> versions = json.map(original.getInputVersionsJson());
             versions.put("interviewVersion", actual);
@@ -195,8 +210,8 @@ public class InterviewService {
         Map<String, Object> frozen = json.map(String.valueOf(session.get("input_snapshot_json")));
         Map<String, Object> profile = json.convert(json.tree(frozen.get("profile")), Map.class);
         Map<String, Object> jobInput = json.convert(json.tree(frozen.get("job")), Map.class);
-        int limit = ((Number) session.get("question_limit")).intValue();
-        Map<String, Object> payload = turnPayload(interviewId, expected, limit, profile, jobInput, messages, latestAnswer);
+
+        Map<String, Object> payload = turnPayload(interviewId, expected, limit, rule, asked, profile, jobInput, messages, latestAnswer);
         Map<String, Object> versions = Map.of("profileVersion", session.get("profile_version"),
                 "resumeVersionId", session.get("resume_version_id"), "jobVersion", session.get("job_version"),
                 "interviewVersion", expected);
@@ -206,7 +221,10 @@ public class InterviewService {
                             ((Number) latest.get("question_no")).intValue(), ((Number) latest.get("follow_up_no")).intValue(),
                             questionMessageId, "[]", taskId);
                     if (transcriptionId != null) {
-                        voice.markConsumed(transcriptionId, answerId);
+                        if (voice.markConsumed(transcriptionId, answerId) != 1) {
+                            throw BusinessException.stale("转写已失效，请重新录音或改用文字",
+                                    Map.of("reason", "TRANSCRIPTION_CONSUMED"));
+                        }
                     }
                     if ("VOICE".equals(messageSource)) {
                         mapper.markVoiceMode(interviewId);
@@ -246,9 +264,12 @@ public class InterviewService {
             item.put("evidenceStatus", evaluation.get("evidenceStatus"));
             return item;
         }).toList();
+        QuestionCountRule rule = QuestionCountRule.parse(session.get("question_count_rule"));
         Map<String, Object> payload = Map.of("interviewId", interviewId, "completionType", completionType,
                 "messages", agentMessages(interviewId), "turnEvaluations", evaluations,
-                "skillSnapshot", skillSnapshots(userId));
+                "skillSnapshot", skillSnapshots(userId),
+                "questionCountRule", rule.name(),
+                "askedQuestionCount", mapper.askedQuestions(interviewId));
         Map<String, Object> versions = Map.of("interviewVersion", session.get("version"));
         return tasks.create(userId, "POST", route, key, request, "INTERVIEW_REPORT", "INTERVIEW_REPORT", interviewId,
                 versions, payload, retryOfTaskId, taskId -> mapper.updateTaskStatus(interviewId, "ENDING", taskId));
@@ -275,6 +296,13 @@ public class InterviewService {
         result.put("status", session.get("status"));
         result.put("mode", session.get("mode"));
         result.put("questionLimit", session.get("question_limit"));
+        QuestionCountRule rule = QuestionCountRule.parse(session.get("question_count_rule"));
+        int limit = session.get("question_limit") instanceof Number number ? number.intValue() : 0;
+        int asked = session.get("asked_count") instanceof Number number ? number.intValue()
+                : mapper.askedQuestions(String.valueOf(session.get("id")));
+        result.put("questionCountRule", rule.name());
+        result.put("askedQuestionCount", asked);
+        result.put("remainingQuestionCount", rule.remaining(limit, asked));
         result.put("version", session.get("version"));
         result.put("pendingTaskId", session.get("pending_task_id"));
         // U09/U11：岗位名、报告完成类型与实际有效回答数（列表查询带出，历史列表据此展示）
@@ -308,13 +336,17 @@ public class InterviewService {
         }).toList();
     }
 
-    private Map<String, Object> turnPayload(String interviewId, int expectedVersion, int limit, Map<String, Object> profile,
+    private Map<String, Object> turnPayload(String interviewId, int expectedVersion, int limit,
+                                            QuestionCountRule rule, int asked, Map<String, Object> profile,
                                             Map<String, Object> job, List<Map<String, Object>> messages,
                                             Map<String, Object> latestAnswer) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("interviewId", interviewId);
         payload.put("expectedVersion", expectedVersion);
         payload.put("questionLimit", limit);
+        payload.put("questionCountRule", rule.name());
+        payload.put("askedCount", asked);
+        payload.put("remainingQuestions", rule.remaining(limit, asked));
         payload.put("maxFollowUps", 2);
         payload.put("profile", profile);
         payload.put("job", job);
@@ -341,14 +373,4 @@ public class InterviewService {
         return value;
     }
 
-    private static boolean expired(Map<String, Object> row) {
-        Object value = row.get("expires_at");
-        if (value instanceof java.time.LocalDateTime time) {
-            return time.isBefore(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
-        }
-        if (value instanceof java.sql.Timestamp time) {
-            return time.toInstant().isBefore(java.time.Instant.now());
-        }
-        return false;
-    }
 }

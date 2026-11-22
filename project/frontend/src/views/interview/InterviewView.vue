@@ -93,6 +93,20 @@ const currentQuestion = computed(() => {
   }
   return null
 })
+const questionProgressLabel = computed(() => {
+  const session = currentInterview.value
+  if (!session) return ''
+  if (session.questionCountRule === 'TOTAL_ASKED') {
+    return `已提问 ${session.askedQuestionCount ?? 0} / ${session.questionLimit}（含追问）`
+  }
+  return `${session.questionLimit} 个主问题`
+})
+const isLastQuestion = computed(() => {
+  const session = currentInterview.value
+  return session?.questionCountRule === 'TOTAL_ASKED'
+    && session.status === 'WAITING_ANSWER'
+    && (session.askedQuestionCount ?? 0) >= session.questionLimit
+})
 const canAnswer = computed(() => {
   const contentLength = answerContent.value.trim().length
   return currentInterview.value?.status === 'WAITING_ANSWER'
@@ -303,7 +317,7 @@ async function createInterview() {
     return
   }
   if (createForm.value.questionLimit < 3 || createForm.value.questionLimit > 10) {
-    ElMessage.warning('主问题数量须为 3 到 10')
+    ElMessage.warning('总提问数量须为 3 到 10')
     return
   }
   creating.value = true
@@ -385,9 +399,9 @@ async function sendAnswer() {
   await submitAnswer(answerContent.value)
 }
 
-async function handleVoiceSubmit(payload: { content: string; transcriptionId: string }) {
+async function handleVoiceSubmit(payload: { content: string; answerSource: 'TEXT' | 'VOICE'; transcriptionId: string }) {
   answerContent.value = payload.content
-  await submitAnswer(payload.content, 'VOICE', payload.transcriptionId)
+  await submitAnswer(payload.content, payload.answerSource, payload.transcriptionId)
 }
 
 function handleVoiceSwitchText() {
@@ -397,7 +411,8 @@ function handleVoiceSwitchText() {
 async function retryAnswerWithSameContent() {
   if (!answerAttempt.value) return
   answerContent.value = answerAttempt.value.content
-  await submitAnswer(answerAttempt.value.content)
+  const attempt = answerAttempt.value
+  await submitAnswer(attempt.content, attempt.answerSource, attempt.voiceTranscriptionId)
 }
 
 async function endInterview() {
@@ -630,9 +645,9 @@ onMounted(async () => {
               </el-select>
             </el-form-item>
           </div>
-          <el-form-item label="主问题数量（3–10）" required>
+          <el-form-item label="总提问上限（含追问，3–10）" required>
             <el-input-number v-model="createForm.questionLimit" :min="3" :max="10" :step="1" step-strictly />
-            <span class="form-hint">每个主问题最多追问 2 次</span>
+            <span class="form-hint">每个主问题最多追问 2 次，追问同样计入总数</span>
           </el-form-item>
           <el-alert v-if="queryValue(route.query.planItemId)" title="本次面试将关联当前训练计划项" type="success" :closable="false" />
           <el-button native-type="submit" type="primary" :loading="creating" :disabled="!!activeTask && !isTerminalTask(activeTask.status)">创建面试并生成首题</el-button>
@@ -646,7 +661,7 @@ onMounted(async () => {
           <div>
             <h2>文字面试对话</h2>
             <p v-if="currentInterview" class="session-meta">
-              {{ commonStatusLabels[currentInterview.status] || currentInterview.status }} · {{ currentInterview.questionLimit }} 个主问题 · 版本 {{ currentInterview.version }}
+              {{ commonStatusLabels[currentInterview.status] || currentInterview.status }} · {{ questionProgressLabel }} · 版本 {{ currentInterview.version }}
             </p>
           </div>
           <el-button size="small" :loading="interviewLoading" @click="refreshCurrent">刷新会话</el-button>
@@ -671,6 +686,7 @@ onMounted(async () => {
                 <strong>回答当前问题</strong>
                 <span class="muted">使用当前会话版本 {{ currentInterview.version }}</span>
               </div>
+              <el-alert v-if="isLastQuestion" title="这是最后一题，提交后生成报告" type="warning" :closable="false" show-icon />
               <VoiceAnswerPanel
                 v-if="voiceAvailable && voiceCapability && currentQuestion"
                 :key="`${currentInterview.id}:${currentQuestion.id}`"
@@ -725,6 +741,7 @@ onMounted(async () => {
               <div class="report-facts">
                 <div><span>完成方式</span><strong>{{ completionTypeLabels[report.completionType] }}</strong></div>
                 <div><span>有效回答主问题数</span><strong>{{ report.answeredQuestionCount }}</strong></div>
+                <div v-if="report.answeredAskCount != null"><span>有效回答（含追问）</span><strong>{{ report.answeredAskCount }}</strong></div>
                 <div><span>证据状态</span><strong>{{ evidenceStatusLabels[report.evaluation.evidenceStatus] || report.evaluation.evidenceStatus }}</strong></div>
               </div>
             </div>
@@ -799,7 +816,7 @@ onMounted(async () => {
               <el-tag size="small" :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'primary'">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
               <el-tag v-if="item.completionType === 'EARLY_END'" size="small" type="warning">提前结束</el-tag>
               <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER'" size="small" type="info">无有效回答</el-tag>
-              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} 次（含追问） · 计划 {{ item.questionLimit }} 个主问题</span>
+              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} 次（含追问） · {{ item.questionCountRule === 'TOTAL_ASKED' ? `已提问 ${item.askedQuestionCount ?? 0} / ${item.questionLimit}（含追问）` : `计划 ${item.questionLimit} 个主问题` }}</span>
               <time class="muted">{{ formatDate(item.createdAt) }}</time>
             </button>
             <div class="history-item__actions">

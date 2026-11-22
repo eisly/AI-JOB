@@ -60,8 +60,11 @@ public class InterviewResultHandler implements TaskResultHandler {
 
     @Override
     public void failure(AiTask task, JsonNode error) {
-        Map<String, Object> session = mapper.session(task.getResourceId(), task.getUserId());
-        if (session == null) return;
+        Map<String, Object> session = mapper.lockSession(task.getResourceId(), task.getUserId());
+        Set<String> expectedStates = "INTERVIEW_REPORT".equals(task.getOperation())
+                ? Set.of("ENDING") : Set.of("PREPARING", "GENERATING");
+        if (session == null || !task.getId().equals(session.get("pending_task_id"))
+                || !expectedStates.contains(String.valueOf(session.get("status")))) return;
         String status;
         if ("INTERVIEW_REPORT".equals(task.getOperation())) {
             status = "WAITING_ANSWER";
@@ -74,6 +77,13 @@ public class InterviewResultHandler implements TaskResultHandler {
 
     @Override
     public void prepareRetry(AiTask original, String newTaskId) {
+        Map<String, Object> session = mapper.lockSession(original.getResourceId(), original.getUserId());
+        Set<String> expectedStates = "INTERVIEW_REPORT".equals(original.getOperation())
+                ? Set.of("WAITING_ANSWER") : Set.of("FAILED", "WAITING_ANSWER");
+        if (session == null || !original.getId().equals(session.get("pending_task_id"))
+                || !expectedStates.contains(String.valueOf(session.get("status")))) {
+            throw BusinessException.conflict("面试状态已变化，不能重试旧任务", "INVALID_STATE");
+        }
         if ("INTERVIEW_REPORT".equals(original.getOperation())) {
             mapper.updateTaskStatus(original.getResourceId(), "ENDING", newTaskId);
         } else {
@@ -88,6 +98,15 @@ public class InterviewResultHandler implements TaskResultHandler {
         if (session == null || !Set.of("PREPARING", "GENERATING").contains(String.valueOf(session.get("status")))) {
             throw BusinessException.conflict("面试状态已变化", "INVALID_STATE");
         }
+        // 旧版本任务（pending_task_id 已被新任务覆盖）晚到时一律拒绝，避免覆盖当前状态或重复增加题数。
+        Object pendingTaskId = session.get("pending_task_id");
+        if (pendingTaskId == null || !task.getId().equals(String.valueOf(pendingTaskId))) {
+            throw BusinessException.conflict("面试状态已变化", "INVALID_STATE");
+        }
+        QuestionCountRule rule = QuestionCountRule.parse(session.get("question_count_rule"));
+        int limit = ((Number) session.get("question_limit")).intValue();
+        // 必须是本事务中 lockSession 之后的第一条普通 SELECT，否则 REPEATABLE READ 旧快照可能少计刚创建的题目。
+        int asked = mapper.askedQuestions(task.getResourceId());
         Map<String, Object> payload = json.map(task.getInputSnapshotJson());
         Map<String, Object> latestAnswer = (Map<String, Object>) payload.get("latestAnswer");
         Map<String, Object> value = json.map(result);
@@ -102,14 +121,15 @@ public class InterviewResultHandler implements TaskResultHandler {
             throw BusinessException.aiSchema("面试下一步 action 非法");
         }
         Map<String, Object> question = (Map<String, Object>) value.get("question");
-        if ("FINISH".equals(action) && question != null || !"FINISH".equals(action) && question == null) {
+        boolean exhausted = rule == QuestionCountRule.TOTAL_ASKED && asked >= limit;
+        if (!exhausted
+                && ("FINISH".equals(action) && question != null || !"FINISH".equals(action) && question == null)) {
             throw BusinessException.aiSchema("面试 action 与 question 不匹配");
         }
-        int limit = ((Number) session.get("question_limit")).intValue();
         int currentQuestion = ((Number) session.get("current_question_no")).intValue();
         int currentFollowUp = ((Number) session.get("current_follow_up_no")).intValue();
-        boolean automaticFinish = "FINISH".equals(action);
-        if (latestAnswer != null) {
+        boolean automaticFinish = "FINISH".equals(action) || exhausted;
+        if (!exhausted && rule == QuestionCountRule.MAIN_ONLY && latestAnswer != null) {
             Map<String, Object> answered = mapper.message(String.valueOf(latestAnswer.get("questionMessageId")),
                     task.getResourceId(), task.getUserId());
             int answeredNo = ((Number) answered.get("question_no")).intValue();
@@ -122,7 +142,8 @@ public class InterviewResultHandler implements TaskResultHandler {
                 if (questionNo != currentQuestion || followUpNo != currentFollowUp + 1 || followUpNo > 2) {
                     throw BusinessException.aiSchema("追问序号或次数非法");
                 }
-            } else if (questionNo != currentQuestion + 1 || followUpNo != 0 || questionNo > limit) {
+            } else if (questionNo != currentQuestion + 1 || followUpNo != 0
+                    || (rule == QuestionCountRule.MAIN_ONLY && questionNo > limit)) {
                 throw BusinessException.aiSchema("下一道面试问题序号非法");
             }
         }
@@ -176,7 +197,8 @@ public class InterviewResultHandler implements TaskResultHandler {
     @SuppressWarnings("unchecked")
     private int report(AiTask task, JsonNode result) {
         Map<String, Object> session = mapper.lockSession(task.getResourceId(), task.getUserId());
-        if (session == null || !"ENDING".equals(String.valueOf(session.get("status")))) {
+        if (session == null || !"ENDING".equals(String.valueOf(session.get("status")))
+                || !task.getId().equals(session.get("pending_task_id"))) {
             throw BusinessException.conflict("面试报告状态已变化", "INVALID_STATE");
         }
         Map<String, Object> value = json.map(result);
@@ -186,6 +208,7 @@ public class InterviewResultHandler implements TaskResultHandler {
         List<Map<String, Object>> turns = mapper.evaluations(task.getResourceId());
         List<BigDecimal> validScores = new ArrayList<>();
         Set<String> answered = new java.util.HashSet<>();
+        Set<String> answeredAsk = new java.util.HashSet<>();
         for (Map<String, Object> turn : turns) {
             Map<String, Object> evaluation = json.map(String.valueOf(turn.get("evaluation_json")));
             if ("VALID".equals(String.valueOf(evaluation.get("evidenceStatus"))) && turn.get("overall_score") != null) {
@@ -193,6 +216,9 @@ public class InterviewResultHandler implements TaskResultHandler {
                 Map<String, Object> message = mapper.message(String.valueOf(turn.get("answer_message_id")),
                         task.getResourceId(), task.getUserId());
                 answered.add(String.valueOf(message.get("question_no")));
+                Object questionMessageId = message.get("question_message_id");
+                answeredAsk.add(questionMessageId != null ? String.valueOf(questionMessageId)
+                        : "q-" + message.get("question_no"));
             }
         }
         BigDecimal overall = null;
@@ -204,7 +230,8 @@ public class InterviewResultHandler implements TaskResultHandler {
             normalized.evaluation().put("evidenceStatus", "INSUFFICIENT");
         }
         normalized.evaluation().put("overallScore", overall);
-        String requestedCompletion = String.valueOf(json.map(task.getInputSnapshotJson()).get("completionType"));
+        Map<String, Object> snapshot = json.map(task.getInputSnapshotJson());
+        String requestedCompletion = String.valueOf(snapshot.get("completionType"));
         String completionType = validScores.isEmpty() ? "NO_VALID_ANSWER" : requestedCompletion;
         if (!validScores.isEmpty() && !"VALID".equals(String.valueOf(normalized.evaluation().get("evidenceStatus")))) {
             throw BusinessException.aiSchema("存在有效回答时报告评价必须为 VALID");
@@ -227,7 +254,16 @@ public class InterviewResultHandler implements TaskResultHandler {
         report.put("skillEvidenceMessage", !evidenceIds.isEmpty() ? "仅已获得有效技能评分的回答计入成长证据。"
                 : validScores.isEmpty() ? "本次没有有效回答，不新增技能证据或有效样本。"
                 : "本次有有效总评，但没有有效的逐技能评分，因此不新增技能证据或有效样本；总分不会复制为技能分。");
+        QuestionCountRule countRule = QuestionCountRule.parse(snapshot.get("questionCountRule"));
+        Object askedQuestionCount = snapshot.get("askedQuestionCount");
         report.put("answeredQuestionCount", answered.size());
+        if (askedQuestionCount != null) {
+            report.put("askedQuestionCount", askedQuestionCount);
+        }
+        report.put("questionCountRule", countRule.name());
+        if (countRule == QuestionCountRule.TOTAL_ASKED) {
+            report.put("answeredAskCount", answeredAsk.size());
+        }
         report.put("completionType", completionType);
         mapper.insertReport(UUID.randomUUID().toString(), task.getResourceId(), task.getId(), json.stringify(report),
                 overall, completionType);

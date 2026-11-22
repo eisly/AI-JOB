@@ -240,6 +240,9 @@ export interface InterviewVO {
   resumeVersionId?: string
   status?: string
   questionLimit?: number
+  questionCountRule?: 'MAIN_ONLY' | 'TOTAL_ASKED' | null
+  askedQuestionCount?: number | null
+  remainingQuestionCount?: number | null
   version?: number
   pendingTaskId?: string | null
   messages?: InterviewMessageVO[]

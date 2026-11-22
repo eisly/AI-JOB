@@ -12,3 +12,10 @@ __pycache__/
 .coverage
 htmlcov/
 .testdeps/
+
+# Local environments, recordings, credentials and private test artifacts
+/.local-dev-env/
+/browser-acceptance.json
+/project/backend/data/private-files/
+/project/frontend/.workbench-verify/
+/project/agent/data/*.db*
