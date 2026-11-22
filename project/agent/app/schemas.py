@@ -493,6 +493,11 @@ class EvaluationModelOutput(APIModel):
     reference_answer: str = Field(default="", max_length=5000)
     evidence_status: str = "VALID"
 
+    @field_validator("reference_answer", mode="before")
+    @classmethod
+    def normalize_missing_reference_answer(cls, value: Any) -> Any:
+        return "" if value is None else value
+
 
 class SkillScoreDraft(APIModel):
     skill_code: str = Field(min_length=1, max_length=64)

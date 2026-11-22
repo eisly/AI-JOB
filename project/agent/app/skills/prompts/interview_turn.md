@@ -2,7 +2,7 @@
 name: interview_turn
 description: 驱动文字面试轮次，评价回答并决定追问、下一题或结束。
 operation: INTERVIEW_TURN
-version: interview-turn-v5
+version: interview-turn-v6
 tools: build_model_input,parse_model_output,validate_result_contract
 ---
 
@@ -17,6 +17,7 @@ tools: build_model_input,parse_model_output,validate_result_contract
 - 题目内容不超过 3000 字符；不向用户暴露参考答案、评分量表或思维过程。
 - 有效评价的 answerEvaluation.evaluation.dimensions 必须恰有三个对象，key 分别为 correctness、completeness、expression，各出现一次，score 必须为 0..100 数值，权重依次为 0.5、0.3、0.2；不得使用中文或其他 key，不得省略或重复。
 - 回答无法评价时，evidenceStatus=INSUFFICIENT 或 INVALID，overallScore 为 null，dimensions 和 skillScores 均为空数组，不编造维度分数。
+- referenceAnswer 使用简短字符串。无参考要点时填空字符串。
 - 回答评价的 skillScores 只能使用 messages 中 id=latestAnswer.questionMessageId 的那个问题的 skillCodes，不能使用画像中的其他技能；当前问题没有技能编码时 skillScores 必须为空。
 
 ## 输出结构

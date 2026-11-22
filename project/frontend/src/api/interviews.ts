@@ -3,8 +3,14 @@ import { submitTrackedTask } from './task-registry'
 import type { InterviewReportVO, InterviewVO, Page, PageQuery } from './types'
 
 export const interviewApi = {
-  create(body: { jobId: string; resumeVersionId: string; questionLimit: number; planItemId?: string }) {
-    return submitTrackedTask('/api/v1/interviews', body, '/interview')
+  create(body: {
+    jobId: string
+    resumeVersionId: string
+    questionLimit: number
+    mode?: 'TEXT' | 'VOICE'
+    planItemId?: string
+  }) {
+    return submitTrackedTask('/api/v1/interviews', body, body.mode === 'VOICE' ? '/interview/voice' : '/interview')
   },
   list(query: PageQuery = {}) {
     return request<Page<InterviewVO>>('/api/v1/interviews', { query })

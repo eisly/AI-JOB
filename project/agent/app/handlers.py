@@ -264,7 +264,9 @@ class BaseHandler:
                 user_prompt=user_prompt + repair_note,
                 schema_hint=schema_hint,
                 context=context,
-                thinking=False if self.operation in {RESUME_PARSE, RESUME_DIAGNOSE, PROJECT_RECOMMEND, PROJECT_PLAN} else None,
+                thinking=False if self.operation in {
+                    RESUME_PARSE, RESUME_DIAGNOSE, PROJECT_RECOMMEND, PROJECT_PLAN, INTERVIEW_TURN,
+                } else None,
             )
             logger.info("model call attempt=%s user_chars=%s thinking=%s",
                         attempt + 1, len(request.user_prompt), request.thinking)

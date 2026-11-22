@@ -68,7 +68,7 @@ def build_speech_router(
             result = await service.synthesize(
                 str(body.get("text") or ""),
                 str(body.get("voice") or settings.speech_tts_voice),
-                str(body.get("format") or "mp3"),
+                str(body.get("format") or "wav"),
             )
         return _result(result.model_dump(by_alias=True, mode="json"), trace_id=_trace(request))
 

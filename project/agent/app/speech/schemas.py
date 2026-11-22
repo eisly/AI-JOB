@@ -20,6 +20,8 @@ class SynthesizeResult(BaseModel):
 
     audio_base64: str = Field(alias="audioBase64")
     mime_type: str = Field(alias="mimeType")
+    format: str
     provider: str
+    model: str
     chars: int
     latency_ms: int = Field(alias="latencyMs")

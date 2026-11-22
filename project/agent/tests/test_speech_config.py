@@ -95,17 +95,24 @@ def test_dev_allows_real_asr_with_fake_tts() -> None:
     assert settings.effective_tts_provider == "fake"
 
 
-def test_prod_explicit_qwen_exposes_asr_without_mock_tts() -> None:
+def test_prod_qwen_asr_enables_qwen_tts_route() -> None:
     settings = _base(app_env="prod", speech_asr_provider="qwen", speech_api_key="sk-test",
                      storage_backend="memory", llm_provider="fake")
+    assert settings.effective_tts_provider == "qwen"
     client = TestClient(create_app(settings, llm_client=FakeLLM()))
     assert client.post("/internal/ai/v1/speech/transcribe").status_code != 404
-    assert client.post("/internal/ai/v1/speech/synthesize").status_code == 404
+    assert client.post("/internal/ai/v1/speech/synthesize").status_code != 404
 
 
 @pytest.mark.parametrize("speech_api_key", [None, "test-speech-key"])
 def test_dev_auto_uses_fake_until_real_provider_is_available(speech_api_key: str | None) -> None:
-    settings = Settings(app_env="dev", speech_provider="auto", speech_api_key=speech_api_key)
+    settings = Settings(
+        app_env="dev",
+        speech_provider="auto",
+        speech_asr_provider="auto",
+        speech_tts_provider="auto",
+        speech_api_key=speech_api_key,
+    )
     assert settings.effective_speech_provider == "fake"
     assert "speech_api_key" not in repr(settings)
 
@@ -119,6 +126,8 @@ def test_prod_auto_starts_core_agent_without_mock_routes(speech_api_key: str | N
         llm_provider="deepseek",
         deepseek_api_key="test-key",
         speech_provider="auto",
+        speech_asr_provider="auto",
+        speech_tts_provider="auto",
         speech_api_key=speech_api_key,
         storage_backend="memory",
     )

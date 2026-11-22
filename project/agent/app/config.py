@@ -121,11 +121,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SPEECH_ASR_MODEL", "AGENT_SPEECH_ASR_MODEL"),
     )
     speech_tts_model: str = Field(
-        default="cosyvoice-v1",
+        default="qwen3-tts-flash",
         validation_alias=AliasChoices("SPEECH_TTS_MODEL", "AGENT_SPEECH_TTS_MODEL"),
     )
     speech_tts_voice: str = Field(
-        default="longxiaochun",
+        default="Cherry",
         validation_alias=AliasChoices("SPEECH_TTS_VOICE", "AGENT_SPEECH_TTS_VOICE"),
     )
     speech_timeout_seconds: float = Field(default=8.0, gt=0)
@@ -294,7 +294,7 @@ class Settings(BaseSettings):
     @property
     def effective_tts_provider(self) -> str:
         if self.speech_tts_provider == "auto" and self.effective_asr_provider == "qwen":
-            return "fake"
+            return "qwen"
         return self._resolve_speech_provider(self.speech_tts_provider)
 
     @property

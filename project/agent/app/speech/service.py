@@ -43,18 +43,18 @@ class SpeechService:
         asr_provider = settings.effective_asr_provider
         tts_provider = settings.effective_tts_provider
         if asr is None:
-            if asr_provider != "fake":
+            if asr_provider not in ("fake", "disabled"):
                 raise RuntimeError("speech ASR provider=%s 未注入真实实现" % asr_provider)
-            asr = FakeAsrProvider()
-        elif asr_provider != "fake" and getattr(asr, "name", "fake") != asr_provider:
+            asr = FakeAsrProvider() if asr_provider == "fake" else None
+        elif asr_provider not in ("fake", "disabled") and getattr(asr, "name", "fake") != asr_provider:
             raise RuntimeError(
                 "speech ASR provider=%s 与注入实现 %s 不一致" % (asr_provider, getattr(asr, "name", "unknown"))
             )
         if tts is None:
-            if tts_provider != "fake":
+            if tts_provider not in ("fake", "disabled"):
                 raise RuntimeError("speech TTS provider=%s 未注入真实实现" % tts_provider)
-            tts = FakeTtsProvider()
-        elif tts_provider != "fake" and getattr(tts, "name", "fake") != tts_provider:
+            tts = FakeTtsProvider() if tts_provider == "fake" else None
+        elif tts_provider not in ("fake", "disabled") and getattr(tts, "name", "fake") != tts_provider:
             raise RuntimeError(
                 "speech TTS provider=%s 与注入实现 %s 不一致" % (tts_provider, getattr(tts, "name", "unknown"))
             )
@@ -75,12 +75,22 @@ class SpeechService:
     def tts_provider_name(self) -> str:
         return getattr(self.tts, "name", self.settings.effective_tts_provider)
 
+    @property
+    def tts_model_name(self) -> str:
+        on_agent = getattr(self.tts, "model", None)
+        if isinstance(on_agent, str) and on_agent:
+            return on_agent
+        return "fake-tts" if self.tts_provider_name == "fake" else self.settings.speech_tts_model
+
     async def close(self) -> None:
-        closer = getattr(self.asr, "aclose", None)
-        if closer is not None:
-            await closer()
+        for provider in (self.asr, self.tts):
+            closer = getattr(provider, "aclose", None)
+            if closer is not None:
+                await closer()
 
     async def transcribe(self, data: bytes, mime_type: str, duration_ms: int, language: str = "zh") -> TranscribeResult:
+        if self.asr is None:
+            raise ApiError(503, 50301, "语音识别未开启", "SPEECH_DISABLED", retryable=False)
         if len(data) == 0:
             raise validation_error("录音内容为空")
         if len(data) > self.settings.speech_max_bytes:
@@ -122,7 +132,9 @@ class SpeechService:
             latencyMs=latency_ms,
         )
 
-    async def synthesize(self, text: str, voice: str | None = None, fmt: str = "mp3") -> SynthesizeResult:
+    async def synthesize(self, text: str, voice: str | None = None, fmt: str = "wav") -> SynthesizeResult:
+        if self.tts is None:
+            raise ApiError(503, 50301, "题目语音未开启", "SPEECH_DISABLED", retryable=False)
         normalized = " ".join(text.split()).strip()
         if not normalized:
             raise validation_error("待合成文本不能为空")
@@ -142,7 +154,9 @@ class SpeechService:
         return SynthesizeResult(
             audioBase64=base64.b64encode(audio.data).decode("ascii"),
             mimeType=audio.mime_type,
+            format=audio.format,
             provider=audio.provider,
+            model=self.tts_model_name,
             chars=len(normalized),
             latencyMs=latency_ms,
         )

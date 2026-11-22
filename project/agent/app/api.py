@@ -42,7 +42,7 @@ from .runner import RunService
 from .schemas import AIRequestEnvelope, AIRunVO
 from .security import Principal, verify_internal_token
 from .speech.router import build_speech_router
-from .speech.qwen import QwenAsrProvider
+from .speech.qwen import QwenAsrProvider, QwenTtsProvider
 from .speech.service import SpeechService
 from .storage import RunRecord, RunRepository, build_repository, utcnow
 
@@ -100,9 +100,12 @@ def create_app(
     callbacks = CallbackDispatcher(repository, settings, callback_transport)
     service = RunService(settings, repository, llm_client, callbacks, FileFetcher(settings))
     speech_service = None
-    if settings.effective_asr_provider != "disabled":
-        speech_asr = QwenAsrProvider(settings) if settings.effective_asr_provider == "qwen" else None
-        speech_service = SpeechService(settings, asr=speech_asr)
+    asr_provider = settings.effective_asr_provider
+    tts_provider = settings.effective_tts_provider
+    if asr_provider != "disabled" or tts_provider != "disabled":
+        speech_asr = QwenAsrProvider(settings) if asr_provider == "qwen" else None
+        speech_tts = QwenTtsProvider(settings) if tts_provider == "qwen" else None
+        speech_service = SpeechService(settings, asr=speech_asr, tts=speech_tts)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

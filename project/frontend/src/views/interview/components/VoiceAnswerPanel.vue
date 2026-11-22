@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { voiceInterviewApi } from '@/api/voiceInterviews'
 import type { InterviewVO, MessageVO, VoiceCapabilityVO } from '@/api/types'
@@ -18,10 +18,17 @@ const props = defineProps<{
   capability: VoiceCapabilityVO
   disabled?: boolean
   submitting?: boolean
+  /** 语音面试页由页面统一展示题目与播报控件，避免出现两套播放器。 */
+  showPlayer?: boolean
+  /** 嵌入式展示时由外层卡片提供标题、边框与背景。 */
+  flat?: boolean
+  title?: string
 }>()
 const emit = defineEmits<{
   submit: [payload: { content: string; answerSource: 'TEXT' | 'VOICE'; transcriptionId: string }]
   'switch-text': []
+  'recording-start': []
+  'recording-change': [active: boolean]
 }>()
 
 const limits = computed(() => applyCapability(props.capability))
@@ -44,6 +51,13 @@ const recorder = useVoiceRecorder({
     player.value?.stop()
   },
 })
+
+watch(
+  () => recorder.state.value === 'requesting' || recorder.recording.value,
+  (active) => emit('recording-change', active),
+  { flush: 'sync' },
+)
+onBeforeUnmount(() => emit('recording-change', false))
 
 watch(
   () => props.question.id,
@@ -87,6 +101,7 @@ async function startRecording() {
     privacyVisible.value = true
     return
   }
+  emit('recording-start')
   player.value?.stop()
   await recorder.start()
 }
@@ -171,9 +186,9 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
 </script>
 
 <template>
-  <section class="voice-panel">
+  <section class="voice-panel" :class="{ 'voice-panel--flat': flat }">
     <div class="voice-panel__heading">
-      <strong>语音作答</strong>
+      <strong v-if="title !== ''">{{ title || '语音作答' }}</strong>
       <div class="voice-panel__modes">
         <el-button v-if="voiceMode" size="small" text @click="switchToText">切换为文字</el-button>
         <el-button v-else size="small" text @click="switchToVoice">切换回语音</el-button>
@@ -182,7 +197,7 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
     </div>
 
     <QuestionAudioPlayer
-      v-if="voiceMode && capability.ttsEnabled"
+      v-if="voiceMode && capability.ttsEnabled && showPlayer !== false"
       ref="player"
       :interview-id="interview.id"
       :message-id="question.id"
@@ -263,6 +278,11 @@ defineExpose({ reset: () => { recorder.reset(); answer.reset(); text.value = '' 
   padding: 16px;
   margin-bottom: 16px;
   background: var(--ai-bg-card, #fafcff);
+}
+.voice-panel--flat {
+  border: 0;
+  padding: 0;
+  background: transparent;
 }
 .voice-panel__heading {
   display: flex;

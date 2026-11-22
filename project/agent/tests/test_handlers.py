@@ -1030,6 +1030,31 @@ def _turn_prepared(payload):
     }
 
 
+@pytest.mark.asyncio
+async def test_interview_turn_accepts_null_reference_without_another_model_call():
+    evaluation = _evaluation_output().model_dump(by_alias=True)
+    evaluation["evaluation"]["referenceAnswer"] = None
+    requests = []
+
+    async def complete(request):
+        requests.append(request)
+        return LLMResponse(json.dumps({"answerEvaluation": evaluation}), "test-model", "test")
+
+    async def emit_stage(_name, _progress):
+        pass
+
+    payload = _turn_payload(questionLimit=1)
+    ctx = SimpleNamespace(payload=payload, llm=SimpleNamespace(complete=complete),
+                          emit_stage=emit_stage, emit_reasoning=None)
+    result, meta = await InterviewTurnHandler().execute(ctx)
+
+    assert len(requests) == meta["attempts"] == 1
+    assert requests[0].thinking is False
+    assert result["action"] == "FINISH"
+    assert result["answerEvaluation"]["evaluation"]["referenceAnswer"] == ""
+    assert result["answerEvaluation"]["evaluation"]["overallScore"] == 80.0
+
+
 def test_turn_requires_answer_evaluation_for_followup_rounds():
     payload = _turn_payload()
     with pytest.raises(HandlerValidationError, match="后续轮次必须提供 answerEvaluation"):

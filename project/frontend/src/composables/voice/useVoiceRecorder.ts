@@ -22,6 +22,7 @@ export function useVoiceRecorder(options: RecorderOptions) {
   let timer: number | undefined
   let startedAt = 0
   let resolveStop: ((value: Blob | null) => void) | null = null
+  let generation = 0
 
   const recording = computed(() => state.value === 'recording')
   const recorded = computed(() => state.value === 'recorded' && !!blob.value)
@@ -62,6 +63,7 @@ export function useVoiceRecorder(options: RecorderOptions) {
   }
 
   function reset() {
+    generation += 1
     release()
     releaseUrl()
     blob.value = null
@@ -81,7 +83,9 @@ export function useVoiceRecorder(options: RecorderOptions) {
   async function start() {
     if (state.value === 'recording' || state.value === 'requesting') return
     reset()
+    const run = generation
     await options.onBeforeStart?.()
+    if (run !== generation) return
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       state.value = 'unavailable'
       error.value = new Error('当前浏览器不支持录音，请改用文字回答')
@@ -95,7 +99,12 @@ export function useVoiceRecorder(options: RecorderOptions) {
     }
     state.value = 'requesting'
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const requestedStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (run !== generation) {
+        requestedStream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      stream = requestedStream
       recorder = new MediaRecorder(stream, {
         mimeType: candidate.mimeType,
         audioBitsPerSecond: candidate.bitsPerSecond,
@@ -106,6 +115,7 @@ export function useVoiceRecorder(options: RecorderOptions) {
         if (event.data.size > 0) chunks.push(event.data)
       }
       recorder.onstop = () => {
+        if (run !== generation) return
         cleanupTimer()
         durationMs.value = startedAt ? Date.now() - startedAt : 0
         const value = chunks.length ? new Blob(chunks, { type: candidate.mimeType }) : null
@@ -131,6 +141,7 @@ export function useVoiceRecorder(options: RecorderOptions) {
         }
       }, 250)
     } catch (reason) {
+      if (run !== generation) return
       state.value = classify(reason)
       error.value = reason
       releaseStream()

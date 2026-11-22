@@ -73,6 +73,11 @@ public class InterviewService {
         String resumeId = Data.uuid(body, "resumeVersionId", true);
         int limit = Data.integer(body, "questionLimit", 5, 3, 10);
         String planItemId = Data.uuid(body, "planItemId", false);
+        String rawMode = Data.text(body, "mode", false, 8);
+        String mode = rawMode == null || rawMode.isBlank() ? "TEXT" : rawMode;
+        if (!Set.of("TEXT", "VOICE").contains(mode)) {
+            throw BusinessException.validation("mode", "mode 只能为 TEXT 或 VOICE");
+        }
         Map<String, Object> job = jobs.job(jobId, userId);
         Map<String, Object> resume = resumes.version(resumeId, userId);
         if (job == null || resume == null || !"ACTIVE".equals(String.valueOf(job.get("status")))
@@ -95,7 +100,8 @@ public class InterviewService {
                 "jobVersion", jobVersion, "interviewVersion", 1);
         return tasks.create(userId, "POST", route, key, body, "INTERVIEW_TURN", "INTERVIEW", interviewId,
                 versions, payload, taskId -> mapper.insertSession(interviewId, userId, jobId, jobVersion, resumeId,
-                        profileVersion, json.stringify(Map.of("profile", profile, "job", jobInput)), limit, taskId, planItemId));
+                        profileVersion, json.stringify(Map.of("profile", profile, "job", jobInput)), mode, limit,
+                        taskId, planItemId));
     }
 
     public Map<String, Object> detail(String userId, String interviewId) {
@@ -216,9 +222,6 @@ public class InterviewService {
                             throw BusinessException.stale("转写已失效，请重新录音或改用文字",
                                     Map.of("reason", "TRANSCRIPTION_CONSUMED"));
                         }
-                    }
-                    if ("VOICE".equals(messageSource)) {
-                        mapper.markVoiceMode(interviewId);
                     }
                     mapper.updateTaskStatus(interviewId, "GENERATING", taskId);
 

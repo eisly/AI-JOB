@@ -132,7 +132,7 @@ PROMPT_VERSIONS: dict[str, str] = {
     LEARNING_EVALUATE: "answer-evaluate-v3",
     LEARNING_PRACTICE_QUESTIONS: "learning-practice-questions-v1",
     LEARNING_PRACTICE_EVALUATE: "learning-practice-evaluate-v1",
-    INTERVIEW_TURN: "interview-turn-v5",
+    INTERVIEW_TURN: "interview-turn-v6",
     INTERVIEW_REPORT: "interview-report-v2",
     GROWTH_ANALYZE: "growth-analyze-v2",
     PROJECT_RECOMMEND: "project-recommend-v2",

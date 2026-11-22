@@ -17,15 +17,15 @@ public interface InterviewMapper {
 
     @Insert("""
             INSERT INTO interview_session (id,user_id,job_id,job_version,resume_version_id,profile_version,input_snapshot_json,
-              status,question_limit,pending_task_id,plan_item_id)
+              status,mode,question_limit,pending_task_id,plan_item_id)
             VALUES (#{id},#{userId},#{jobId},#{jobVersion},#{resumeVersionId},#{profileVersion},#{snapshotJson},
-              'PREPARING',#{questionLimit},#{taskId},#{planItemId})
+              'PREPARING',#{mode},#{questionLimit},#{taskId},#{planItemId})
             """)
     int insertSession(@Param("id") String id, @Param("userId") String userId, @Param("jobId") String jobId,
                       @Param("jobVersion") int jobVersion, @Param("resumeVersionId") String resumeVersionId,
                       @Param("profileVersion") long profileVersion, @Param("snapshotJson") String snapshotJson,
-                      @Param("questionLimit") int questionLimit, @Param("taskId") String taskId,
-                      @Param("planItemId") String planItemId);
+                      @Param("mode") String mode, @Param("questionLimit") int questionLimit,
+                      @Param("taskId") String taskId, @Param("planItemId") String planItemId);
 
     @Select("SELECT * FROM interview_session WHERE id=#{id} AND user_id=#{userId}")
     Map<String,Object> session(@Param("id") String id, @Param("userId") String userId);
@@ -81,12 +81,6 @@ public interface InterviewMapper {
                       @Param("content") String content, @Param("questionNo") int questionNo,
                       @Param("followUpNo") int followUpNo, @Param("questionMessageId") String questionMessageId,
                       @Param("skillCodesJson") String skillCodesJson, @Param("taskId") String taskId);
-
-    @Update("""
-            UPDATE interview_session SET mode='VOICE',updated_at=UTC_TIMESTAMP(3)
-            WHERE id=#{id} AND mode='TEXT'
-            """)
-    int markVoiceMode(@Param("id") String id);
 
     @Select("SELECT * FROM interview_message WHERE interview_id=#{interviewId} ORDER BY seq")
     List<Map<String,Object>> messages(@Param("interviewId") String interviewId);

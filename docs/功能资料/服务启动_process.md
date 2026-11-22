@@ -988,3 +988,100 @@ etstat -ano；通过 Start-Process 启动 Vite、mvn -o -B -DskipTests spring-bo
 **遗留问题：** 未进行登录或模型调用；使用已有 jar，未重新构建。
 
 ---
+
+### [2026-11-22 19:29:59] 准备重启合并后的三端服务
+
+**任务目标：** 用 feature/bug 的合并提交 13be7e1 重启前端、Java 后端和 Agent。
+
+**执行行为：** 核对工作区提交与三个服务的实际进程。当前数据库使用语音分支 V15–V17 历史，与目标分支同号迁移不一致。找到已停止的原 feature/bug 数据卷，拟使用其副本运行 V22，保留两套原数据。使用相同提交的独立工作树构建 Java jar。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md。独立构建工作树生成 project/backend/target/backend-0.0.1-SNAPSHOT.jar。
+
+**执行命令与验证：** git log、docker ps、docker inspect、Flyway 历史查询及 mvn -o -q -DskipTests package。构建通过，在线语音分支数据库最高为 V17。
+
+**影响范围：** 准备本机运行产物，现有三端保持运行。
+
+**遗留问题：** 核对原 feature/bug 数据副本版本并升级，随后切换三端，验证健康与实际语音识别。
+
+---
+
+### [2026-11-22 19:38:17] 处理数据库连接差异并准备独立 V22 库
+
+**任务目标：** 保留正在使用的本地账号和面试记录，完成合并分支启动。
+
+**执行行为：** 复制已停止的 Docker 卷后发现其仅到 V4，停止临时容器。旧 feature/bug 的 Windows MySQL 在 3306，当前项目凭据无法认证。保留原库，改用已运行的语音数据库作为数据来源，在同实例建立独立 career_business_feature_bug，启动单独的 Java 进程执行迁移。
+
+**文件变更：** 修改本记录。新增本地启动目录 feature-bug-v22-20261122-193713 的 jar、迁移日志和一次性数据复制脚本。临时 Docker 副本已停止。
+
+**执行命令与验证：** Docker 只读核对语音库 V17 和空闲任务队列，Redis PING 返回 PONG。Windows MySQL 只读查询返回 1045。独立 V22 迁移已启动，待查询结果与数据试复制。
+
+**影响范围：** 原有 Windows MySQL 和语音业务库均未改写。新库使用原 MySQL 实例的独立 schema。
+
+**遗留问题：** 完成复制校验后切换三端。
+
+---
+
+### [2026-11-22 19:41:46] 完成数据复制并启动 feature/bug 三端
+
+**任务目标：** 以合并提交的源码和 Java 构建产物启动本地服务。
+
+**执行行为：** 独立 schema 经 Flyway 从空库应用 V1–V22。先在事务内试复制并回滚，核对来源记录主键和目标库外键。首次切换因 Java 启动器 PID 与实际监听进程不同而提前停止，未结束旧服务。核对实际子进程后停止旧三端及迁移进程，复制源业务记录和 Agent SQLite，再启动新三端。
+
+**文件变更：** 修改本记录。运行目录 feature-bug-v22-20261122-193713 新增 restart-merged-services.ps1、Agent SQLite 与三端运行日志。当前 .env 未修改。
+
+**执行命令与验证：** Flyway 应用 22 个迁移。数据复制脚本处理 137 条来源记录，新写入 123 条，14 个技能字典主键使用 V22 已有值，并核对 101 个外键。SQLite quick_check 通过。三端进程启动成功，待检查接口和转写。
+
+**影响范围：** 业务后端连接 career_business_feature_bug，复用本机 3307 MySQL 与 6380 Redis。两套原有业务数据保留。
+
+**遗留问题：** 待核对运行进程健康与合成录音接口响应。
+
+---
+
+### [2026-11-22 19:43:12] 核验三端和真实转写
+
+**任务目标：** 核验合并分支上线后的入口、数据库和语音服务。
+
+**执行行为：** 通过 HTTP 检查前端首页、面试路由、Java API、前端代理和 Agent 健康接口。登录相关请求未携带 refresh cookie，带可信 Referer 后按预期得到 401。以合成 WebM 调用运行中 Agent 的真实 Qwen ASR，通过 MySQL 只读核对迁移和数据数量。
+
+**文件变更：** 修改本记录，三端日志位于 project/backend/target/local-restarts/feature-bug-v22-20261122-193713/。
+
+**执行命令与验证：** Invoke-WebRequest 显示首页与面试入口 200、Java API 及代理的匿名访问 401、Agent healthz 和 readyz 200。MySQL 核对 V22、1 个账号、1 个面试会话及 14 条转写记录。合成录音转写返回 HTTP 200、provider=qwen，结果非空，用时约 0.81 秒。5173、8080、8100 由新进程监听。
+
+**影响范围：** feature/bug 合并版本已在本机运行，业务连接独立 V22 库，保留语音库来源记录。未改动 Windows MySQL 原库。
+
+**遗留问题：** 未使用实体麦克风或登录用户账户验收。
+
+---
+
+### [2026-11-22 21:16:49] 重启 feature/bug 版 Java 后端并验证
+
+**任务目标：**
+使用运行目录中的最新 jar 重新启动 8080 后端，仅做启动与存活验证，不编译、不测试、不修改源码或配置，不动 Agent(8100) 与前端(5173)。
+
+**执行行为：**
+1. 确认 8080 无监听、jar/.env/JDK21 均存在，备份旧 `backend.out.log`/`backend.err.log` 为 `*.prev-20261122`。
+2. 在运行目录新增启动脚本，读取 `.env` 的 `MYSQL_USER`/`MYSQL_PASSWORD`，清除 `AI_BAILIAN_API_KEY`、`DASHSCOPE_API_KEY`，设置 `DB_URL`、`REDIS_PORT=6380`、`SERVER_PORT=8080`、`AGENT_SCHEDULER_ENABLED=true`，以工作目录 `project/backend` 启动 `D:\JDK21\bin\java.exe -jar`，输出重定向到运行目录日志。
+3. 因 CMD 被策略禁止，改为通过 `Invoke-CimMethod Win32_Process Create` 启动独立 PowerShell 宿主进程，由脚本内 `Start-Process` 拉起 Java 并 `WaitForExit` 保活。
+4. 每 5 秒轮询 8080 监听、`curl.exe` 根路径状态码与启动日志，最多 30 秒。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/target/local-restarts/feature-bug-v22-20261122-193713/_start-backend-20261122.ps1` | 运行期启动脚本 | 在独立会话中注入环境变量并保活 Java |
+| 新增 | `project/backend/target/local-restarts/feature-bug-v22-20261122-193713/backend.out.log`、`backend.err.log`、`backend.launcher.log`、`backend.java.pid` | 本次启动日志与 PID 记录 | 排障与验证依据 |
+| 修改 | `docs/功能资料/服务启动_process.md` | 追加本次启动记录 | 跟踪服务运行 |
+
+**执行命令与验证：**
+
+- 命令：`Invoke-CimMethod Win32_Process Create`、`Get-NetTCPConnection`、`curl.exe -s -o NUL -w '%{http_code}'`、`Select-String`、`netstat -ano`。
+- 结果：通过。Java PID 76900，启动 21:16:49，`Started BackendApplication in 7.752 seconds`，Tomcat 监听 8080，根路径 HTTP 401（预期匿名未登录）。
+- 说明：Flyway 当前版本 V22，成功校验 22 个迁移，`Schema ... is up to date. No migration necessary.`；`backend.err.log` 为 0 字节。8100 仍在监听（PID 54772），未操作。
+
+**影响范围：**
+仅本机 Java 后端进程重启；MySQL 3307/Redis 6380 复用，未触发迁移。未修改任何源码、测试或配置，工作区中既有改动均为此前任务遗留。
+
+**遗留问题：**
+本次仅验证启动与存活，未做业务接口功能测试。
+
+---

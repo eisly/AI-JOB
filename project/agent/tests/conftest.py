@@ -30,6 +30,8 @@ def settings(request: pytest.FixtureRequest, tmp_path) -> Settings:
         llm_provider="fake",
         speech_asr_provider="fake",
         speech_tts_provider="fake",
+        # 显式隔离本地 .env / 环境变量中的语音凭据，避免不同机器配置导致冲突或真实调用。
+        speech_api_key=None,
         log_level="WARNING",
     )
     if backend == "sqlite":

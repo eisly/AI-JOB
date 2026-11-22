@@ -134,7 +134,8 @@ def test_prod_runtime_security_rules():
             llm_provider="deepseek",
             deepseek_api_key=None,
         ).validate_runtime_security()
-    Settings(app_env="prod", jwt_secret="x" * 40, llm_provider="fake").validate_runtime_security()
+    Settings(app_env="prod", jwt_secret="x" * 40, llm_provider="fake",
+             speech_provider="disabled").validate_runtime_security()
     Settings(app_env="dev", jwt_secret=DEFAULT_JWT_SECRET).validate_runtime_security()
 
 

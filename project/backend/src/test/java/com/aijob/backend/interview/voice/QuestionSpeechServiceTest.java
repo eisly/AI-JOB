@@ -36,6 +36,18 @@ class QuestionSpeechServiceTest {
     }
 
     @Test
+    void cacheKeyIncludesVoiceModelFormatAndTextDigest() {
+        String first = QuestionSpeechService.cacheKey("i", "m", "Cherry", "qwen3-tts-flash", "wav", "题目");
+        String second = QuestionSpeechService.cacheKey("i", "m", "Cherry", "qwen3-tts-flash", "mp3", "题目");
+        String third = QuestionSpeechService.cacheKey("i", "m", "Cherry", "other-model", "wav", "题目");
+        String fourth = QuestionSpeechService.cacheKey("i", "m", "Serena", "qwen3-tts-flash", "wav", "题目");
+        assertTrue(!first.equals(second));
+        assertTrue(!first.equals(third));
+        assertTrue(!first.equals(fourth));
+        assertTrue(first.contains("Cherry") && first.contains("qwen3-tts-flash") && first.contains("wav"));
+    }
+
+    @Test
     void limitsMatchDesign() {
         assertEquals(8 * 1024 * 1024, VoiceLimits.MAX_AUDIO_BYTES);
         assertEquals(180_000, VoiceLimits.MAX_DURATION_MS);

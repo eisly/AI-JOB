@@ -48,7 +48,9 @@ public class SpeechAgentClient {
                              @Value("${app.agent.connect-timeout:5s}") Duration connectTimeout) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(connectTimeout.toMillis()));
-        this.webClient = builder.baseUrl(baseUrl).clientConnector(new ReactorClientHttpConnector(httpClient)).build();
+        int maxResponseBytes = ((VoiceLimits.MAX_AUDIO_BYTES + 2) / 3) * 4 + 64 * 1024;
+        this.webClient = builder.baseUrl(baseUrl).clientConnector(new ReactorClientHttpConnector(httpClient))
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(maxResponseBytes)).build();
         this.jwtService = jwtService;
         this.transcribeTimeout = transcribeTimeout;
         this.synthesizeTimeout = synthesizeTimeout;
@@ -86,14 +88,14 @@ public class SpeechAgentClient {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> synthesize(String text, String voice, String requestId, String userId) {
+    public Map<String, Object> synthesize(String text, String voice, String requestId, String userId, String format) {
         long started = System.nanoTime();
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("requestId", requestId);
         envelope.put("userId", userId);
         envelope.put("text", text);
         envelope.put("voice", voice);
-        envelope.put("format", "mp3");
+        envelope.put("format", format);
         try {
             Map<String, Object> response = webClient.post().uri(SYNTHESIZE_PATH)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtService.speechToken(requestId))
@@ -101,8 +103,9 @@ public class SpeechAgentClient {
                     .bodyValue(envelope)
                     .retrieve().bodyToMono(Map.class).block(synthesizeTimeout);
             Map<String, Object> data = data(response);
-            log.info("voice tts request={} provider={} chars={} latency_ms={}",
-                    requestId, data.get("provider"), data.get("chars"), elapsed(started));
+            log.info("voice tts request={} provider={} format={} model={} chars={} latency_ms={}",
+                    requestId, data.get("provider"), data.get("format"), data.get("model"), data.get("chars"),
+                    elapsed(started));
             return data;
         } catch (RuntimeException ex) {
             log.warn("voice tts failed request={} error={} latency_ms={}", requestId, describe(ex), elapsed(started));

@@ -9,36 +9,46 @@ import org.springframework.stereotype.Component;
 @Component
 public class SpeechAudioCache {
 
-    private static final int MAX_ENTRIES = 200;
-    private static final int MAX_BYTES_PER_ENTRY = 512 * 1024;
+    private static final int MAX_ENTRIES = 60;
+    private static final int MAX_BYTES_PER_ENTRY = 8 * 1024 * 1024;
+    private static final long MAX_TOTAL_BYTES = 64L * 1024 * 1024;
     private static final long TTL_MILLIS = 5 * 60 * 1000L;
 
-    private final Map<String, Entry> entries = new LinkedHashMap<>(16, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, Entry> eldest) {
-            return size() > MAX_ENTRIES;
-        }
-    };
+    private final Map<String, Entry> entries = new LinkedHashMap<>(16, 0.75f, true);
+    private long totalBytes;
 
-    public byte[] get(String key) {
+    public CachedAudio get(String key) {
         synchronized (entries) {
             Entry entry = entries.get(key);
             if (entry == null) return null;
             if (System.currentTimeMillis() - entry.createdAt > TTL_MILLIS) {
                 entries.remove(key);
+                totalBytes -= entry.data.length;
                 return null;
             }
-            return entry.data;
+            return new CachedAudio(entry.data, entry.mimeType);
         }
     }
 
-    public void put(String key, byte[] data) {
+    public void put(String key, byte[] data, String mimeType) {
         if (data == null || data.length == 0 || data.length > MAX_BYTES_PER_ENTRY) return;
         synchronized (entries) {
-            entries.put(key, new Entry(data, System.currentTimeMillis()));
+            Entry previous = entries.remove(key);
+            if (previous != null) totalBytes -= previous.data.length;
+            entries.put(key, new Entry(data, mimeType, System.currentTimeMillis()));
+            totalBytes += data.length;
+            var iterator = entries.entrySet().iterator();
+            while (totalBytes > MAX_TOTAL_BYTES && iterator.hasNext()) {
+                Entry eldest = iterator.next().getValue();
+                totalBytes -= eldest.data.length;
+                iterator.remove();
+            }
         }
     }
 
-    private record Entry(byte[] data, long createdAt) {
+    public record CachedAudio(byte[] data, String mimeType) {
+    }
+
+    private record Entry(byte[] data, String mimeType, long createdAt) {
     }
 }

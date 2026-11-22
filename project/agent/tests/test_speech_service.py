@@ -144,3 +144,34 @@ async def test_synthesize_uses_injected_tts() -> None:
     result = await service.synthesize("hello")
     assert result.provider == "fake"
     assert result.audio_base64
+    assert result.format == "wav"
+
+
+@pytest.mark.asyncio
+async def test_disabled_asr_and_tts_are_rejected_with_503() -> None:
+    service = SpeechService(_settings(speech_provider="disabled"))
+    with pytest.raises(ApiError) as error:
+        await service.transcribe(b"\x1a\x45\xdf\xa3" + b"x" * 100, "audio/webm", 5000)
+    assert error.value.status_code == 503
+    with pytest.raises(ApiError) as error:
+        await service.synthesize("题目")
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_synthesize_reports_provider_model_for_cache_identity() -> None:
+    class StubTts(FakeTtsProvider):
+        name = "qwen"
+        model = "qwen3-tts-flash"
+
+        async def synthesize(self, text: str, *, voice: str = "fake", fmt: str = "mp3") -> AudioOutput:
+            return AudioOutput(data=b"RIFF", mime_type="audio/wav", provider="qwen", format="wav")
+
+    service = SpeechService(
+        _settings(speech_asr_provider="fake", speech_tts_provider="qwen", speech_api_key="sk-test"),
+        tts=StubTts(),
+    )
+    result = await service.synthesize("题目")
+    assert result.model == "qwen3-tts-flash"
+    assert result.mime_type == "audio/wav"
+    assert result.format == "wav"

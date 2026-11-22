@@ -11,6 +11,7 @@ import TrainingSessionView from '@/views/training/TrainingSessionView.vue'
 import PracticePrepareView from '@/views/training/PracticePrepareView.vue'
 import ProjectView from '@/views/project/ProjectView.vue'
 import InterviewView from '@/views/interview/InterviewView.vue'
+import VoiceInterviewView from '@/views/interview/VoiceInterviewView.vue'
 import GrowthView from '@/views/growth/GrowthView.vue'
 import ApplicationView from '@/views/application/ApplicationView.vue'
 import TasksView from '@/views/tasks/TasksView.vue'
@@ -46,6 +47,7 @@ export const routes: RouteRecordRaw[] = [
       { path: 'training/prepare/:taskId', name: 'training-prepare', component: PracticePrepareView, meta: { title: '专项训练 · 生成题目' } },
       { path: 'project', name: 'project', component: ProjectView, meta: { title: '项目实战' } },
       { path: 'interview', name: 'interview', component: InterviewView, meta: { title: '模拟面试' } },
+      { path: 'interview/voice', name: 'interview-voice', component: VoiceInterviewView, meta: { title: '语音模拟面试' } },
       { path: 'growth', name: 'growth', component: GrowthView, meta: { title: '成长中心' } },
       { path: 'application', name: 'application', component: ApplicationView, meta: { title: '投递进度' } },
       { path: 'tasks', name: 'tasks', component: TasksView, meta: { title: '任务中心' } },

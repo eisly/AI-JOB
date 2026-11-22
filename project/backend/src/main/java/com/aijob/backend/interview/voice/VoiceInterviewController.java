@@ -88,7 +88,7 @@ public class VoiceInterviewController {
         QuestionSpeechService.AudioResult result = speech.synthesize(userId, id, mid,
                 String.valueOf(message.get("content")), voice);
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("audio/mpeg"))
+                .contentType(MediaType.parseMediaType(result.mimeType()))
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header("X-Speech-Voice", result.voice())
                 .header("X-Speech-Chars", String.valueOf(result.chars()))
