@@ -239,6 +239,23 @@ export interface OptimizationSection {
   suggestedText: string
   content?: string
   sourceQuotes: string[]
+  jdQuote?: string | null
+  reason?: string | null
+}
+
+export interface OptimizationRequirementGap {
+  requirement: string
+  note?: string | null
+}
+
+export interface OptimizationFullDocumentBlock {
+  text: string
+  changed: boolean
+}
+
+export interface OptimizationFullDocument {
+  text: string
+  blocks: OptimizationFullDocumentBlock[]
 }
 
 export interface ResumeOptimizationVO {
@@ -246,9 +263,17 @@ export interface ResumeOptimizationVO {
   resumeVersionId: string
   jobId: string
   diagnosisId: string | null
+  mode?: 'SECTIONS' | 'FULL_DOCUMENT'
+  jobVersion?: number | null
+  companyName?: string | null
+  jobTitle?: string | null
   status: 'GENERATING' | 'READY' | 'ACCEPTED' | 'FAILED'
   title: string | null
   sections: OptimizationSection[]
+  missingRequirements?: OptimizationRequirementGap[]
+  notes?: string[]
+  sourceText?: string | null
+  fullDocument?: OptimizationFullDocument | null
   acceptedAt: string | null
   createdAt: string
 }
@@ -319,24 +344,55 @@ export interface GapVO {
   suggestion: string
 }
 
+export interface RequirementEvidenceVO {
+  requirementQuote: string
+  skillCode: string | null
+  supportLevel: 'DIRECT' | 'PARTIAL' | 'MISSING'
+  resumeQuote: string | null
+}
+
+export interface RequirementEvidenceCoverageVO {
+  jdCharacters: number
+  jdInputLimit: number
+  jdTruncated: boolean
+  requirementLimit: number
+  returned: number
+}
+
+export interface EvidenceSampleVO {
+  evidenceId: string
+  sourceType?: 'RESUME_CLAIM' | 'LEARNING_ANSWER' | 'INTERVIEW_ANSWER'
+  sourceId?: string
+  score?: number | null
+  scoredAt?: string | null
+  available: boolean
+  question?: string | null
+  answerExcerpt?: string | null
+  reason?: string | null
+}
+
+export interface MatchEvidenceVO {
+  skillCode: string
+  evidence: EvidenceSampleVO[]
+  reason?: string | null
+}
+
 export interface MatchItemVO {
   id: string
   jobId: string
   jobVersion: number
   title: string
-  eligibility: {
-    status: 'PASS' | 'FAIL' | 'UNKNOWN'
-    ruleVersion: string
-    checks: EligibilityCheckVO[]
-  }
+  eligibility: { status: 'PASS' | 'FAIL' | 'UNKNOWN'; ruleVersion: string; checks: EligibilityCheckVO[] }
   matchScore: number | null
   scoreVersion: string
   components: ScoreComponentVO[]
   gaps: GapVO[]
+  requirementEvidence?: RequirementEvidenceVO[]
+  requirementEvidenceCoverage?: RequirementEvidenceCoverageVO | null
   reasons: string[]
   source: JobSourceVO
   sourceUrl: string | null
-  verifiedAt: string | null
+verifiedAt: string | null
 }
 
 export interface MatchBatchVO {
@@ -453,6 +509,7 @@ export interface JobFieldSource {
 }
 
 export interface JobSearchItemVO extends MatchItemVO {
+  jdSummary?: string | null
   companySizeText?: string | null
   fieldSources?: Record<string, JobFieldSource> | null
   batchId: string

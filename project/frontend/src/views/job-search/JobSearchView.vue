@@ -21,7 +21,8 @@ import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import { isTerminalTask, useTask } from '@/composables/useTask'
 import { useUserStore } from '@/stores/user'
-import { candidateTypeLabels, cityLabels, companySizeLabels, formatSalary } from '@/utils/format'
+import { candidateTypeLabels, cityLabels, companySizeLabels } from '@/utils/format'
+import { jobSalary } from '@/utils/job-search-fields'
 
 const route = useRoute()
 const router = useRouter()
@@ -319,11 +320,8 @@ function jobMetadata(item: JobSearchItemVO) {
   const company = warnings.includes('COMPANY_FROM_DOMAIN') ? '' : item.companyName?.trim()
   const city = (item.cityCode && cityLabels[item.cityCode]) || item.cityName
   const type = warnings.includes('CANDIDATE_TYPE_UNKNOWN') ? '' : candidateTypeLabels[item.candidateType]
-  const knownSalary = item.minMonthlySalaryCents != null && item.maxMonthlySalaryCents != null
-  const salaryText = item.salaryText?.trim()
-  const salary = salaryText && !/^(?:来源未提供|薪资未明确|未提供|—+|-+)$/.test(salaryText)
-    ? salaryText : knownSalary ? formatSalary(item.minMonthlySalaryCents, item.maxMonthlySalaryCents) : ''
-  return [company, city, type, salary].filter(Boolean).join(' · ')
+  const verification = (item.verificationStatus ?? item.recruitmentStatus) === 'UNKNOWN' ? '在招状态待核验' : ''
+  return [company, city, type, jobSalary(item), verification].filter(Boolean).join(' · ')
 }
 
 function safeUrl(url?: string | null) {

@@ -96,6 +96,14 @@ public class JobController {
         return Responses.ok(jobs.match(users.resolveCurrentUserId(), Data.uuid(matchId, "matchId")));
     }
 
+    @GetMapping("/job-matches/{matchId}/items/{itemId}/evidence")
+    public CommonResult<Map<String, Object>> matchEvidence(@PathVariable String matchId,
+                                                            @PathVariable String itemId,
+                                                            @RequestParam String skillCode) {
+        return Responses.ok(jobs.matchEvidence(users.resolveCurrentUserId(), Data.uuid(matchId, "matchId"),
+                Data.uuid(itemId, "itemId"), skillCode));
+    }
+
     @GetMapping("/job-matches")
     public CommonResult<PageResult<Map<String, Object>>> matches(@RequestParam(required = false) Integer current,
                                                                   @RequestParam(required = false) Integer size) {

@@ -184,6 +184,24 @@ def _match(request: LLMRequest) -> dict[str, Any]:
             for item in required
             if item not in user_skills
         }
+        requirement_evidence = []
+        resume_quotes = payload.get("resumeQuotes") or []
+        if candidate.get("personalOwned") and candidate.get("jdText"):
+            jd_line = next(
+                (line.strip() for line in str(candidate.get("jdText") or "").splitlines() if line.strip()),
+                "",
+            )
+            resume_line = resume_quotes[0] if resume_quotes else None
+            skill = required[0] if required else None
+            support = "PARTIAL" if skill in matched and resume_line else "MISSING"
+            requirement_evidence.append(
+                {
+                    "requirementQuote": jd_line[:2000],
+                    "skillCode": skill,
+                    "supportLevel": support,
+                    "resumeQuote": resume_line if support != "MISSING" else None,
+                }
+            )
         items.append(
             {
                 "jobId": str(candidate.get("jobId")),
@@ -191,6 +209,7 @@ def _match(request: LLMRequest) -> dict[str, Any]:
                 "semanticScore": round(0.55 + 0.45 * ratio, 4),
                 "reasons": reasons[:5],
                 "gapSuggestions": gap_suggestions,
+                "requirementEvidence": requirement_evidence,
             }
         )
     return {"items": items}
@@ -636,6 +655,8 @@ def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
         lines[0] if lines else "",
     )[:10000]
     suggested = quote if quote.endswith(("。", "！", "？", ".", "!", "?")) else quote + "。"
+    jd_text = str(_payload(request).get("jdText") or "")
+    jd_line = next((line.strip() for line in jd_text.splitlines() if line.strip()), "")
     return {
         "title": "定向优化候选建议",
         "sections": [
@@ -645,8 +666,11 @@ def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
                 "originalText": quote,
                 "suggestedText": suggested,
                 "sourceQuotes": [quote[:1000]],
+                "jdQuote": jd_line[:2000] or None,
+                "reason": "把已发生的事实表述得更贴近岗位要求。",
             }
         ],
+        "missingRequirements": [],
     }
 
 

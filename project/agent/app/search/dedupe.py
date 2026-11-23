@@ -130,9 +130,18 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
     result: list[SourcePosting] = []
     merged_count = 0
     for group in groups.values():
-        group.sort(key=lambda item: (SOURCE_PRIORITY.get(item.source_type, 9), -_verification_rank(item),
-                                     -len(item.jd_text)))
+        unavailable_urls = {canonical_url(item.source_url) for item in group if item.is_unavailable}
+        group.sort(key=lambda item: (
+            SOURCE_PRIORITY.get(item.source_type, 9),
+            canonical_url(item.source_url) in unavailable_urls,
+            -int(item.is_unavailable),
+            -_verification_rank(item),
+            -len(item.jd_text),
+        ))
         primary = group[0]
+        if not primary.is_unavailable and canonical_url(primary.source_url) in unavailable_urls:
+            url = canonical_url(primary.source_url)
+            primary = next(item for item in group if item.is_unavailable and canonical_url(item.source_url) == url)
         aliases: list[dict[str, Any]] = []
         for other in group:
             aliases.append(_alias(other))
@@ -161,6 +170,7 @@ def dedupe_postings(postings: list[SourcePosting]) -> tuple[list[SourcePosting],
                 primary.field_sources["companySize"] = dict(employer.field_sources["companySize"])
 
     result.sort(key=lambda item: (
+        item.is_unavailable,
         SOURCE_PRIORITY.get(item.source_type, 9),
         -_verification_rank(item),
         item.fingerprint,
@@ -212,7 +222,9 @@ def _alias(posting: SourcePosting) -> dict[str, Any]:
 
 def _fill_missing(primary: SourcePosting, other: SourcePosting) -> None:
     fill_groups(primary, other)
-    if primary.source_type != "OFFICIAL" and _verification_rank(other) > _verification_rank(primary):
+    if (primary.source_type != "OFFICIAL" and not primary.is_unavailable and not other.is_unavailable
+            and canonical_url(primary.source_url) == canonical_url(other.source_url)
+            and _verification_rank(other) > _verification_rank(primary)):
         primary.verification_status = other.verification_status
         primary.verification_reason = other.verification_reason
         primary.verification_evidence = other.verification_evidence

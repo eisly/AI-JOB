@@ -3,6 +3,7 @@ package com.aijob.backend.ability;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -56,5 +57,21 @@ class AbilityServiceTest {
 
         verify(mapper).saveSnapshot(eq("user"), eq("redis"), isNull(), eq(0), eq("MISSING"));
 
+    }
+
+    @Test
+    void matchSnapshotKeepsIdsOnlyForRequestedSkillsWithMatchingSampleCounts() {
+        var skills = List.<Map<String, Object>>of(
+                Map.of("skill_code", "redis", "score", 48, "sample_count", 1),
+                Map.of("skill_code", "java", "score", 72, "sample_count", 2),
+                Map.of("skill_code", "kafka", "score", 80, "sample_count", 1));
+        when(mapper.snapshots("user")).thenReturn(skills);
+        when(mapper.last20EvidenceIds("user", "redis")).thenReturn(List.of("redis-answer"));
+        when(mapper.last20EvidenceIds("user", "java")).thenReturn(List.of("incomplete-snapshot"));
+
+        var snapshot = service.matchSnapshot("user", Set.of("redis", "java"));
+
+        assertEquals(skills, snapshot.skills());
+        assertEquals(Map.of("redis", List.of("redis-answer")), snapshot.evidenceIds());
     }
 }

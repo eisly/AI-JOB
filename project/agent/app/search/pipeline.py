@@ -351,7 +351,7 @@ class JobSearchPipeline:
                             {"title": p.title, "companyName": p.company_name, "cityName": p.city_name,
                              "sourceKey": p.source_key, "sourceUrl": p.source_url,
                              "verificationStatus": p.verification_status}
-                            for p in result.postings if not p.is_closed
+                            for p in result.postings if not p.is_unavailable
                         ])
                     else:
                         await self.runtime.emit_stage("search_candidates_available", 40)
@@ -376,7 +376,7 @@ class JobSearchPipeline:
         supplements = [replace(specs[i % len(specs)], query=f"{p.company_name} {p.title} {p.city_name or ''} 薪资 招聘")
                        for i, p in enumerate(official_postings[:3]) if not p.salary_text or p.company_size in (None, "SIZE_UNKNOWN")]
         context.extra["query_specs"] = supplements + specs
-        usable = [p for p in official_postings if not p.is_closed and not _is_stale(p, self.budget_config.freshness_days)]
+        usable = [p for p in official_postings if not p.is_unavailable and not _is_stale(p, self.budget_config.freshness_days)]
         needs_fallback = (state.get("was_adjusted") or len({p.fingerprint for p in usable}) < self.filters.max_results
             or not set(self.filters.cities) <= {p.city_code for p in usable}
             or not set(self.filters.candidate_types) <= {p.candidate_type for p in usable}
@@ -478,7 +478,7 @@ class JobSearchPipeline:
             source["key"] == "web" and source["status"] in {"AVAILABLE", "EMPTY", "PARTIAL"}
             for source in state.get("sources") or []
         )
-        unique = {posting.fingerprint for posting in state.get("raw") or [] if _valid_posting(posting) and not posting.is_closed}
+        unique = {posting.fingerprint for posting in state.get("raw") or [] if _valid_posting(posting) and not posting.is_unavailable}
         coverage = state.get("coverage")
         uncovered = len(coverage.uncovered()) if coverage is not None else 0
         pending = sum(len(extra.get("pending_pages", {})) for extra in self.source_extras.values())
@@ -715,7 +715,7 @@ class JobSearchPipeline:
                 self.funnel.stale_count += 1
                 posting.warnings.append("STALE_POSTING")
         self.funnel.hard_filter_pass = len(postings)
-        self.funnel.final_recommendations = sum(1 for posting in postings if not posting.is_closed)
+        self.funnel.final_recommendations = sum(1 for posting in postings if not posting.is_unavailable)
         discovered = set().union(*(extra.get("discovered_urls", set()) for extra in self.source_extras.values()))
         if discovered:
             self.funnel.unique_urls = len(discovered)

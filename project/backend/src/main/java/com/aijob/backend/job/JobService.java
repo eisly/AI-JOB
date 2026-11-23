@@ -2,6 +2,7 @@ package com.aijob.backend.job;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -241,15 +242,29 @@ public class JobService {
         }
         List<Map<String, Object>> jobs = candidates(userId, body);
         boolean includeUnknown = Data.bool(body, "includeUnknown", true);
-        List<Map<String, Object>> candidates = jobs.stream().map(this::agentCandidate).toList();
-        List<Map<String, Object>> snapshots = profilesSkillSnapshots(userId);
-        Map<String, Object> payload = Map.of("profile", profile, "skillSnapshot", snapshots, "candidates", candidates);
+        List<Map<String, Object>> candidates = jobs.stream().map(row -> agentCandidate(row, userId)).toList();
+        Set<String> personalSkills = new LinkedHashSet<>();
+        boolean hasPersonalJob = false;
+        for (Map<String, Object> candidate : candidates) {
+            if (!Boolean.TRUE.equals(candidate.get("personalOwned"))) continue;
+            hasPersonalJob = true;
+            if (candidate.get("requirements") instanceof Map<?, ?> requirements && requirements.get("skills") instanceof List<?> skills) {
+                for (Object skill : skills) personalSkills.add(String.valueOf(skill));
+            }
+        }
+        var snapshot = abilityService.matchSnapshot(userId, personalSkills);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("profile", profile);
+        payload.put("skillSnapshot", profilesSkillSnapshots(snapshot.skills()));
+        payload.put("candidates", candidates);
+        if (hasPersonalJob) payload.put("resumeQuotes", confirmedResumeQuotes(resume));
         String matchId = UUID.randomUUID().toString();
         Map<String, Object> versions = new LinkedHashMap<>();
         versions.put("profileVersion", actual);
         versions.put("resumeVersionId", resumeId);
         List<Map<String, Object>> jobSnapshots = jobs.stream().map(row -> jobVo(row, userId)).toList();
-        Map<String, Object> batchSnapshot = Map.of("includeUnknown", includeUnknown, "jobs", jobSnapshots);
+        Map<String, Object> batchSnapshot = Map.of("includeUnknown", includeUnknown, "jobs", jobSnapshots,
+                "scoreEvidenceIds", snapshot.evidenceIds());
         return tasks.create(userId, "POST", route, key, body, "JOB_MATCH", "JOB_MATCH", matchId,
                 versions, payload, taskId -> mapper.insertBatch(matchId, userId, taskId, actual, resumeId,
                         json.stringify(batchSnapshot)));
@@ -287,9 +302,13 @@ public class JobService {
             boolean includeUnknown = Boolean.TRUE.equals(json.map(String.valueOf(batch.get("input_snapshot_json"))).get("includeUnknown"));
             for (Map<String, Object> item : mapper.items(String.valueOf(batch.get("id")))) {
                 String eligibility = String.valueOf(item.get("eligibility_status"));
-                if (!"FAIL".equals(eligibility) && (includeUnknown || !"UNKNOWN".equals(eligibility))) {
-                    items.add(matchItemVo(item));
+                if (!includeUnknown && "UNKNOWN".equals(eligibility)) continue;
+                Map<String, Object> detail = matchItemVo(item);
+                if ("FAIL".equals(eligibility) && !(detail.get("source") instanceof Map<?, ?> source
+                        && "USER_INPUT".equals(source.get("type")))) {
+                    continue;
                 }
+                items.add(detail);
             }
         }
         result.put("items", items);
@@ -307,8 +326,152 @@ public class JobService {
         result.put("source", snapshot.get("source"));
         result.put("sourceUrl", snapshot.get("sourceUrl"));
         result.put("verifiedAt", snapshot.get("verifiedAt"));
+        result.put("requirementEvidence", snapshot.get("requirementEvidence") == null ? List.of()
+                : snapshot.get("requirementEvidence"));
+        result.put("requirementEvidenceCoverage", snapshot.get("requirementEvidenceCoverage"));
         result.put("scoreVersion", "match-v1-trial");
         return result;
+    }
+
+    public Map<String, Object> matchEvidence(String userId, String matchId, String itemId, String skillCode) {
+        Map<String, Object> item = mapper.matchItem(itemId, userId);
+        if (item == null || !matchId.equals(String.valueOf(item.get("batch_id")))) {
+            throw BusinessException.notFound();
+        }
+        List<Map<String, Object>> gaps = item.get("gaps_json") == null ? List.of()
+                : json.convert(json.parse(String.valueOf(item.get("gaps_json"))), List.class);
+        Map<String, Object> gap = gaps.stream()
+                .filter(entry -> skillCode.equals(String.valueOf(entry.get("skillCode"))))
+                .findFirst().orElse(null);
+        if (gap == null) {
+            throw BusinessException.validation("skillCode", "该技能不属于此匹配条目");
+        }
+        List<String> ids = stringIds(gap.get("evidenceIds"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("skillCode", skillCode);
+        if (ids.isEmpty()) {
+            result.put("evidence", List.of());
+            result.put("reason", "该技能暂无可用评分样本，完成训练或面试后再查看");
+            return result;
+        }
+        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
+        for (Map<String, Object> row : abilityService.evidenceByIds(userId, ids)) {
+            rows.put(String.valueOf(row.get("id")), row);
+        }
+        List<String> learningIds = new ArrayList<>();
+        List<String> interviewIds = new ArrayList<>();
+        for (String id : ids) {
+            Map<String, Object> row = rows.get(id);
+            if (row == null || row.get("source_id") == null) {
+                continue;
+            }
+            String sourceId = String.valueOf(row.get("source_id"));
+            String type = String.valueOf(row.get("source_type"));
+            if ("LEARNING_ANSWER".equals(type)) {
+                learningIds.add(sourceId);
+            } else if ("INTERVIEW_ANSWER".equals(type)) {
+                interviewIds.add(sourceId);
+            }
+        }
+        Map<String, Map<String, Object>> learning = index(abilityService.learningAnswerDetails(learningIds));
+        Map<String, Map<String, Object>> interview = index(abilityService.interviewMessageDetails(interviewIds));
+        List<String> questionIds = new ArrayList<>();
+        for (Map<String, Object> row : interview.values()) {
+            if (row.get("question_message_id") != null) {
+                questionIds.add(String.valueOf(row.get("question_message_id")));
+            }
+        }
+        Map<String, Map<String, Object>> questions = index(abilityService.interviewMessageDetails(questionIds));
+        List<Map<String, Object>> evidence = new ArrayList<>();
+        for (String id : ids) {
+            evidence.add(evidenceVo(id, rows.get(id), learning, interview, questions));
+        }
+        result.put("evidence", evidence);
+        return result;
+    }
+
+    private Map<String, Object> evidenceVo(String id, Map<String, Object> row,
+                                           Map<String, Map<String, Object>> learning,
+                                           Map<String, Map<String, Object>> interview,
+                                           Map<String, Map<String, Object>> questions) {
+        Map<String, Object> vo = new LinkedHashMap<>();
+        vo.put("evidenceId", id);
+        if (row == null) {
+            vo.put("available", false);
+            vo.put("reason", "评分记录已不存在");
+            return vo;
+        }
+        vo.put("sourceType", row.get("source_type"));
+        vo.put("sourceId", row.get("source_id"));
+        vo.put("score", row.get("score"));
+        vo.put("scoredAt", view.value(row.get("created_at")));
+        boolean available = "VALID".equals(String.valueOf(row.get("status")));
+        String sourceId = row.get("source_id") == null ? "" : String.valueOf(row.get("source_id"));
+        String question = null;
+        String answer = null;
+        if ("LEARNING_ANSWER".equals(String.valueOf(row.get("source_type")))) {
+            Map<String, Object> detail = learning.get(sourceId);
+            if (detail != null) {
+                question = text(detail.get("stem"));
+                answer = text(detail.get("content"));
+            }
+        } else if ("INTERVIEW_ANSWER".equals(String.valueOf(row.get("source_type")))) {
+            Map<String, Object> detail = interview.get(sourceId);
+            if (detail != null) {
+                answer = text(detail.get("content"));
+                if (detail.get("question_message_id") != null) {
+                    Map<String, Object> questionRow = questions.get(String.valueOf(detail.get("question_message_id")));
+                    if (questionRow != null) {
+                        question = text(questionRow.get("content"));
+                    }
+                }
+            }
+        }
+        if (!available) {
+            vo.put("reason", "该评分记录已撤销");
+        } else if (question == null || answer == null) {
+            available = false;
+            vo.put("reason", "来源记录无法读取");
+        }
+        vo.put("available", available);
+        vo.put("question", question);
+        vo.put("answerExcerpt", excerpt(answer, 300));
+        return vo;
+    }
+
+    private List<String> stringIds(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                result.add(String.valueOf(item));
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Map<String, Object>> index(List<Map<String, Object>> rows) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            if (row.get("id") != null) {
+                result.put(String.valueOf(row.get("id")), row);
+            }
+        }
+        return result;
+    }
+
+    private String text(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String excerpt(String value, int max) {
+        if (value == null) {
+            return null;
+        }
+        String stripped = value.strip();
+        return stripped.length() <= max ? stripped : stripped.substring(0, max) + "…";
     }
 
     public Map<String, Object> jobVo(Map<String, Object> row, String userId) {
@@ -420,23 +583,49 @@ public class JobService {
             }
         }
         if (jobs.isEmpty()) {
-            throw BusinessException.conflict("没有可匹配的岗位候选", "INVALID_STATE");
+            throw BusinessException.conflict("暂无可信岗位候选，请选择一个已分析的个人 JD", "NO_MATCH_CANDIDATES");
         }
         return jobs;
     }
 
-    private Map<String, Object> agentCandidate(Map<String, Object> row) {
+    private Map<String, Object> agentCandidate(Map<String, Object> row, String userId) {
         Map<String, Object> candidate = new LinkedHashMap<>();
         candidate.put("jobId", row.get("id"));
         candidate.put("jobVersion", row.get("job_version"));
         candidate.put("title", row.get("title"));
         candidate.put("jdText", row.get("jd_text"));
         candidate.put("requirements", json.map(String.valueOf(row.get("requirements_json"))));
+        candidate.put("personalOwned", "PRIVATE".equals(String.valueOf(row.get("visibility")))
+                && "USER_INPUT".equals(row.get("source_type"))
+                && row.get("owner_user_id") != null
+                && userId.equals(String.valueOf(row.get("owner_user_id"))));
         return candidate;
     }
 
-    private List<Map<String, Object>> profilesSkillSnapshots(String userId) {
-        return abilityService.snapshots(userId).stream().map(row -> {
+    private List<String> confirmedResumeQuotes(Map<String, Object> resume) {
+        if (!(resume.get("extracted_text") instanceof String source) || resume.get("confirmed_facts_json") == null) {
+            return List.of();
+        }
+        Map<String, Object> facts = json.map(String.valueOf(resume.get("confirmed_facts_json")));
+        Set<String> quotes = new LinkedHashSet<>();
+        int remaining = 8000;
+        for (String field : List.of("skills", "internships", "awards")) {
+            if (!(facts.get(field) instanceof List<?> entries)) continue;
+            for (Object entry : entries) {
+                if (!(entry instanceof Map<?, ?> fact) || !Boolean.TRUE.equals(fact.get("confirmed"))
+                        || !(fact.get("quote") instanceof String raw)) continue;
+                String quote = raw.strip();
+                if (!quote.isEmpty() && quote.length() <= 1000 && quote.length() <= remaining
+                        && source.contains(quote) && quotes.add(quote)) {
+                    remaining -= quote.length();
+                }
+            }
+        }
+        return List.copyOf(quotes);
+    }
+
+    private List<Map<String, Object>> profilesSkillSnapshots(List<Map<String, Object>> snapshots) {
+        return snapshots.stream().map(row -> {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("skillCode", row.get("skill_code"));
             item.put("score", row.get("score"));

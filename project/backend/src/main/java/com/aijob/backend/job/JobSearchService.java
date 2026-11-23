@@ -253,6 +253,11 @@ public class JobSearchService {
         result.put("recruitmentStatus", snapshot.get("recruitmentStatus"));
         result.put("recruitmentCheckedAt", snapshot.get("recruitmentCheckedAt"));
         result.put("recruitmentEvidence", snapshot.get("recruitmentEvidence"));
+        result.put("verificationStatus", snapshot.get("verificationStatus"));
+        result.put("verificationReason", snapshot.get("verificationReason"));
+        result.put("verificationEvidence", snapshot.get("verificationEvidence"));
+        result.put("verificationCheckedAt", snapshot.get("verificationCheckedAt"));
+        result.put("verificationHttpStatus", snapshot.get("verificationHttpStatus"));
         result.put("minMonthlySalaryCents", first(row.get("min_monthly_salary_cents"), snapshot.get("salaryMinMonthlyCents")));
         result.put("maxMonthlySalaryCents", first(row.get("max_monthly_salary_cents"), snapshot.get("salaryMaxMonthlyCents")));
         result.put("salaryText", snapshot.get("salaryText"));
@@ -262,6 +267,7 @@ public class JobSearchService {
         result.put("experienceMonthsMin", snapshot.get("experienceMonthsMin"));
         result.put("educationText", snapshot.get("educationText"));
         result.put("educationMin", snapshot.get("educationMin"));
+        result.put("jdSummary", row.get("jd_summary"));
         result.put("source", snapshot.get("source"));
         result.put("sourceUrl", snapshot.get("sourceUrl"));
         result.put("verifiedAt", snapshot.get("verifiedAt"));

@@ -17,7 +17,7 @@ export const optimizationApi = {
   listDiagnoses(query: PageQuery & { resumeVersionId?: string }) {
     return request<Page<ResumeDiagnosisVO>>('/api/v1/resume-optimizations/diagnoses', { query })
   },
-  create(body: { resumeVersionId: string; jobId: string; diagnosisId?: string }) {
+  create(body: { resumeVersionId: string; jobId: string; diagnosisId?: string; mode?: 'SECTIONS' | 'FULL_DOCUMENT'; jobVersion?: number }) {
     return submitTrackedTask('/api/v1/resume-optimizations', body, `/resume-optimization?resumeVersionId=${body.resumeVersionId}&jobId=${body.jobId}`)
   },
   get(optimizationId: string) {

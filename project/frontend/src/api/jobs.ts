@@ -1,6 +1,6 @@
 import { request } from './request'
 import { submitTrackedTask } from './task-registry'
-import type { JobVO, MatchBatchVO, Page, PageQuery } from './types'
+import type { JobVO, MatchBatchVO, MatchEvidenceVO, Page, PageQuery } from './types'
 
 export const jobApi = {
   list(query: PageQuery & { q?: string; cityCode?: string; candidateType?: string }) {
@@ -29,6 +29,9 @@ export const jobApi = {
   },
   getMatch(matchId: string) {
     return request<MatchBatchVO>(`/api/v1/job-matches/${matchId}`)
+  },
+  matchEvidence(matchId: string, itemId: string, skillCode: string) {
+    return request<MatchEvidenceVO>(`/api/v1/job-matches/${matchId}/items/${itemId}/evidence`, { query: { skillCode } })
   },
   listMatches(query: PageQuery = {}) {
     return request<Page<MatchBatchVO>>('/api/v1/job-matches', { query })

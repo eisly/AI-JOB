@@ -191,7 +191,7 @@ verify(mapper).completeDiagnosis(eq("resource"), eq("task"), savedItems.capture(
 
         assertThrows(BusinessException.class, () -> handler.success(task,
                 json.tree(Map.of("title", "简历", "sections", List.of(section)))));
-        verify(mapper, never()).completeOptimization(any(), any(), any(), any());
+        verify(mapper, never()).completeOptimization(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -203,7 +203,121 @@ verify(mapper).completeDiagnosis(eq("resource"), eq("task"), savedItems.capture(
 
         assertThrows(BusinessException.class, () -> handler.success(task,
                 json.tree(Map.of("title", "简历", "sections", List.of(section)))));
-        verify(mapper, never()).completeOptimization(any(), any(), any(), any());
+        verify(mapper, never()).completeOptimization(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void optimizationFullDocumentAllowsNoSuggestionsAndKeepsMissingRequirements() {
+        String text = "项目经历：使用 Redis 缓存商品详情。";
+        AiTask task = fullDocumentTask(text, "熟悉 Redis 缓存一致性方案。\n具备 Spring Boot 开发经验。");
+        when(mapper.lockOptimization("resource", "user")).thenReturn(Map.of("id", "resource"));
+        when(mapper.completeOptimization(eq("resource"), eq("task"), eq("定向简历"), eq("[]"), anyString(),
+                anyString(), any(), any())).thenReturn(1);
+        Map<String, Object> invalid = new LinkedHashMap<>();
+        invalid.put("requirement", "不存在的岗位要求");
+
+        assertEquals(1, handler.success(task, json.tree(Map.of(
+                "title", "定向简历",
+                "sections", List.of(),
+                "missingRequirements", List.of(
+                        Map.of("requirement", "熟悉 Redis 缓存一致性方案。",
+                                "note", "简历只提到用 Redis 缓存商品详情。"),
+                        invalid)))));
+
+        ArgumentCaptor<String> capturedGaps = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> capturedNotes = ArgumentCaptor.forClass(String.class);
+        verify(mapper).completeOptimization(eq("resource"), eq("task"), eq("定向简历"), eq("[]"),
+                capturedGaps.capture(), capturedNotes.capture(), any(), any());
+        List<Map<String, Object>> savedGaps = json.convert(json.parse(capturedGaps.getValue()), List.class);
+        assertEquals(1, savedGaps.size());
+        assertEquals("熟悉 Redis 缓存一致性方案。", savedGaps.get(0).get("requirement"));
+        assertTrue(json.parse(capturedNotes.getValue()).toString().contains("无法在 JD 中定位"));
+    }
+
+    @Test
+    void optimizationFullDocumentSkipsDuplicateLocationsAndUnsupportedNumbers() {
+        String text = "实习经历：使用 Redis 缓存商品详情。项目经历：使用 Redis 缓存商品详情。技能：了解 MySQL 索引优化。";
+        AiTask task = fullDocumentTask(text, "熟悉 Redis 缓存一致性方案。");
+        when(mapper.lockOptimization("resource", "user")).thenReturn(Map.of("id", "resource"));
+        when(mapper.completeOptimization(eq("resource"), eq("task"), eq("定向简历"), eq("[]"), anyString(),
+                anyString(), any(), any())).thenReturn(1);
+        Map<String, Object> duplicate = new LinkedHashMap<>();
+        duplicate.put("sectionKey", "internship");
+        duplicate.put("title", "实习经历");
+        duplicate.put("originalText", "使用 Redis 缓存商品详情。");
+        duplicate.put("suggestedText", "通过 Redis 缓存商品详情。");
+        duplicate.put("sourceQuotes", List.of());
+        Map<String, Object> invented = new LinkedHashMap<>();
+        invented.put("sectionKey", "skills");
+        invented.put("title", "技能");
+        invented.put("originalText", "了解 MySQL 索引优化。");
+        invented.put("suggestedText", "了解 MySQL 索引优化，查询性能提升40%。");
+        invented.put("sourceQuotes", List.of());
+
+        assertEquals(1, handler.success(task, json.tree(Map.of(
+                "title", "定向简历", "sections", List.of(duplicate, invented)))));
+
+        ArgumentCaptor<String> capturedNotes = ArgumentCaptor.forClass(String.class);
+        verify(mapper).completeOptimization(eq("resource"), eq("task"), eq("定向简历"), eq("[]"),
+                anyString(), capturedNotes.capture(), any(), any());
+        String notes = json.parse(capturedNotes.getValue()).toString();
+        assertTrue(notes.contains("无法唯一定位"));
+        assertTrue(notes.contains("不存在的数字"));
+    }
+
+    @Test
+    void optimizationSkipsUnchangedSuggestionsWithoutBlockingRealRewrites() {
+        String original = "开发缓存模块\n并联调查询接口。";
+        AiTask task = fullDocumentTask("项目经历：" + original, "具备接口联调经验。");
+        when(mapper.lockOptimization("resource", "user")).thenReturn(Map.of("id", "resource"));
+        when(mapper.completeOptimization(eq("resource"), eq("task"), anyString(), anyString(), anyString(),
+                anyString(), any(), any())).thenReturn(1);
+        Map<String, Object> unchanged = Map.of("sectionKey", "same", "title", "缓存模块",
+                "originalText", original, "suggestedText", "  " + original.replace("\n", "\r\n") + "  ",
+                "sourceQuotes", List.of());
+        Map<String, Object> rewrite = Map.of("sectionKey", "rewrite", "title", "接口联调",
+                "originalText", original, "suggestedText", "完成查询接口联调与缓存模块开发。",
+                "sourceQuotes", List.of());
+
+        assertEquals(1, handler.success(task, json.tree(Map.of(
+                "title", "定向简历", "sections", List.of(unchanged, rewrite)))));
+
+        ArgumentCaptor<String> capturedSections = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> capturedNotes = ArgumentCaptor.forClass(String.class);
+        verify(mapper).completeOptimization(eq("resource"), eq("task"), anyString(), capturedSections.capture(),
+                anyString(), capturedNotes.capture(), any(), any());
+        List<Map<String, Object>> saved = json.convert(json.parse(capturedSections.getValue()), List.class);
+        assertEquals(1, saved.size());
+        assertEquals("rewrite", saved.get(0).get("sectionKey"));
+        assertTrue(capturedNotes.getValue().contains("建议与简历原文一致"));
+    }
+
+    @Test
+    void optimizationClearsJdQuoteOutsideJdTextAndKeepsSection() {
+        String text = "项目经历：使用 Redis 缓存商品详情。";
+        AiTask task = fullDocumentTask(text, "熟悉 Spring Boot 开发。");
+        when(mapper.lockOptimization("resource", "user")).thenReturn(Map.of("id", "resource"));
+        when(mapper.completeOptimization(eq("resource"), eq("task"), anyString(), anyString(), anyString(),
+                anyString(), any(), any())).thenReturn(1);
+        Map<String, Object> section = new LinkedHashMap<>();
+        section.put("sectionKey", "project");
+        section.put("title", "项目经历");
+        section.put("originalText", "使用 Redis 缓存商品详情。");
+        section.put("suggestedText", "通过 Redis 缓存商品详情。");
+        section.put("sourceQuotes", List.of());
+        section.put("jdQuote", "熟悉 Kubernetes 集群运维");
+        section.put("reason", "对应岗位要求。");
+
+        assertEquals(1, handler.success(task, json.tree(Map.of(
+                "title", "定向简历", "sections", List.of(section)))));
+
+        ArgumentCaptor<String> capturedSections = ArgumentCaptor.forClass(String.class);
+        verify(mapper).completeOptimization(eq("resource"), eq("task"), anyString(), capturedSections.capture(),
+                anyString(), anyString(), any(), any());
+        List<Map<String, Object>> saved = json.convert(json.parse(capturedSections.getValue()), List.class);
+        assertEquals(1, saved.size());
+        assertNull(saved.get(0).get("jdQuote"));
+        assertEquals("对应岗位要求。", saved.get(0).get("reason"));
     }
 
     @Test
@@ -364,6 +478,15 @@ verify(mapper).completeDiagnosis(eq("resource"), eq("task"), savedItems.capture(
         task.setOperation(operation);
         task.setInputSnapshotJson(json.stringify(Map.of("document", Map.of("text", text,
                 "textLayoutVersion", "pdf-layout-v2", "readOrderVerified", true))));
+        return task;
+    }
+
+    private AiTask fullDocumentTask(String text, String jdText) {
+        AiTask task = task("RESUME_OPTIMIZE", text);
+        task.setInputSnapshotJson(json.stringify(Map.of(
+                "document", Map.of("text", text, "textLayoutVersion", "pdf-layout-v2", "readOrderVerified", true),
+                "jdText", jdText,
+                "mode", "FULL_DOCUMENT")));
         return task;
     }
 }

@@ -215,10 +215,13 @@ public class ResumeOptimizationResultHandler implements TaskResultHandler {
             throw BusinessException.notFound();
         }
         Snapshot snapshot = snapshot(task);
+        boolean fullDocument = "FULL_DOCUMENT".equals(snapshot.mode());
         Map<String, Object> value = json.map(result);
         Set<String> keys = new HashSet<>();
+        List<String> notes = new ArrayList<>();
+        List<int[]> spans = new ArrayList<>();
         List<Map<String, Object>> sections = new ArrayList<>();
-        for (Object raw : array(value, "sections", 1, 20)) {
+        for (Object raw : array(value, "sections", fullDocument ? 0 : 1, 20)) {
             Map<String, Object> input = object(raw, "sections");
             String sectionKey = text(input, "sectionKey", 64);
             if (!keys.add(sectionKey)) {
@@ -238,19 +241,93 @@ public class ResumeOptimizationResultHandler implements TaskResultHandler {
                 requireSource(snapshot.text(), quote, "优化 sourceQuotes 不属于授权简历原文");
                 quotes.add(quote);
             }
+            String suggested = text(input, "suggestedText", 10000);
+            if (normalizeLineEndings(original).equals(normalizeLineEndings(suggested))) {
+                notes.add("段落「" + sectionKey + "」的建议与简历原文一致，已跳过该建议");
+                continue;
+            }
+            String jdQuote = optionalText(input, "jdQuote", 2000);
+            if (jdQuote != null && !normalized(snapshot.jdText()).contains(normalized(jdQuote))) {
+                notes.add("段落「" + sectionKey + "」的岗位原句无法在 JD 中定位，已清空该引用");
+                jdQuote = null;
+            }
+            String reason = optionalText(input, "reason", 2000);
+            StringBuilder evidence = new StringBuilder(original).append('\n').append(String.join("\n", quotes));
+            if (hasUnsupportedNumber(evidence.toString(), suggested)) {
+                notes.add("段落「" + sectionKey + "」的改写新增了简历与 JD 依据中不存在的数字，已跳过该建议");
+                continue;
+            }
+            if (fullDocument) {
+                int index = snapshot.text().indexOf(original);
+                if (index < 0 || snapshot.text().indexOf(original, index + 1) >= 0) {
+                    notes.add("段落「" + sectionKey + "」的简历原句无法唯一定位，已跳过该建议");
+                    continue;
+                }
+                int start = index;
+                int end = index + original.length();
+                boolean overlap = spans.stream().anyMatch(span -> start < span[1] && span[0] < end);
+                if (overlap) {
+                    notes.add("段落「" + sectionKey + "」的替换位置与其他建议重叠，已跳过该建议");
+                    continue;
+                }
+                spans.add(new int[]{start, end});
+            }
             Map<String, Object> section = new LinkedHashMap<>();
             section.put("sectionKey", sectionKey);
             section.put("title", text(input, "title", 200));
             section.put("originalText", original);
-            section.put("suggestedText", text(input, "suggestedText", 10000));
+            section.put("suggestedText", suggested);
             section.put("sourceQuotes", quotes);
+            section.put("jdQuote", jdQuote);
+            section.put("reason", reason);
             sections.add(section);
         }
+        if (!fullDocument && sections.isEmpty()) {
+            throw BusinessException.aiSchema("逐段优化至少需要一条可用建议");
+        }
+        List<Map<String, Object>> gaps = new ArrayList<>();
+        Object rawGaps = value.get("missingRequirements");
+        if (rawGaps != null) {
+            if (!(rawGaps instanceof List<?> gapList) || gapList.size() > 5) {
+                throw BusinessException.aiSchema("missingRequirements 必须为最多 5 项的数组");
+            }
+            for (Object raw : gapList) {
+                Map<String, Object> input = object(raw, "missingRequirements");
+                String requirement = text(input, "requirement", 2000);
+                if (!normalized(snapshot.jdText()).contains(normalized(requirement))) {
+                    notes.add("岗位要求「" + requirement + "」无法在 JD 中定位，已忽略");
+                    continue;
+                }
+                Map<String, Object> gap = new LinkedHashMap<>();
+                gap.put("requirement", requirement);
+                gap.put("note", optionalText(input, "note", 2000));
+                gaps.add(gap);
+            }
+        }
+        List<String> dedupedNotes = notes.stream().distinct().limit(20).toList();
         if (mapper.completeOptimization(task.getResourceId(), task.getId(), text(value, "title", 200),
-                json.stringify(sections)) == 0) {
+                json.stringify(sections), json.stringify(gaps), json.stringify(dedupedNotes), null, null) == 0) {
             throw BusinessException.conflict("优化稿状态已变化", "INVALID_STATE");
         }
         return 1;
+    }
+
+    private static String normalizeLineEndings(String value) {
+        return value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static String normalized(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static boolean hasUnsupportedNumber(String evidence, String suggested) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\d+(?:\\.\\d+)?%?").matcher(suggested);
+        while (matcher.find()) {
+            if (!evidence.contains(matcher.group())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Snapshot snapshot(AiTask task) {
@@ -265,7 +342,10 @@ public class ResumeOptimizationResultHandler implements TaskResultHandler {
         String ruleVersion = payload.get("assessmentRules") instanceof Map<?, ?> rules
                 && rules.get("ruleVersion") instanceof String version && ResumeAssessmentRules.supports(version)
                 ? version : null;
-        return new Snapshot(text, layoutVersion, truthy(map.get("readOrderVerified")), ruleVersion);
+        String jdText = payload.get("jdText") instanceof String jd ? jd : "";
+        String mode = payload.get("mode") instanceof String value && "FULL_DOCUMENT".equals(value)
+                ? "FULL_DOCUMENT" : "SECTIONS";
+        return new Snapshot(text, layoutVersion, truthy(map.get("readOrderVerified")), ruleVersion, jdText, mode);
     }
 
     private List<String> optionalQuotes(Map<String, Object> input, String source, String message) {
@@ -361,6 +441,7 @@ public class ResumeOptimizationResultHandler implements TaskResultHandler {
         return value != null && "true".equalsIgnoreCase(String.valueOf(value));
     }
 
-    private record Snapshot(String text, String layoutVersion, boolean readOrderVerified, String ruleVersion) {
+    private record Snapshot(String text, String layoutVersion, boolean readOrderVerified, String ruleVersion,
+                            String jdText, String mode) {
     }
 }

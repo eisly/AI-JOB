@@ -128,12 +128,14 @@ def match_envelope(task_id: UUID) -> dict[str, Any]:
                 "updatedAt": "2026-10-27T02:30:00Z",
             },
             "skillSnapshot": [{"skillCode": "redis", "score": None, "sampleCount": 0}],
+            "resumeQuotes": ["使用Redis实现缓存"],
             "candidates": [
                 {
                     "jobId": JOB_ID,
                     "jobVersion": 1,
                     "title": "Java后端开发",
                     "jdText": "熟悉Java、MySQL和Redis",
+                    "personalOwned": True,
                     "requirements": {
                         "educationMin": "BACHELOR",
                         "graduationYearMin": 2026,

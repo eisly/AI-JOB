@@ -2,11 +2,14 @@ package com.aijob.backend.ability;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.aijob.backend.common.JsonService;
@@ -77,5 +80,34 @@ public class AbilityService {
 
     public List<Map<String, Object>> snapshots(String userId) {
         return mapper.snapshots(userId);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public MatchSnapshot matchSnapshot(String userId, Set<String> evidenceSkills) {
+        List<Map<String, Object>> snapshots = mapper.snapshots(userId);
+        Map<String, List<String>> evidenceIds = new LinkedHashMap<>();
+        for (Map<String, Object> snapshot : snapshots) {
+            String skillCode = String.valueOf(snapshot.get("skill_code"));
+            if (!evidenceSkills.contains(skillCode) || snapshot.get("score") == null) continue;
+            List<String> ids = mapper.last20EvidenceIds(userId, skillCode);
+            if (snapshot.get("sample_count") instanceof Number count && count.intValue() == ids.size()) {
+                evidenceIds.put(skillCode, ids);
+            }
+        }
+        return new MatchSnapshot(snapshots, evidenceIds);
+    }
+
+    public record MatchSnapshot(List<Map<String, Object>> skills, Map<String, List<String>> evidenceIds) {}
+
+    public List<Map<String, Object>> evidenceByIds(String userId, List<String> ids) {
+        return ids.isEmpty() ? List.of() : mapper.evidenceByIds(userId, ids);
+    }
+
+    public List<Map<String, Object>> learningAnswerDetails(List<String> ids) {
+        return ids.isEmpty() ? List.of() : mapper.learningAnswerDetails(ids);
+    }
+
+    public List<Map<String, Object>> interviewMessageDetails(List<String> ids) {
+        return ids.isEmpty() ? List.of() : mapper.interviewMessageDetails(ids);
     }
 }

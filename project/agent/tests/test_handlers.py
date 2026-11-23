@@ -51,6 +51,7 @@ from app.schemas import (
     PlanItem,
     ReportModelOutput,
     Requirement,
+    RequirementEvidenceItem,
     ResumeEvidenceFact,
     ResumeFacts,
     ResumeParsePayload,
@@ -409,6 +410,14 @@ def _match_output():
                 semanticScore=0.8,
                 reasons=["方向一致"],
                 gapSuggestions={"java": "补强 Java"},
+                requirementEvidence=[
+                    RequirementEvidenceItem(
+                        requirementQuote="熟悉Java、MySQL和Redis",
+                        skillCode="redis",
+                        supportLevel="PARTIAL",
+                        resumeQuote="使用Redis实现缓存",
+                    )
+                ],
             )
         ]
     )
@@ -438,6 +447,55 @@ def test_match_rejects_duplicate_missing_and_unknown_suggestions():
     output.items[0].gap_suggestions = {"python": "x"}
     with pytest.raises(HandlerValidationError, match="gapSuggestions 含候选"):
         JobMatchHandler().validate_business(_ctx(payload), output, {}, {})
+
+
+def test_match_filters_invalid_requirement_evidence_and_marks_missing():
+    body = match_envelope(uuid4())["payload"]
+    body["candidates"][0]["personalOwned"] = True
+    payload = JobMatchPayload.model_validate(body)
+    output = _match_output()
+    output.items[0].requirement_evidence = [
+        RequirementEvidenceItem(
+            requirement_quote="熟悉Java、MySQL和Redis",
+            skill_code="redis",
+            support_level="PARTIAL",
+            resume_quote="使用Redis实现缓存",
+        ),
+        RequirementEvidenceItem(
+            requirement_quote="熟悉 Java、MySQL和Redis",
+            skill_code="redis",
+            support_level="DIRECT",
+            resume_quote="使用Redis实现缓存",
+        ),
+        RequirementEvidenceItem(
+            requirement_quote="熟悉Java、MySQL和Redis",
+            skill_code="python",
+            support_level="DIRECT",
+            resume_quote="使用 Redis 实现缓存",
+        ),
+        RequirementEvidenceItem(
+            requirement_quote="熟悉Java、MySQL和Redis",
+            skill_code="mysql",
+            support_level="DIRECT",
+            resume_quote=None,
+        ),
+    ]
+
+    result = JobMatchHandler().validate_business(_ctx(payload), output, {}, {})
+    evidence = result.items[0].requirement_evidence
+    assert len(evidence) == 3
+    assert evidence[0].support_level == "PARTIAL"
+    assert evidence[0].skill_code == "redis"
+    assert evidence[1].support_level == "MISSING"
+    assert evidence[1].skill_code is None
+    assert evidence[1].resume_quote is None
+    assert evidence[2].support_level == "MISSING"
+    assert evidence[2].skill_code == "mysql"
+
+    body["candidates"][0]["personalOwned"] = False
+    payload = JobMatchPayload.model_validate(body)
+    result = JobMatchHandler().validate_business(_ctx(payload), _match_output(), {}, {})
+    assert result.items[0].requirement_evidence == []
 
 
 def test_build_gaps_covers_all_evidence_branches():

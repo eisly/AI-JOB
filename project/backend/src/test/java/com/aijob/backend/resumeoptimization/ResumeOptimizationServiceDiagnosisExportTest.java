@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -38,19 +39,27 @@ class ResumeOptimizationServiceDiagnosisExportTest {
     private ResumeMapper resumes;
     private JobMapper jobs;
     private TaskService tasks;
+    private IdempotencyService idempotency;
     private FileStorageService files;
     private ResumeOptimizationService service;
     private JsonService json;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         mapper = mock(ResumeOptimizationMapper.class);
         resumes = mock(ResumeMapper.class);
         jobs = mock(JobMapper.class);
         tasks = mock(TaskService.class);
         files = mock(FileStorageService.class);
+        idempotency = mock(IdempotencyService.class);
         json = new JsonService(JsonMapper.builder().build());
-        service = new ResumeOptimizationService(mapper, resumes, jobs, tasks, mock(IdempotencyService.class),
+        when(idempotency.execute(anyString(), anyString(), anyString(), anyString(), any(), anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    ((java.util.function.Supplier<Object>) invocation.getArgument(6)).get();
+                    return null;
+                });
+        service = new ResumeOptimizationService(mapper, resumes, jobs, tasks, idempotency,
                 new ResumeExportService("C:\\Windows\\Fonts\\simhei.ttf"), files, json, new ApiView(json));
     }
 
@@ -235,6 +244,85 @@ class ResumeOptimizationServiceDiagnosisExportTest {
     }
 
     @Test
+    void optimizeFullDocumentRequiresOwnedPrivateJobAndMatchingVersion() {
+        String versionId = "20000000-0000-4000-8000-000000000002";
+        String jobId = "30000000-0000-4000-8000-000000000001";
+        when(resumes.version(versionId, "user")).thenReturn(confirmedVersion(versionId, "简历原文"));
+        Map<String, Object> publicJob = job(jobId);
+        publicJob.put("visibility", "PUBLIC");
+        when(jobs.job(jobId, "user")).thenReturn(publicJob);
+
+        assertThrows(BusinessException.class, () -> service.optimize("user", "/api/v1/resume-optimizations",
+                "key", Map.of("resumeVersionId", versionId, "jobId", jobId, "mode", "FULL_DOCUMENT")));
+
+        Map<String, Object> privateJob = job(jobId);
+        privateJob.put("visibility", "PRIVATE");
+        privateJob.put("owner_user_id", "user");
+        when(jobs.job(jobId, "user")).thenReturn(privateJob);
+
+        assertThrows(BusinessException.class, () -> service.optimize("user", "/api/v1/resume-optimizations",
+                "key", Map.of("resumeVersionId", versionId, "jobId", jobId, "mode", "FULL_DOCUMENT",
+                        "jobVersion", 2)));
+
+        service.optimize("user", "/api/v1/resume-optimizations", "key",
+                Map.of("resumeVersionId", versionId, "jobId", jobId, "mode", "FULL_DOCUMENT", "jobVersion", 1));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
+        verify(tasks).create(eq("user"), eq("POST"), anyString(), anyString(), any(), eq("RESUME_OPTIMIZE"),
+                eq("RESUME_OPTIMIZATION"), anyString(), any(), payload.capture(), any());
+        assertEquals("FULL_DOCUMENT", payload.getValue().get("mode"));
+    }
+
+    @Test
+    void acceptPersistsFullDocumentUsingOnlyChangedSections() {
+        String source = "教育背景：本科。\n项目经历：使用Redis缓存商品详情。\n技能：熟悉Java。";
+        Map<String, Object> row = optimizationRow("READY");
+        row.put("mode", "FULL_DOCUMENT");
+        row.put("source_text", source);
+        row.put("sections_json", json.stringify(List.of(
+                section("project", "项目经历", "使用Redis缓存商品详情。", "使用 Redis 缓存商品详情，并校验更新一致性。"),
+                section("skills", "技能", "熟悉Java。", "熟悉Java。"))));
+        when(mapper.lockOptimization("id", "user")).thenReturn(row);
+        when(mapper.accept(eq("id"), anyString(), anyString(), anyString())).thenReturn(1);
+        when(mapper.optimization("id", "user")).thenReturn(row);
+
+        service.accept("user", "id", "/api/v1/resume-optimizations/id/accept", "key", Map.of("sections", List.of(
+                Map.of("sectionKey", "project", "title", "项目经历", "content", "使用 Redis 缓存商品详情，并校验更新一致性。"),
+                Map.of("sectionKey", "skills", "title", "技能", "content", "熟悉Java。"))));
+
+        ArgumentCaptor<String> fullText = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> fullJson = ArgumentCaptor.forClass(String.class);
+        verify(mapper).accept(eq("id"), anyString(), fullText.capture(), fullJson.capture());
+        assertTrue(fullText.getValue().contains("并校验更新一致性"));
+        assertTrue(fullText.getValue().contains("教育背景：本科。"));
+        assertTrue(fullText.getValue().contains("技能：熟悉Java。"));
+        var blocks = json.parse(fullJson.getValue()).get("blocks");
+        assertEquals(3, blocks.size());
+        assertFalse(blocks.get(0).get("changed").asBoolean());
+        assertTrue(blocks.get(1).get("changed").asBoolean());
+    }
+
+    @Test
+    void exportUsesConfirmedFullDocumentInsteadOfAcceptedSections() throws Exception {
+        Map<String, Object> row = optimizationRow("ACCEPTED");
+        row.put("title", "定向简历");
+        row.put("accepted_sections_json", "[]");
+        row.put("full_document_json", json.stringify(Map.of("text", "教育背景：本科。项目经历：使用 Redis 缓存并校验一致性。",
+                "blocks", List.of(
+                        Map.of("text", "教育背景：本科。", "changed", false),
+                        Map.of("text", "项目经历：使用 Redis 缓存并校验一致性。", "changed", true)))));
+        when(mapper.optimization("id", "user")).thenReturn(row);
+
+        ResumeOptimizationService.ExportContent content = service.export("user", "id", "PDF");
+
+        try (PDDocument document = Loader.loadPDF(content.bytes())) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("校验一致性"));
+            assertTrue(text.contains("教育背景：本科。"));
+        }
+    }
+
+    @Test
     void exportDiagnosisMarksReadOrderUnverifiedWhenOriginalFileUnavailable() throws Exception {
         Map<String, Object> row = row("READY", assessmentJson());
         row.put("read_order_verified", 0);
@@ -329,6 +417,26 @@ class ResumeOptimizationServiceDiagnosisExportTest {
         row.put("assessment_json", assessmentJson);
         row.put("created_at", java.time.Instant.now());
         return row;
+    }
+
+    private Map<String, Object> optimizationRow(String status) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", "id");
+        row.put("resume_version_id", "version");
+        row.put("job_id", "job");
+        row.put("status", status);
+        row.put("created_at", java.time.Instant.now());
+        return row;
+    }
+
+    private Map<String, Object> section(String key, String title, String original, String suggested) {
+        Map<String, Object> section = new LinkedHashMap<>();
+        section.put("sectionKey", key);
+        section.put("title", title);
+        section.put("originalText", original);
+        section.put("suggestedText", suggested);
+        section.put("sourceQuotes", List.of());
+        return section;
     }
 
     private String itemsJson(boolean withCheck) {

@@ -35,6 +35,7 @@ from app.schemas import (
     ResumeDiagnosePayload,
     ResumeDiagnosisItem,
     ResumeOptimizePayload,
+    ResumeOptimizeRequirementGap,
     ResumeOptimizeSection,
 )
 from app.skills import get_skill
@@ -133,6 +134,8 @@ def _optimize_output():
                 originalText="使用Redis实现缓存",
                 suggestedText="使用Redis实现缓存。",
                 sourceQuotes=["参与Java接口开发"],
+                jdQuote="熟悉Java、MySQL与Redis",
+                reason="对应岗位对缓存设计的要求。",
             )
         ],
     )
@@ -422,6 +425,40 @@ def test_resume_optimize_validates_references_and_unique_section_keys():
         handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
 
 
+def test_resume_optimize_filters_invalid_jd_quotes_and_allows_full_document_without_changes():
+    body = resume_optimize_envelope(uuid4())["payload"]
+    payload = ResumeOptimizePayload.model_validate(body)
+    handler = ResumeOptimizeHandler()
+
+    output = _optimize_output()
+    output.sections[0].jd_quote = "熟悉 Kubernetes 集群运维"
+    output.missing_requirements = [
+        ResumeOptimizeRequirementGap(requirement="熟悉Java、MySQL与Redis"),
+        ResumeOptimizeRequirementGap(requirement="具备五年以上团队管理经验"),
+    ]
+    result = handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
+    assert result.sections[0].jd_quote is None
+    assert [gap.requirement for gap in result.missing_requirements] == ["熟悉Java、MySQL与Redis"]
+
+    full_payload = ResumeOptimizePayload.model_validate({**body, "mode": "FULL_DOCUMENT"})
+    empty = AIResumeOptimizeResult(
+        title="无可靠改动",
+        sections=[],
+        missing_requirements=[ResumeOptimizeRequirementGap(requirement="熟悉Java、MySQL与Redis")],
+    )
+    result = handler.validate_business(_ctx(full_payload), empty, {"document_text": RESUME_TEXT}, {})
+    assert result.sections == []
+    assert len(result.missing_requirements) == 1
+
+    with pytest.raises(HandlerValidationError, match="逐段优化至少需要一条建议"):
+        handler.validate_business(
+            _ctx(payload),
+            AIResumeOptimizeResult(title="空", sections=[]),
+            {"document_text": RESUME_TEXT},
+            {},
+        )
+
+
 def test_project_plan_checks_sequence_and_hour_budget():
     payload = ProjectPlanPayload.model_validate(project_plan_envelope(uuid4())["payload"])
     handler = ProjectPlanHandler()
@@ -441,8 +478,7 @@ def test_project_plan_checks_sequence_and_hour_budget():
 def test_new_result_models_enforce_required_collections():
     with pytest.raises(ValidationError):
         AIResumeDiagnoseResult(items=[])
-    with pytest.raises(ValidationError):
-        AIResumeOptimizeResult(title="候选", sections=[])
+    assert AIResumeOptimizeResult(title="候选", sections=[]).sections == []
     assert AIProjectRecommendResult(mode="REPOSITORY").items == []
     with pytest.raises(ValidationError):
         AIProjectPlanResult(title="计划", summary="摘要", milestones=[])

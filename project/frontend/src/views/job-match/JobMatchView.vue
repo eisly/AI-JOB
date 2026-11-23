@@ -9,11 +9,13 @@ import { Aim, Plus, Refresh, Search, Star, StarFilled } from '@element-plus/icon
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { jobApi } from '@/api/jobs'
+import { ApiError } from '@/api/request'
 import { learningApi } from '@/api/learning'
 import { profileApi } from '@/api/profile'
 import { canRetryTrackedTask, retryTrackedTask } from '@/api/task-registry'
-import type { JobSearchItemVO, JobVO, MatchBatchVO, MatchItemVO, Page, ProfileVO, SkillVO, TaskVO } from '@/api/types'
+import type { JobSearchItemVO, JobVO, MatchBatchVO, MatchEvidenceVO, MatchItemVO, Page, ProfileVO, SkillVO, TaskVO } from '@/api/types'
 import { useTask } from '@/composables/useTask'
+import { jobEducation, jobSalary } from '@/utils/job-search-fields'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 
@@ -37,9 +39,9 @@ function planApplication(job: JobVO | JobSearchItemVO) {
     companyName: job.companyName.slice(0, 100),
     jobTitle: job.title.slice(0, 100),
     cityCode: job.cityCode,
-    education: fromSearch ? job.educationText?.slice(0, 50) : null,
-    salaryText: fromSearch ? job.salaryText?.slice(0, 100) : null,
-    description: fromSearch ? null : job.jdText.slice(0, 1000),
+    education: jobEducation(job),
+    salaryText: jobSalary(job)?.slice(0, 100),
+    description: (fromSearch ? job.jdSummary : job.jdText)?.trim().slice(0, 1000),
     status: 'PLANNED',
   }
   applicationVisible.value = true
@@ -252,6 +254,14 @@ const fieldCorrectionPending = ref(false)
 const fieldCorrectionError = ref<unknown>(null)
 const correctionSkills = ref<SkillVO[]>([])
 const fieldCorrection = reactive({ cityCode: '' as string, skillCodes: [] as string[], sourceQuote: '', reason: '' })
+
+function optimizeForJob(job: JobVO) {
+  jobDrawerVisible.value = false
+  void router.push({
+    path: '/resume-optimization',
+    query: { tab: 'optimization', jobId: job.id },
+  })
+}
 
 async function openFieldCorrection() {
   if (!jobDetail.value || jobDetail.value.source.type !== 'USER_INPUT') return
@@ -480,6 +490,13 @@ function toggleJobSelection(jobId: string, selected: boolean) {
   }
 }
 
+function selectPersonalJobForMatch(job: JobVO) {
+  selectedJobIds.value = [job.id]
+  matchActionError.value = null
+  jobDrawerVisible.value = false
+  activeTab.value = 'matches'
+}
+
 const profile = ref<ProfileVO | null>(null)
 const profileLoading = ref(false)
 const profileError = ref<unknown>(null)
@@ -487,6 +504,8 @@ const includeUnknown = ref(true)
 const matchSubmitting = ref(false)
 const matchRetrying = ref(false)
 const matchActionError = ref<unknown>(null)
+const noMatchCandidates = computed(() => matchActionError.value instanceof ApiError
+  && matchActionError.value.key === 'NO_MATCH_CANDIDATES')
 const matchTaskId = ref<string | null>(null)
 const lastMatchBody = ref<MatchBody | null>(null)
 const matchTracker = useTask(matchTaskId, { onDone: handleMatchDone })
@@ -622,7 +641,23 @@ const matchGroups = computed(() => {
 function groupDescription(status: EligibilityStatus) {
   if (status === 'PASS') return '硬性资格已通过，可进入推荐；组内按有效匹配分降序排列。'
   if (status === 'UNKNOWN') return '部分资格缺少足够证据，需要人工确认，不等同于资格不符。'
-  return '仅用于展示资格核验结果，不进入推荐主列表，也不创建训练计划。'
+  return '可查看已选个人 JD 的资格核验和证据。'
+}
+
+function eligibilityFieldLabel(field: string) {
+  return ({ education: '学历', graduationYear: '毕业年份', experienceMonths: '工作经验', requiredSkillLevels: '技能要求' } as Record<string, string>)[field] || field
+}
+
+function qualificationValue(value: string | null) {
+  if (value == null) return '—'
+  const [start, end] = value.split('..')
+  return end && start === end ? start : value
+}
+
+function failedEligibilitySummary(item: MatchItemVO) {
+  return item.eligibility.checks.filter(check => check.result === 'FAIL').map(check =>
+    `${eligibilityFieldLabel(check.field)}（当前 ${qualificationValue(check.actual)}，JD 要求 ${qualificationValue(check.expected)}）`,
+  ).join('、')
 }
 
 function componentLabel(key: string) {
@@ -631,6 +666,43 @@ function componentLabel(key: string) {
 
 function evidenceLabel(status: string) {
   return ({ MISSING: '缺少证据', LIMITED: '证据有限', SUFFICIENT: '证据充分' } as Record<string, string>)[status] || status
+}
+
+const supportLevels: Record<string, { label: string; type: 'success' | 'warning' | 'info' }> = {
+  DIRECT: { label: '有依据', type: 'success' },
+  PARTIAL: { label: '部分支持', type: 'warning' },
+  MISSING: { label: '待补证', type: 'info' },
+}
+
+function supportMeta(level: string) {
+  return supportLevels[level] || supportLevels.MISSING
+}
+
+function evidenceSourceLabel(type?: string) {
+  return ({ LEARNING_ANSWER: '训练答题', INTERVIEW_ANSWER: '模拟面试', RESUME_CLAIM: '简历声明' } as Record<string, string>)[type || ''] || (type || '未知来源')
+}
+
+const evidenceDialogVisible = ref(false)
+const evidenceDialogSkill = ref('')
+const evidenceDialogLoading = ref(false)
+const evidenceDialogError = ref<unknown>(null)
+const evidenceDialogData = ref<MatchEvidenceVO | null>(null)
+
+async function openEvidence(item: MatchItemVO, skillCode: string) {
+  const matchId = selectedMatch.value?.id
+  if (!matchId) return
+  evidenceDialogVisible.value = true
+  evidenceDialogSkill.value = skillCode
+  evidenceDialogLoading.value = true
+  evidenceDialogError.value = null
+  evidenceDialogData.value = null
+  try {
+    evidenceDialogData.value = await jobApi.matchEvidence(matchId, item.id, skillCode)
+  } catch (reason) {
+    evidenceDialogError.value = reason
+  } finally {
+    evidenceDialogLoading.value = false
+  }
 }
 
 function goInterview(item: MatchItemVO) {
@@ -847,6 +919,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                 </div>
                 <div class="actions">
                   <el-button type="primary" plain @click="openJobById(job.id)">查看岗位与要求</el-button>
+                  <el-button v-if="job.source.type === 'USER_INPUT' && job.status === 'ACTIVE' && job.requirements" @click="selectPersonalJobForMatch(job)">用此 JD 匹配</el-button>
                   <el-button :loading="favoritePendingIds.includes(job.id)" @click="toggleFavorite(job)">
                     <el-icon><StarFilled v-if="job.isFavorite" /><Star v-else /></el-icon>
                     {{ job.isFavorite ? '取消收藏' : '收藏' }}
@@ -867,7 +940,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         <div class="panel__heading">
           <div>
             <h2>创建岗位匹配</h2>
-            <p class="muted">不勾选岗位时，由后端按契约选择最多50个可信候选；显式选择最多20个。</p>
+            <p class="muted">选择已分析的个人 JD，可在匹配结果中查看逐条证据。</p>
           </div>
           <el-tag v-if="profile" type="info">画像版本 v{{ profile.profileVersion }}</el-tag>
         </div>
@@ -878,7 +951,10 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               <template v-if="selectedJobIds.length">
                 <el-tag v-for="id in selectedJobIds" :key="id" closable @close="toggleJobSelection(id, false)">{{ knownJobs.get(id)?.title || id }}</el-tag>
               </template>
-              <span v-else class="muted">当前为空，将使用默认可信候选</span>
+              <template v-else>
+                <span class="muted">当前未选择目标岗位</span>
+                <el-button link type="primary" @click="activeTab = 'personal'">选择个人 JD</el-button>
+              </template>
             </div>
             <div class="match-setup__controls">
               <el-switch v-model="includeUnknown" active-text="包含资格待确认项" inactive-text="不包含待确认项" />
@@ -886,8 +962,9 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
             </div>
           </div>
         </AsyncState>
-        <el-alert v-if="matchActionError" class="task-alert" :title="errorMessage(matchActionError)" type="error" :closable="false" show-icon>
-          <el-button v-if="lastMatchBody && (!matchTask || canRetryTrackedTask(matchTask))" size="small" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
+        <el-alert v-if="matchActionError" class="task-alert" :title="errorMessage(matchActionError)" :type="noMatchCandidates ? 'info' : 'error'" :closable="false" show-icon>
+          <el-button v-if="noMatchCandidates" size="small" @click="activeTab = 'personal'">前往个人 JD</el-button>
+          <el-button v-else-if="lastMatchBody && (!matchTask || canRetryTrackedTask(matchTask))" size="small" :loading="matchRetrying" @click="retryMatch">按原参数重试</el-button>
         </el-alert>
         <TaskStatus v-if="matchTaskId" :task="matchTask" :loading="matchTracker.loading.value" :reasoning="matchTracker.reasoningText.value" :tracking-error="matchTrackingError" :refreshing="matchTracker.refreshing.value" @refresh="matchTracker.refresh">
           <template #actions>
@@ -942,7 +1019,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
               </el-descriptions></details>
               <el-alert v-if="selectedMatch.status === 'GENERATING'" title="批次仍在生成，请稍后刷新详情" type="warning" :closable="false" show-icon />
               <el-alert v-else-if="selectedMatch.status === 'FAILED'" title="该匹配批次生成失败，请从任务状态核对原因并重试" type="error" :closable="false" show-icon />
-              <el-empty v-else-if="!selectedMatch.items.length" description="本次没有可用于匹配的岗位，请先搜索或导入 JD">
+              <el-empty v-else-if="!selectedMatch.items.length" description="本批次没有符合当前资格筛选条件的岗位">
                 <el-button type="primary" @click="activeTab = 'search'">搜索岗位</el-button><el-button @click="activeTab = 'personal'">导入个人 JD</el-button>
               </el-empty>
               <div v-else class="match-groups">
@@ -965,8 +1042,10 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                           <strong>{{ rawValue(item.matchScore) }}</strong>
                           <span>匹配分</span>
                         </div>
-                        <el-tag v-else type="danger">仅资格核验</el-tag>
+                        <el-tag v-else type="danger">资格不符</el-tag>
                       </div>
+                      <el-alert v-if="item.eligibility.status === 'FAIL'" class="qualification-alert" type="warning" :closable="false" show-icon
+                        title="部分硬性资格未通过" :description="failedEligibilitySummary(item)" />
 
                       <template v-if="item.eligibility.status !== 'FAIL'">
                         <div class="detail-block">
@@ -985,14 +1064,38 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                           <ul v-if="item.reasons.length" class="reason-list"><li v-for="(reason, index) in item.reasons" :key="index">{{ reason }}</li></ul>
                           <p v-else class="muted">后端未提供额外理由</p>
                         </div>
+                      </template>
 
+                      <template v-if="item.eligibility.status !== 'FAIL' || item.source.type === 'USER_INPUT'">
                         <div class="detail-block">
                           <h5>能力差距与证据</h5>
+                          <div v-if="item.requirementEvidence?.length" class="requirement-list">
+                            <article v-for="(card, index) in item.requirementEvidence" :key="`${item.id}-evidence-${index}`" class="requirement-card" :data-level="card.supportLevel">
+                              <div class="requirement-card__head">
+                                <span class="requirement-card__index">要求 {{ index + 1 }}</span>
+                                <el-tag size="small" :type="supportMeta(card.supportLevel).type">{{ supportMeta(card.supportLevel).label }}</el-tag>
+                              </div>
+                              <p class="pre-wrap"><strong>JD 原句：</strong>{{ card.requirementQuote }}</p>
+                              <p class="pre-wrap"><strong>简历原句：</strong>{{ card.resumeQuote || '简历暂未找到对应依据' }}</p>
+                              <el-button v-if="card.skillCode" text type="primary" size="small" @click="openEvidence(item, card.skillCode)">查看 {{ card.skillCode }} 的评分依据</el-button>
+                            </article>
+                            <p v-if="item.requirementEvidenceCoverage?.jdTruncated" class="muted coverage-note">
+                              JD 共 {{ item.requirementEvidenceCoverage.jdCharacters }} 字，模型仅读取前 {{ item.requirementEvidenceCoverage.jdInputLimit }} 字，证据卡只覆盖前段要求。
+                            </p>
+                            <p v-else-if="item.requirementEvidenceCoverage && item.requirementEvidenceCoverage.returned >= item.requirementEvidenceCoverage.requirementLimit" class="muted coverage-note">
+                              已返回 {{ item.requirementEvidenceCoverage.returned }} 条要求，达到上限，可能未覆盖 JD 全部要求。
+                            </p>
+                          </div>
+                          <p v-else class="muted evidence-empty">若该岗位为本人的个人 JD，重新匹配后可查看岗位要求证据卡。</p>
+
                           <div v-if="item.gaps.length" class="gap-list">
                             <div v-for="gap in item.gaps" :key="gap.skillCode" class="gap-card">
                               <div class="gap-card__heading">
                                 <strong>{{ gap.skillCode }}</strong>
-                                <el-tag size="small" :type="gap.evidenceStatus === 'SUFFICIENT' ? 'success' : 'warning'">{{ evidenceLabel(gap.evidenceStatus) }}</el-tag>
+                                <div class="gap-card__actions">
+                                  <el-tag size="small" :type="gap.evidenceStatus === 'SUFFICIENT' ? 'success' : 'warning'">{{ evidenceLabel(gap.evidenceStatus) }}</el-tag>
+                                  <el-button text type="primary" size="small" @click="openEvidence(item, gap.skillCode)">查看评分依据</el-button>
+                                </div>
                               </div>
                               <el-descriptions :column="3" size="small">
                                 <el-descriptions-item label="当前分">{{ gap.currentScore === null ? '证据不足' : rawValue(gap.currentScore) }}</el-descriptions-item>
@@ -1010,12 +1113,12 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
                       <div class="detail-block">
                         <h5>完整资格核验 <span class="muted">规则 {{ item.eligibility.ruleVersion }}</span></h5>
                         <el-table :data="item.eligibility.checks" size="small" border>
-                          <el-table-column prop="field" label="核验字段" min-width="110" />
+                          <el-table-column label="核验字段" min-width="110"><template #default="scope">{{ eligibilityFieldLabel(scope.row.field) }}</template></el-table-column>
                           <el-table-column label="结果" width="90"><template #default="scope"><el-tag size="small" :type="statusTagType(scope.row.result)">{{ scope.row.result }}</el-tag></template></el-table-column>
                           <el-table-column label="实际值" min-width="110"><template #default="scope">{{ scope.row.actual ?? '—' }}</template></el-table-column>
-                          <el-table-column label="期望值" min-width="110"><template #default="scope">{{ scope.row.expected ?? '—' }}</template></el-table-column>
+                          <el-table-column label="期望值" min-width="110"><template #default="scope">{{ qualificationValue(scope.row.expected) }}</template></el-table-column>
                           <el-table-column prop="reason" label="核验理由" min-width="190" />
-                          <el-table-column label="sourceQuote" min-width="210"><template #default="scope"><span class="pre-wrap">{{ scope.row.sourceQuote || '无原文引述' }}</span></template></el-table-column>
+                          <el-table-column label="JD 原句" min-width="210"><template #default="scope"><span class="pre-wrap">{{ scope.row.sourceQuote || '无原文引述' }}</span></template></el-table-column>
                         </el-table>
                       </div>
 
@@ -1057,6 +1160,8 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
             <el-button :type="selectedJobIds.includes(jobDetail.id) ? 'success' : 'primary'" plain @click="toggleJobSelection(jobDetail.id, !selectedJobIds.includes(jobDetail.id))">{{ selectedJobIds.includes(jobDetail.id) ? '取消匹配选择' : '选择用于匹配' }}</el-button>
             <el-button :loading="favoritePendingIds.includes(jobDetail.id)" @click="toggleFavorite(jobDetail)">{{ jobDetail.isFavorite ? '取消收藏' : '收藏岗位' }}</el-button>
             <el-button v-if="jobDetail.source.type === 'USER_INPUT' && ['ACTIVE', 'FAILED'].includes(jobDetail.status)" type="primary" plain @click="openFieldCorrection">{{ jobDetail.status === 'FAILED' ? '人工补全 JD 字段' : '核对提取结果' }}</el-button>
+            <el-button v-if="jobDetail.source.type === 'USER_INPUT' && jobDetail.status === 'ACTIVE' && jobDetail.requirements" @click="selectPersonalJobForMatch(jobDetail)">用此 JD 匹配</el-button>
+            <el-button v-if="jobDetail.source.type === 'USER_INPUT' && jobDetail.status === 'ACTIVE' && jobDetail.requirements" type="primary" @click="optimizeForJob(jobDetail)">针对该岗位优化简历</el-button>
           </div>
           <el-alert v-if="fieldCorrectionError && !fieldCorrectionVisible" class="inline-alert" type="error" :title="errorMessage(fieldCorrectionError)" :closable="false" show-icon />
           <el-descriptions :column="2" border>
@@ -1164,6 +1269,27 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
         <el-button v-else type="primary" :loading="planSubmitting" :disabled="planTaskActive || planSourceStale || selectedMatch?.isStale" @click="submitPlan">提交生成计划</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="evidenceDialogVisible" :title="`${evidenceDialogSkill} 的评分依据`" width="720px" class="responsive-dialog">
+      <AsyncState
+        :loading="evidenceDialogLoading"
+        :error="evidenceDialogError"
+        :empty="!evidenceDialogData || !evidenceDialogData.evidence.length"
+        :empty-text="evidenceDialogData?.reason || '暂无可用评分样本'"
+      >
+        <div v-if="evidenceDialogData" class="evidence-samples">
+          <article v-for="sample in evidenceDialogData.evidence" :key="sample.evidenceId" class="evidence-sample">
+            <div class="evidence-sample__head">
+              <el-tag size="small" :type="sample.available ? 'success' : 'info'">{{ sample.available ? '有效样本' : '不可用' }}</el-tag>
+              <span class="muted">{{ evidenceSourceLabel(sample.sourceType) }} · {{ sample.scoredAt ? formatDate(sample.scoredAt) : '时间未知' }} · 单次评分 {{ rawValue(sample.score ?? null) }}</span>
+            </div>
+            <p class="pre-wrap"><strong>题目：</strong>{{ sample.question || '来源记录无法读取' }}</p>
+            <p class="pre-wrap"><strong>回答摘录：</strong>{{ sample.answerExcerpt || '来源记录无法读取' }}</p>
+            <p v-if="!sample.available" class="muted">{{ sample.reason }}</p>
+          </article>
+        </div>
+      </AsyncState>
+      <template #footer><el-button @click="evidenceDialogVisible = false">关闭</el-button></template>
+    </el-dialog>
     <ApplicationForm v-model:visible="applicationVisible" mode="create" :baseline="null" :plan="applicationPlan" />
   </div>
 </template>
@@ -1184,6 +1310,7 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .filter-control { width: 170px; }
 .filter-note { margin: 0; color: $ai-text-secondary; font-size: 13px; }
 .task-alert { margin: 16px 0; }
+.qualification-alert { margin-top: 12px; }
 .task-alert :deep(.el-alert__content) { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .reference-failures { display: grid; gap: 8px; margin-bottom: 16px; }
 .job-card { display: flex; gap: 12px; padding: 18px; border: 1px solid $ai-border; border-radius: $ai-radius; background: var(--ai-bg-card, #fff); transition: border-color .2s, box-shadow .2s; }
@@ -1214,6 +1341,21 @@ watch(() => queryValue(route.query.matchId), id => { if (id) void loadMatch(id, 
 .stale-alert { margin-bottom: 16px; border: 2px solid $ai-danger; }
 .batch-meta { margin-bottom: 16px; }
 .break-all { word-break: break-all; }
+.requirement-list { display: grid; gap: 10px; margin-bottom: 14px; }
+.requirement-card { padding: 12px 14px; border: 1px solid $ai-border; border-left: 3px solid var(--ai-text-tertiary, #9aa9bf); border-radius: 8px; background: $ai-bg-card; }
+.requirement-card[data-level='DIRECT'] { border-left-color: var(--ai-success, #1b956f); background: var(--ai-success-bg, #f2fbf7); }
+.requirement-card[data-level='PARTIAL'] { border-left-color: var(--ai-warning, #d89635); background: var(--ai-warning-bg, #fffaf0); }
+.requirement-card[data-level='MISSING'] { border-left-color: var(--ai-danger, #b54a4a); background: var(--ai-danger-bg, #fdf5f5); }
+.requirement-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.requirement-card__index { color: $ai-text-secondary; font-size: 12px; font-weight: 600; }
+.requirement-card p { margin: 4px 0; font-size: 13px; line-height: 1.6; }
+.coverage-note, .evidence-empty { margin: 0 0 12px; font-size: 12px; }
+.gap-card__actions { display: flex; align-items: center; gap: 6px; }
+.evidence-samples { display: grid; }
+.evidence-sample { padding: 12px 0; border-top: 1px solid $ai-border; }
+.evidence-sample:first-child { border-top: 0; }
+.evidence-sample__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.evidence-sample p { margin: 4px 0; font-size: 13px; line-height: 1.65; }
 .match-groups { display: grid; gap: 24px; }
 .match-group { padding-top: 6px; }
 .match-group__heading { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid $ai-border; }

@@ -82,9 +82,27 @@ class JobSearchResultHandlerTest {
                 new Ranked(2, "PASS", "核验已过时的高分岗位", 100, "UNKNOWN", "UNKNOWN", "INSUFFICIENT_EVIDENCE"),
                 new Ranked(3, "PASS", "较新的资格通过", 10, "OPEN", "ACTIVE_CONFIRMED", "ACTIVE_EVIDENCE_FOUND"),
                 new Ranked(4, "PASS", "较旧的资格通过", 10, "OPEN", "ACTIVE_CONFIRMED", "ACTIVE_EVIDENCE_FOUND"),
-                new Ranked(5, "UNKNOWN", "资格未知高分", 100, "OPEN", "ACTIVE_CONFIRMED", "ACTIVE_EVIDENCE_FOUND"),
-                new Ranked(6, "PASS", "原文显示已下线的相关岗位", 20, "CLOSED", "CLOSED", "OFFICIAL_CLOSED")),
+                new Ranked(5, "UNKNOWN", "资格未知高分", 100, "OPEN", "ACTIVE_CONFIRMED", "ACTIVE_EVIDENCE_FOUND")),
                 harness.ranked);
+    }
+
+    @Test
+    void discardsUnreachableLinksAndStaleDuplicatesBeforeRanking() {
+        Harness harness = new Harness(2);
+        Map<String, Object> active = harness.job("在招岗位", "110100", "BACHELOR", 0.4, "2026-11-07T00:00:00Z");
+        Map<String, Object> expired = harness.job("过期岗位", "110100", "BACHELOR", 1, "2026-11-07T00:00:00Z");
+        expired.put("verificationEvidence", "EXPIRED");
+        Map<String, Object> prior = harness.job("旧的搜索摘要", "110100", "BACHELOR", 1, "2026-11-07T00:00:00Z");
+        Map<String, Object> missing = new HashMap<>(prior);
+        missing.put("verificationStatus", "UNKNOWN");
+        missing.put("verificationReason", "HTTP_404");
+        missing.put("verificationHttpStatus", 404);
+        Map<String, Object> gone = harness.job("已删除的详情", "110100", "BACHELOR", 1, "2026-11-07T00:00:00Z");
+        gone.put("verificationHttpStatus", 410);
+        Map<String, Object> redirected = harness.job("跳回招聘主页", "110100", "BACHELOR", 1, "2026-11-07T00:00:00Z");
+        redirected.put("verificationHttpStatus", 302);
+        harness.run(List.of(active, prior, missing, expired, gone, redirected));
+        assertEquals(List.of("在招岗位"), harness.ranked.stream().map(Ranked::title).toList());
     }
 
     @Test

@@ -267,6 +267,11 @@ class SourcePosting:
         return self.verification_status == "CLOSED" or self.recruitment_status == "CLOSED"
 
     @property
+    def is_unavailable(self) -> bool:
+        status = self.verification_http_status or 0
+        return self.is_closed or status in {404, 410} or 300 <= status < 400
+
+    @property
     def is_confirmed_active(self) -> bool:
         return self.verification_status == "ACTIVE_CONFIRMED"
 
@@ -381,9 +386,9 @@ def parse_salary(text: str | None) -> tuple[int | None, int | None]:
     original = unicodedata.normalize("NFKC", str(text))
     if re.search(r"(面议|保密|不限|薪资面谈)", original):
         return None, None
-    if re.search(r"(元/天|元/日|天/元|日薪|时薪|元/时)", original):
+    if re.search(r"(/\s*(?:天|日|时|小时)|天/元|日薪|时薪)", original):
         return None, None
-    annual = bool(re.search(r"(年薪|/年|每年)", original))
+    annual = bool(re.search(r"(年薪|/\s*年|每年)", original))
     numbers = re.findall(r"(\d+(?:\.\d+)?)\s*([kK千万元]?)", original)
     if len(numbers) < 1:
         return None, None

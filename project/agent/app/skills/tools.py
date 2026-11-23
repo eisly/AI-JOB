@@ -68,7 +68,10 @@ def build_model_input(
             "jobId": payload.get("jobId"),
             "jobVersion": payload.get("jobVersion"),
             "jdText": str(payload.get("jdText", ""))[:30000],
+            "companyName": payload.get("companyName"),
+            "jobTitle": payload.get("jobTitle"),
             "diagnosis": payload.get("diagnosis"),
+            "mode": payload.get("mode") or "SECTIONS",
             "documentText": context.get("document_text", ""),
         }
     if operation == "JD_ANALYZE":
@@ -85,13 +88,17 @@ def build_model_input(
                     "title": item.get("title"),
                     "jdText": str(item.get("jdText", ""))[:4000],
                     "requirements": item.get("requirements") or {},
+                    "personalOwned": bool(item.get("personalOwned")),
                 }
             )
-        return {
+        model_input = {
             "profile": payload.get("profile") or {},
             "skillSnapshot": payload.get("skillSnapshot") or [],
             "candidates": candidates,
         }
+        if any(candidate["personalOwned"] for candidate in candidates):
+            model_input["resumeQuotes"] = payload.get("resumeQuotes") or []
+        return model_input
     if operation == "LEARNING_PLAN":
         resume = payload.get("resume") or None
         match_item = payload.get("matchItem") or None

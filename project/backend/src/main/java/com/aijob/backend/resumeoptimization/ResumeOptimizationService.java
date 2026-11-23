@@ -107,6 +107,14 @@ public class ResumeOptimizationService {
         String resumeVersionId = Data.uuid(body, "resumeVersionId", true);
         String jobId = Data.uuid(body, "jobId", true);
         String diagnosisId = Data.uuid(body, "diagnosisId", false);
+        String mode = Data.text(body, "mode", false, 16);
+        if (mode == null || mode.isBlank()) {
+            mode = "SECTIONS";
+        }
+        if (!Set.of("SECTIONS", "FULL_DOCUMENT").contains(mode)) {
+            throw BusinessException.validation("mode", "mode 仅支持 SECTIONS 或 FULL_DOCUMENT");
+        }
+        Integer expectedJobVersion = Data.integer(body, "jobVersion", null, 1, Integer.MAX_VALUE);
         Map<String, Object> version = resumes.version(resumeVersionId, userId);
         Map<String, Object> job = jobs.job(jobId, userId);
         if (version == null || job == null) {
@@ -120,6 +128,17 @@ public class ResumeOptimizationService {
         if (!"ACTIVE".equals(String.valueOf(job.get("status"))) || job.get("requirements_json") == null
                 || job.get("jd_text") == null || String.valueOf(job.get("jd_text")).isBlank()) {
             throw BusinessException.conflict("岗位必须可见且已完成分析", "INVALID_STATE");
+        }
+        int currentJobVersion = ((Number) job.get("job_version")).intValue();
+        if ("FULL_DOCUMENT".equals(mode)) {
+            if (!"PRIVATE".equals(String.valueOf(job.get("visibility")))
+                    || job.get("owner_user_id") == null
+                    || !userId.equals(String.valueOf(job.get("owner_user_id")))) {
+                throw BusinessException.conflict("完整简历模式仅支持本人导入的个人 JD", "INVALID_STATE");
+            }
+            if (expectedJobVersion != null && expectedJobVersion != currentJobVersion) {
+                throw BusinessException.conflict("岗位 JD 已更新，请刷新后重新生成", "INVALID_STATE");
+            }
         }
         Map<String, Object> diagnosisPayload = null;
         String text = String.valueOf(version.get("extracted_text"));
@@ -142,19 +161,25 @@ public class ResumeOptimizationService {
                 readOrderVerified = truthy(diagnosis.get("read_order_verified"));
             }
         }
-        int jobVersion = ((Number) job.get("job_version")).intValue();
         Map<String, Object> payload = new LinkedHashMap<>();
+        String companyName = job.get("company_name") == null ? null : String.valueOf(job.get("company_name"));
+        String jobTitle = job.get("title") == null ? null : String.valueOf(job.get("title"));
         payload.put("document", document(version, text, layoutVersion, readOrderVerified));
         payload.put("jobId", jobId);
-        payload.put("jobVersion", jobVersion);
+        payload.put("jobVersion", currentJobVersion);
         payload.put("jdText", job.get("jd_text"));
+        payload.put("companyName", companyName);
+        payload.put("jobTitle", jobTitle);
         payload.put("diagnosis", diagnosisPayload);
+        payload.put("mode", mode);
         String optimizationId = UUID.randomUUID().toString();
         String acceptedDiagnosisId = diagnosisId;
+        String snapshotMode = mode;
+        String snapshotText = text;
         return tasks.create(userId, "POST", route, key, body, "RESUME_OPTIMIZE", "RESUME_OPTIMIZATION", optimizationId,
-                Map.of("resumeVersionId", resumeVersionId, "jobVersion", jobVersion), payload,
+                Map.of("resumeVersionId", resumeVersionId, "jobVersion", currentJobVersion), payload,
                 taskId -> mapper.insertOptimization(optimizationId, userId, resumeVersionId, jobId,
-                        acceptedDiagnosisId, taskId));
+                        acceptedDiagnosisId, snapshotMode, currentJobVersion, companyName, jobTitle, snapshotText, taskId));
     }
 
     public Map<String, Object> optimization(String userId, String optimizationId) {
@@ -185,11 +210,15 @@ public class ResumeOptimizationService {
         if (row == null) {
             throw BusinessException.notFound();
         }
-        if (!"ACCEPTED".equals(String.valueOf(row.get("status"))) || row.get("accepted_sections_json") == null) {
+        if (!"ACCEPTED".equals(String.valueOf(row.get("status")))
+                || (row.get("accepted_sections_json") == null && row.get("full_document_json") == null)) {
             throw BusinessException.conflict("仅已采纳优化稿可以导出", "INVALID_STATE");
         }
         String normalized = format == null ? "" : format.strip().toUpperCase(Locale.ROOT);
-        List<Map<String, Object>> sections = json.convert(json.parse(String.valueOf(row.get("accepted_sections_json"))), List.class);
+        boolean fullDocument = row.get("full_document_json") != null;
+        List<Map<String, Object>> sections = fullDocument
+                ? fullDocumentSections(json.convert(json.parse(String.valueOf(row.get("full_document_json"))), Map.class))
+                : json.convert(json.parse(String.valueOf(row.get("accepted_sections_json"))), List.class);
         String title = row.get("title") == null ? "优化简历" : String.valueOf(row.get("title"));
         if ("PDF".equals(normalized)) {
             return new ExportContent(exports.pdf(title, sections), "resume-" + optimizationId + ".pdf", "application/pdf");
@@ -243,10 +272,70 @@ public class ResumeOptimizationService {
             }
             return optimizationVo(mapper.optimization(optimizationId, userId));
         }
-        if (mapper.accept(optimizationId, json.stringify(accepted)) == 0) {
+        FullDocument full = buildFullDocument(row, original, accepted);
+        if (mapper.accept(optimizationId, json.stringify(accepted),
+                full == null ? null : full.text(),
+                full == null ? null : json.stringify(Map.of("text", full.text(), "blocks", full.blocks()))) == 0) {
             throw BusinessException.conflict("优化稿状态已变化", "INVALID_STATE");
         }
         return optimizationVo(mapper.optimization(optimizationId, userId));
+    }
+
+    private FullDocument buildFullDocument(Map<String, Object> row, List<Map<String, Object>> originals,
+                                           List<Map<String, Object>> accepted) {
+        if (!"FULL_DOCUMENT".equals(String.valueOf(row.get("mode")))
+                || row.get("source_text") == null || String.valueOf(row.get("source_text")).isBlank()) {
+            return null;
+        }
+        String source = String.valueOf(row.get("source_text"));
+        Map<String, String> contents = new LinkedHashMap<>();
+        for (Map<String, Object> section : accepted) {
+            contents.put(String.valueOf(section.get("sectionKey")), String.valueOf(section.get("content")));
+        }
+        List<Span> candidates = new ArrayList<>();
+        for (Map<String, Object> section : originals) {
+            String key = String.valueOf(section.get("sectionKey"));
+            String content = contents.get(key);
+            if (content == null) {
+                continue;
+            }
+            String original = section.get("originalText") == null ? "" : String.valueOf(section.get("originalText"));
+            if (original.isBlank() || content.equals(original)) {
+                continue;
+            }
+            int index = source.indexOf(original);
+            if (index < 0 || source.indexOf(original, index + 1) >= 0) {
+                continue;
+            }
+            candidates.add(new Span(index, index + original.length(), content));
+        }
+        candidates.sort(java.util.Comparator.comparingInt(Span::start));
+        List<Map<String, Object>> blocks = new ArrayList<>();
+        StringBuilder text = new StringBuilder();
+        int cursor = 0;
+        for (Span span : candidates) {
+            if (span.start() < cursor) {
+                continue;
+            }
+            if (span.start() > cursor) {
+                String plain = source.substring(cursor, span.start());
+                blocks.add(Map.of("text", plain, "changed", false));
+                text.append(plain);
+            }
+            blocks.add(Map.of("text", span.content(), "changed", true));
+            text.append(span.content());
+            cursor = span.end();
+        }
+        if (cursor < source.length()) {
+            String tail = source.substring(cursor);
+            blocks.add(Map.of("text", tail, "changed", false));
+            text.append(tail);
+        }
+        if (blocks.isEmpty()) {
+            blocks.add(Map.of("text", source, "changed", false));
+            text.append(source);
+        }
+        return new FullDocument(text.toString(), blocks);
     }
 
     private Map<String, Object> document(Map<String, Object> version, String text, String layoutVersion,
@@ -484,6 +573,10 @@ public class ResumeOptimizationService {
         result.put("resumeVersionId", row.get("resume_version_id"));
         result.put("jobId", row.get("job_id"));
         result.put("diagnosisId", row.get("diagnosis_id"));
+        result.put("mode", row.get("mode") == null ? "SECTIONS" : row.get("mode"));
+        result.put("jobVersion", row.get("job_version"));
+        result.put("companyName", row.get("job_company_name"));
+        result.put("jobTitle", row.get("job_title"));
         result.put("status", row.get("status"));
         result.put("title", row.get("title"));
         List<Map<String, Object>> sections = row.get("sections_json") == null ? new ArrayList<>()
@@ -503,14 +596,61 @@ public class ResumeOptimizationService {
             }
         }
         result.put("sections", sections);
+        result.put("missingRequirements", row.get("missing_requirements_json") == null ? List.of()
+                : json.convert(json.parse(String.valueOf(row.get("missing_requirements_json"))), Object.class));
+        result.put("notes", row.get("notes_json") == null ? List.of()
+                : json.convert(json.parse(String.valueOf(row.get("notes_json"))), Object.class));
+        result.put("sourceText", row.get("source_text"));
+        Map<String, Object> fullDocument = null;
+        if (row.get("full_document_json") != null) {
+            fullDocument = json.convert(json.parse(String.valueOf(row.get("full_document_json"))), Map.class);
+        } else if ("READY".equals(String.valueOf(row.get("status")))) {
+            List<Map<String, Object>> suggested = new ArrayList<>();
+            for (Map<String, Object> section : sections) {
+                Map<String, Object> candidate = new LinkedHashMap<>();
+                candidate.put("sectionKey", section.get("sectionKey"));
+                candidate.put("title", section.get("title"));
+                candidate.put("content", section.get("suggestedText"));
+                suggested.add(candidate);
+            }
+            FullDocument preview = buildFullDocument(row, sections, suggested);
+            if (preview != null) {
+                fullDocument = Map.of("text", preview.text(), "blocks", preview.blocks());
+            }
+        }
+        result.put("fullDocument", fullDocument);
         result.put("acceptedAt", view.value(row.get("accepted_at")));
         result.put("createdAt", view.value(row.get("created_at")));
         return result;
+    }
+
+    private static List<Map<String, Object>> fullDocumentSections(Map<String, Object> document) {
+        List<Map<String, Object>> sections = new ArrayList<>();
+        Object rawBlocks = document.get("blocks");
+        if (!(rawBlocks instanceof List<?> blocks)) {
+            return sections;
+        }
+        for (Object raw : blocks) {
+            if (!(raw instanceof Map<?, ?> block) || block.get("text") == null) {
+                continue;
+            }
+            Map<String, Object> section = new LinkedHashMap<>();
+            section.put("title", "");
+            section.put("content", String.valueOf(block.get("text")));
+            sections.add(section);
+        }
+        return sections;
     }
 
     public record ExportContent(byte[] bytes, String fileName, String mediaType) {
     }
 
     private record TextSnapshot(String text, String layoutVersion, boolean readOrderVerified) {
+    }
+
+    private record FullDocument(String text, List<Map<String, Object>> blocks) {
+    }
+
+    private record Span(int start, int end, String content) {
     }
 }

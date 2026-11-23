@@ -10,19 +10,26 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import httpx
 
 from ..security import UnsafeUrlError, resolve_public_ipv4
-from ..text_extract import extract_listing_fields
 from ..verification import STATUS_CLOSED, STATUS_PROBABLE, STATUS_UNKNOWN
 
 MAX_DETAIL_BYTES = 512 * 1024
 CLOSED = re.compile(
-    r"(?:当前|该)?(?:职位|岗位)(?:已经?|已被)?(?:下线|下架|关闭|过期|暂停招聘|停止招聘)|"
-    r"停止招聘|(?:投递|招聘)(?:已)?截止(?![日期时])|\[(?:已结束|已过期|已截止)\]|no longer accepting applications|"
-    r"this job is no longer available|this position has been filled", re.I,
+    r"(?:职位|岗位)\s*(?:已经?|已被|现已|暂时|已暂时)?\s*"
+    r"(?:下线|下架|关闭|过期|失效|暂停招聘|停止招聘|停止招募|结束招聘|不存在|不再招聘)|"
+    r"(?:职位|岗位)\s*(?:已经?|现已)\s*(?:结束|招满|删除|暂停)(?!招聘后)|"
+    r"(?:投递|招聘|申请|报名|网申)\s*(?:已经?|现已)\s*(?:截止|结束|关闭)|"
+    r"(?:投递|招聘|申请|报名|网申)\s*截止(?!\s*(?:[日期时]|[:：]?\s*\d))|"
+    r"(?:已|暂时)\s*停止招聘|"
+    r"[\[【](?:已结束|已过期|已截止)[\]】]|no longer accepting applications|"
+    r"(?:this )?(?:job|position)(?: posting)? (?:is no longer available|has been filled|has expired|is closed)", re.I,
 )
 APPLY = re.compile(r"^(?:立即申请|申请职位|立即投递|投递简历|申请该职位|申请此职位|我要应聘|apply(?: now| for this job| for this position)?)$", re.I)
 APPLY_ROUTE = re.compile(r"(?:^|[/_.-])(?:apply|application|submitapplication)(?:$|[/_.-])", re.I)
 JOB_ID_KEYS = {"id", "jobid", "positionid", "postid", "requisitionid", "gh_jid"}
-DEADLINE = re.compile(r"(?:投递截止日期|截止日期|过期时间)[:： ]*(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})")
+DEADLINE = re.compile(
+    r"(?:(?:投递|招聘|申请|报名|网申)\s*截止(?:日期|时间)?|截止日期|过期时间)\s*[:：]?\s*"
+    r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})"
+)
 APPLICATION_PERIOD = re.compile(
     r"(?:投递时间|申请时间)\s*[:：]\s*20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?\s*[-~～至]\s*"
     r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})"
@@ -157,7 +164,7 @@ def read_detail_result(url: str, html: str, now: datetime) -> DetailResult:
     matched = structured_job(html, url)
     page_data = {"title": _html_title(html), "body": body, "fields": listing_fields(html, url),
                  "html": html, "job": matched}
-    if closed_text(body, now):
+    if closed_text(f"{page_data['title']} {body}", now):
         return _result(STATUS_CLOSED, "OFFICIAL_CLOSED", url, http_status=200,
                        page=page_data, detail="页面明确声明岗位下线或截止")
     jobs = []
@@ -229,7 +236,7 @@ async def fetch_detail(client, url: str, timeout: float, *, budget=None) -> Deta
             address = await resolve_public_ipv4(host)
             if budget and redirect_count:
                 if not budget.can_call():
-                    return _result(STATUS_UNKNOWN, "BUDGET_EXHAUSTED", original)
+                    return _result(STATUS_UNKNOWN, "TIMEOUT", original, detail="详情跳转核验预算已用完")
                 budget.record_api_call()
             # Pin the connection to the checked address; validate TLS against the original host.
             pinned = urlunsplit(destination._replace(netloc=address))

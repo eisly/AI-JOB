@@ -21,6 +21,20 @@ from app.skills.registry import (
 from app.skills.tools import build_model_input, validate_result_contract
 
 
+def test_job_match_model_input_limits_resume_quotes_to_personal_candidates():
+    confirmed = ["使用 Redis 缓存商品信息"]
+    body = {"resumeText": "完整简历正文", "resumeQuotes": confirmed, "candidates": [{"personalOwned": False}]}
+
+    public = build_model_input("JOB_MATCH", body, {})
+    assert "resumeText" not in public
+    assert "resumeQuotes" not in public
+
+    body["candidates"][0]["personalOwned"] = True
+    personal = build_model_input("JOB_MATCH", body, {})
+    assert "resumeText" not in personal
+    assert personal["resumeQuotes"] == confirmed
+
+
 @pytest.mark.parametrize("operation", ["INTERVIEW_TURN", "INTERVIEW_REPORT"])
 def test_interview_model_receives_question_skill_codes(operation):
     messages = [

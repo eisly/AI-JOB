@@ -18,12 +18,25 @@ CITY_LABEL = re.compile(
     r"(?:工作地点|工作城市|办公地点|职位地点|上班地点|职位地址|工作地址|上班地址|地点|base)\s*[:：]?\s*([\u4e00-\u9fff]{2,16})",
     re.IGNORECASE,
 )
-SALARY_PATTERN = re.compile(r"(\d{2,6}(?:\.\d+)?\s*[-~至]\s*\d{2,6}(?:\.\d+)?\s*(?:[kK]|千|万|元)?(?:\s*/\s*(?:月|年|天))?)")
+SALARY_AMOUNT = r"\d{1,6}(?:\.\d+)?"
+SALARY_UNIT = r"[kK千万]|元"
+SALARY_PERIOD = r"\s*/\s*(?:月|年|天|日|小时|时)"
+SALARY_PATTERN = re.compile(
+    rf"(?<![\dA-Za-z./-])(?:[¥￥]\s*)?"
+    rf"(?:{SALARY_AMOUNT}\s*(?:{SALARY_UNIT})?\s*[-–—~～至到]\s*)?"
+    rf"{SALARY_AMOUNT}(?:\s*(?:{SALARY_UNIT})(?:{SALARY_PERIOD})?|{SALARY_PERIOD})"
+    r"(?![\dA-Za-z\u4e00-\u9fff]|\s*/)"
+)
+SALARY_LABEL = re.compile(r"(薪资(?:待遇|范围)?|薪酬|工资|月薪|年薪|日薪|时薪)\s*[:：]\s*")
 SIZE_PATTERN = re.compile(r"(\d{2,5}\s*[-~至]\s*\d{2,5}\s*人|\d{2,5}\s*人以上|少于\s*\d{2,5}\s*人)")
 EXPERIENCE_PATTERN = re.compile(
     r"((?:\d{1,2}\s*[-~至]\s*\d{1,2}\s*年(?:经验)?)|(?:\d{1,2}\s*年(?:以上|及以上))|应届(?:毕业生)?|经验不限|无经验)"
 )
-EDUCATION_PATTERN = re.compile(r"([^\n。；;]{0,12}(?:本科|硕士|博士|大专|统招|学历不限)[^\n。；;]{0,12})")
+EDUCATION_PATTERN = re.compile(
+    r"学历不限|不限学历|(?:全日制\s*)?(?:统招\s*)?"
+    r"(?:高中|大专|专科|本科|硕士(?:研究生)?|博士(?:研究生)?|研究生)(?:\s*(?:及以上|以上|或以上))?"
+)
+EDUCATION_LABEL = re.compile(r"(?:最低学历|学历要求|学历)\s*[:：]\s*")
 DATE_PATTERN = re.compile(r"(20\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*日?)")
 
 
@@ -53,14 +66,24 @@ def extract_city(text: str) -> tuple[str | None, str | None]:
 
 
 def extract_salary(text: str) -> tuple[str | None, int | None, int | None]:
-    for match in SALARY_PATTERN.finditer(text):
-        snippet = " ".join(match.group(1).split())
-        low, high = parse_salary(snippet)
-        if not re.search(r"[kK千万元]|/\s*(?:月|年|天|时)", snippet):
-            continue
-        # 日薪/时薪仍保留原文；月薪换算字段可以为空。
-        return snippet[:200], low, high
-    return None, None, None
+    if text.strip() in {"面议", "薪资面议", "薪资面谈"}:
+        return text.strip(), None, None
+    for label in SALARY_LABEL.finditer(text):
+        if text.startswith(("面议", "面谈"), label.end()):
+            return "薪资" + text[label.end():label.end() + 2], None, None
+        match = SALARY_PATTERN.match(text, label.end())
+        if match:
+            snippet = " ".join(match.group().split())
+            if label[1] in {"年薪", "日薪", "时薪"} and "/" not in snippet:
+                snippet = " ".join(text[label.start():match.end()].split())
+            low, high = parse_salary(snippet)
+            return snippet, low, high
+    match = SALARY_PATTERN.search(text)
+    if not match:
+        return None, None, None
+    snippet = " ".join(match.group().split())
+    low, high = parse_salary(snippet)
+    return snippet, low, high
 
 
 def extract_size(text: str) -> tuple[str, str | None]:
@@ -80,10 +103,17 @@ def extract_experience(text: str) -> tuple[str | None, int | None]:
 
 
 def extract_education(text: str) -> tuple[str | None, str | None]:
-    match = EDUCATION_PATTERN.search(text)
+    for label in EDUCATION_LABEL.finditer(text):
+        match = EDUCATION_PATTERN.match(text, label.end())
+        if match:
+            break
+        if text.startswith("不限", label.end()):
+            return "学历不限", None
+    else:
+        match = EDUCATION_PATTERN.search(text)
     if not match:
         return None, None
-    snippet = " ".join(match.group(1).split())[:120]
+    snippet = " ".join(match.group().split())
     return snippet, education_from_text(snippet)
 
 
@@ -113,9 +143,8 @@ def extract_listing_fields(html: str) -> dict:
     salary_match = re.search(r'<span[^>]*class="[^"]*salary[^"]*"[^>]*>(.*?)</span>', html,
                              re.IGNORECASE | re.DOTALL)
     if salary_match:
-        salary = _html_text(salary_match.group(1))[:200]
+        salary, low, high = extract_salary(_html_text(salary_match.group(1)))
         if salary:
-            low, high = parse_salary(salary)
             result.update(salary_text=salary, salary_min_monthly_cents=low,
                           salary_max_monthly_cents=high)
     props_match = re.search(r'<div[^>]*class="[^"]*job-properties[^"]*"[^>]*>(.*?)</div>', html,

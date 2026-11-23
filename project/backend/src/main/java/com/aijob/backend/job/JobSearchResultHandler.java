@@ -198,18 +198,29 @@ public class JobSearchResultHandler implements TaskResultHandler {
             }
         }
         List<SearchCandidate> candidates = new ArrayList<>(unique.values());
+        int mergedCount = valid - candidates.size();
+        int closedCount = 0;
+        for (var iterator = candidates.iterator(); iterator.hasNext(); ) {
+            SearchCandidate candidate = iterator.next();
+            String unavailable = candidate.unavailableReason();
+            if (unavailable != null) {
+                iterator.remove();
+                dropped++;
+                rejected.merge(unavailable, 1, Integer::sum);
+                if ("CLOSED".equals(unavailable)) closedCount++;
+            }
+        }
         Map<String, Integer> qualification = new LinkedHashMap<>(Map.of("PASS", 0, "UNKNOWN", 0, "FAIL", 0));
         for (SearchCandidate candidate : candidates) {
             prepare(candidate, profile, facts, snapshots);
             qualification.merge(candidate.eligibilityStatus, 1, Integer::sum);
         }
         candidates.sort(Comparator
-                .comparingInt((SearchCandidate item) -> "CLOSED".equals(item.verificationStatus) ? 3
-                        : switch (item.eligibilityStatus) {
-                            case "PASS" -> 0;
-                            case "UNKNOWN" -> 1;
-                            default -> 2;
-                        })
+                .comparingInt((SearchCandidate item) -> switch (item.eligibilityStatus) {
+                    case "PASS" -> 0;
+                    case "UNKNOWN" -> 1;
+                    default -> 2;
+                })
                 .thenComparing(item -> item.warnings.contains("STALE_POSTING"))
                 .thenComparing(item -> item.matchScore, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparingInt(item -> -verificationRank(item.verificationStatus))
@@ -223,11 +234,9 @@ public class JobSearchResultHandler implements TaskResultHandler {
         int rank = 1;
         int multiSource = 0;
         int unknownSize = 0;
-        int possiblyExpired = 0;
         int confirmed = 0;
         int probable = 0;
         int unknownVerification = 0;
-        int closedCount = 0;
         for (SearchCandidate candidate : candidates) {
             if (candidate.aliases.size() > 1) {
                 multiSource++;
@@ -238,17 +247,13 @@ public class JobSearchResultHandler implements TaskResultHandler {
             switch (candidate.verificationStatus) {
                 case "ACTIVE_CONFIRMED" -> confirmed++;
                 case "ACTIVE_PROBABLE" -> probable++;
-                case "CLOSED" -> closedCount++;
                 default -> unknownVerification++;
-            }
-            if (candidate.warnings.contains("CLOSED_JOB")) {
-                possiblyExpired++;
             }
             persist(task.getUserId(), task.getResourceId(), candidate, rank++);
         }
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("rawCount", rawItems.size());
-        summary.put("validCount", valid);
+        summary.put("validCount", rawItems.size() - dropped);
         summary.put("uniqueCount", candidates.size());
         summary.put("droppedCount", dropped);
         summary.put("rejectedByReason", rejected);
@@ -257,10 +262,10 @@ public class JobSearchResultHandler implements TaskResultHandler {
         summary.put("truncatedCount", uniqueCount - candidates.size());
         summary.put("agentMetrics", root.get("metrics"));
         summary.put("agentDedupe", root.get("dedupe"));
-        summary.put("mergedCount", valid - uniqueCount);
+        summary.put("mergedCount", mergedCount);
         summary.put("multiSourceCount", multiSource);
         summary.put("unknownSizeCount", unknownSize);
-        summary.put("possiblyExpiredCount", possiblyExpired);
+        summary.put("possiblyExpiredCount", closedCount);
         summary.put("bySource", bySource);
         summary.put("searchProviders", providers);
         summary.put("verification", Map.of(
@@ -285,6 +290,11 @@ public class JobSearchResultHandler implements TaskResultHandler {
 
     private String resolveVerificationStatus(Map<String, Object> raw, String sourceKey, String evidence,
                                               LocalDateTime checkedAt, LocalDateTime now) {
+        String legacyEvidence = text(raw.get("recruitmentEvidence"));
+        if ("CLOSED".equals(raw.get("recruitmentStatus")) || (evidence != null && CLOSED_EVIDENCE.contains(evidence))
+                || (legacyEvidence != null && CLOSED_EVIDENCE.contains(legacyEvidence))) {
+            return "CLOSED";
+        }
         String status = text(raw.get("verificationStatus"));
         if (status == null || !VERIFICATION_STATUSES.contains(status)) {
             status = legacyVerificationStatus(raw, sourceKey, evidence, checkedAt, now);
@@ -302,9 +312,6 @@ public class JobSearchResultHandler implements TaskResultHandler {
 
     private String legacyVerificationStatus(Map<String, Object> raw, String sourceKey, String evidence,
                                              LocalDateTime checkedAt, LocalDateTime now) {
-        if ("CLOSED".equals(raw.get("recruitmentStatus")) || (evidence != null && CLOSED_EVIDENCE.contains(evidence))) {
-            return "CLOSED";
-        }
         boolean confirmed = "OPEN".equals(raw.get("recruitmentStatus"))
                 && activeEvidenceAllowed(sourceKey, evidence) && fresh(checkedAt, CONFIRMED_FRESHNESS, now);
         if (confirmed) {
@@ -333,7 +340,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
     private String defaultReason(String status, String evidence) {
         return switch (status) {
             case "ACTIVE_CONFIRMED", "ACTIVE_PROBABLE" -> "ACTIVE_EVIDENCE_FOUND";
-            case "CLOSED" -> CLOSED_EVIDENCE.contains(evidence) ? evidence : "OFFICIAL_CLOSED";
+            case "CLOSED" -> evidence != null && CLOSED_EVIDENCE.contains(evidence) ? evidence : "OFFICIAL_CLOSED";
             default -> "INSUFFICIENT_EVIDENCE";
         };
     }
@@ -1094,10 +1101,23 @@ public class JobSearchResultHandler implements TaskResultHandler {
         private Integer matchScore;
         private List<Map<String, Object>> components = new ArrayList<>();
 
+        private String unavailableReason() {
+            if ("CLOSED".equals(verificationStatus)) return "CLOSED";
+            if (verificationHttpStatus != null && (verificationHttpStatus == 404 || verificationHttpStatus == 410
+                    || (verificationHttpStatus >= 300 && verificationHttpStatus < 400))) {
+                return "DETAIL_UNAVAILABLE";
+            }
+            return null;
+        }
+
         private void merge(SearchCandidate other) {
             int currentPriority = priority(sourceType);
             int otherPriority = priority(other.sourceType);
-            boolean otherPrimary = otherPriority < currentPriority
+            String unavailable = unavailableReason();
+            String otherUnavailable = other.unavailableReason();
+            boolean otherPrimary = unavailable != null || otherUnavailable != null
+                    ? otherUnavailable != null && (unavailable == null || "CLOSED".equals(otherUnavailable))
+                    : otherPriority < currentPriority
                     || (otherPriority == currentPriority && other.jdText.length() > jdText.length());
             if (otherPrimary) {
                 SearchCandidate swapped = copy();
@@ -1177,7 +1197,7 @@ public class JobSearchResultHandler implements TaskResultHandler {
             if (publishedAt == null) publishedAt = other.publishedAt;
             if (updatedAt == null) updatedAt = other.updatedAt;
             if (fetchedAt == null) fetchedAt = other.fetchedAt;
-            if (!"OFFICIAL".equals(sourceType) && other.verificationStatus != null
+            if (unavailableReason() == null && !"OFFICIAL".equals(sourceType) && other.verificationStatus != null
                     && verificationRank(other.verificationStatus) > verificationRank(verificationStatus)) {
                 verificationStatus = other.verificationStatus;
                 verificationReason = other.verificationReason;

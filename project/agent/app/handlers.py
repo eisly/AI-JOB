@@ -106,6 +106,9 @@ from .schemas import (
     ResumeEvidenceFact,
     ResumeDiagnosePayload,
     ResumeOptimizePayload,
+    ResumeOptimizeRequirementGap,
+    ResumeOptimizeSection,
+    RequirementEvidenceItem,
     ResumeOcrPayload,
     ResumeParsePayload,
     Rubric,
@@ -748,7 +751,12 @@ class ResumeOptimizeHandler(BaseHandler):
         meta: dict[str, Any],
     ) -> AIResumeOptimizeResult:
         text = prepared["document_text"]
+        jd_text = ctx.payload.jd_text
+        full_document = ctx.payload.mode == "FULL_DOCUMENT"
+        if not output.sections and not full_document:
+            raise HandlerValidationError("逐段优化至少需要一条建议")
         section_keys: set[str] = set()
+        sections: list[ResumeOptimizeSection] = []
         for section in output.sections:
             if section.section_key in section_keys:
                 raise HandlerValidationError(f"sectionKey 必须唯一: {section.section_key}")
@@ -758,7 +766,23 @@ class ResumeOptimizeHandler(BaseHandler):
             for quote in section.source_quotes:
                 if not quote_in_text(quote, text):
                     raise HandlerValidationError(f"段落 {section.section_key} 的 sourceQuotes 必须来自简历授权原文")
-        return AIResumeOptimizeResult(title=output.title, sections=output.sections)
+            jd_quote = section.jd_quote.strip() if section.jd_quote else None
+            if jd_quote and not quote_in_text(jd_quote, jd_text):
+                jd_quote = None
+            reason = section.reason.strip() if section.reason else None
+            sections.append(section.model_copy(update={"jd_quote": jd_quote, "reason": reason or None}))
+        gaps: list[ResumeOptimizeRequirementGap] = []
+        for gap in output.missing_requirements:
+            requirement = gap.requirement.strip()
+            if not quote_in_text(requirement, jd_text):
+                continue
+            note = gap.note.strip() if gap.note else None
+            gaps.append(gap.model_copy(update={"requirement": requirement, "note": note or None}))
+        return AIResumeOptimizeResult(
+            title=output.title,
+            sections=sections,
+            missing_requirements=gaps,
+        )
 
 
 class JDAnalyzeHandler(BaseHandler):
@@ -903,6 +927,7 @@ class JobMatchHandler(BaseHandler):
             raise HandlerValidationError("items 必须与输入 candidates 一一对应，不得增加、遗漏或变更版本")
 
         snapshots = {item.skill_code: item for item in payload.skill_snapshot}
+        resume_quotes = set(payload.resume_quotes)
         result_items = []
         for candidate in payload.candidates:
             item = actual[(str(candidate.job_id), candidate.job_version)]
@@ -917,6 +942,24 @@ class JobMatchHandler(BaseHandler):
                 for code, text in item.gap_suggestions.items()
                 if text and text.strip()
             }
+            evidence: list[RequirementEvidenceItem] = []
+            if candidate.personal_owned:
+                for entry in item.requirement_evidence:
+                    if entry.requirement_quote not in candidate.jd_text[:4000]:
+                        continue
+                    quote = entry.resume_quote.strip() if entry.resume_quote else None
+                    if quote not in resume_quotes:
+                        quote = None
+                    level = entry.support_level if quote else "MISSING"
+                    skill_code = entry.skill_code if entry.skill_code in allowed_skills else None
+                    evidence.append(
+                        RequirementEvidenceItem(
+                            requirement_quote=entry.requirement_quote.strip(),
+                            skill_code=skill_code,
+                            support_level=level,
+                            resume_quote=quote,
+                        )
+                    )
             result_items.append(
                 AIMatchItem(
                     job_id=candidate.job_id,
@@ -925,6 +968,7 @@ class JobMatchHandler(BaseHandler):
                     semantic_version="semantic-v1",
                     reasons=dedupe(item.reasons, limit=5),
                     gaps=_build_gaps(candidate.requirements, snapshots, suggestions),
+                    requirement_evidence=evidence,
                 )
             )
         return AIMatchResult(items=result_items)

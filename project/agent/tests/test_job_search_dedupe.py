@@ -68,3 +68,16 @@ def test_ranking_prefers_confirmed_and_fresh() -> None:
     closed = posting(source_url="https://jobs.example.com/3", verification_status="CLOSED")
     assert ranking_score(confirmed, "AI 应用开发") > ranking_score(unknown, "AI 应用开发")
     assert ranking_score(unknown, "AI 应用开发") > ranking_score(closed, "AI 应用开发")
+
+
+def test_dedupe_keeps_available_source_and_does_not_reuse_stale_state_for_unavailable_url() -> None:
+    closed = posting(verification_status="CLOSED")
+    cached = posting(verification_status="ACTIVE_PROBABLE")
+    result, _ = dedupe_postings([closed, cached])
+    assert result[0].is_unavailable
+
+    alternate = posting(source_url="https://another.example.com/job/1", verification_status="UNKNOWN")
+    result, _ = dedupe_postings([closed, cached, alternate])
+    assert len(result) == 1
+    assert result[0].source_url == alternate.source_url
+    assert result[0].verification_status == "UNKNOWN"

@@ -18,14 +18,13 @@ from ..models import (
     SourcePosting,
     SourceResult,
     city_code_for,
-    education_from_text,
     infer_candidate_type,
     parse_company_size,
     parse_experience_months,
-    parse_salary,
 )
 from ..providers import ProviderResult, SearchHit, resolve_providers
 from ..relevance import compact as compact_text
+from ..text_extract import extract_education, extract_salary
 from ..verification import (
     STATUS_CLOSED,
     STATUS_PROBABLE,
@@ -344,7 +343,9 @@ class WebSearchSource(SourceAdapter):
 
         await asyncio.gather(*(prefetch(item) for item in fetch_targets))
         counts["pagesFetched"] = actual_fetches[0]
-        page_list = [(url, {**page, "pageIndex": index}) for index, (url, page) in enumerate(selected)]
+        detail_cache = context.extra.get("detail_cache", {})
+        page_list = [(url, {**page, "pageIndex": index, "detail": detail_cache.get(url)})
+                     for index, (url, page) in enumerate(selected)]
         batch_pages = max(1, int(getattr(settings, "job_search_web_batch_pages", PAGES_PER_BATCH)))
         batch_chars = max(1000, int(getattr(settings, "job_search_web_batch_chars", MAX_EXTRACT_BATCH_CHARS)))
         batches = _page_batches(page_list, max_pages=batch_pages, max_chars=batch_chars)
@@ -434,7 +435,7 @@ class WebSearchSource(SourceAdapter):
                         query in _page_queries(_page_for_url(batch, posting.source_url))
                         and (not spec.city_code or posting.city_code == spec.city_code)
                         and (not spec.candidate_type or posting.candidate_type == spec.candidate_type)
-                        and not posting.is_closed
+                        and not posting.is_unavailable
                         for posting in valid_batch
                     )
                     coverage.mark_analysis(
@@ -807,15 +808,16 @@ async def _fetch_detail_cached(context: SourceContext, url: str, timeout: float)
     result = await fetch_detail(context.client, url, timeout, budget=budget) if budget else await fetch_detail(context.client, url, timeout)
     page = result.page or {}
     html = page.get("html", "")
-    needs_render = result.http_status == 200 and (len(page.get("body", "")) < 100 or
-                   (not page.get("fields") and "<script" in html))
+    needs_render = result.status != STATUS_CLOSED and result.http_status == 200 and (
+        len(page.get("body", "")) < 100 or (not page.get("fields") and "<script" in html))
     if needs_render and context.extra.setdefault("render_state", {"count": 0})["count"] < 2 and (not budget or budget.can_call()):
         from .render import render_detail
         context.extra["render_state"]["count"] += 1
         semaphore = context.extra.setdefault("render_semaphore", asyncio.Semaphore(2))
         async with semaphore:
             rendered = await render_detail(context.client, url, min(6, budget.remaining_seconds() if budget else 6), budget=budget)
-        if rendered.page or not result.page:
+        if (rendered.page or not result.page) and not (
+                rendered.status == STATUS_UNKNOWN and result.status == STATUS_PROBABLE):
             if rendered.page:
                 rendered.page["renderUsed"] = True
             result = rendered
@@ -829,11 +831,12 @@ async def _verify_details(context: SourceContext, postings: list[SourcePosting],
     config = budget.config
     if not config.detail_verification:
         for posting in postings:
-            if posting.verification_status != STATUS_CLOSED:
+            if posting.verification_status == STATUS_PROBABLE:
                 snippet_only(posting.source_url).apply(posting)
         counts["detailChecks"] = 0
         return
-    targets = list(postings)
+    cache: dict[str, DetailResult] = context.extra.setdefault("detail_cache", {})
+    targets = [posting for posting in postings if not posting.is_closed and posting.source_url not in cache]
     remaining = budget.details_remaining()
     selected = targets[:remaining]
 
@@ -845,15 +848,7 @@ async def _verify_details(context: SourceContext, postings: list[SourcePosting],
 
     async def check(posting: SourcePosting) -> None:
         async with semaphore:
-            cache: dict[str, DetailResult] = context.extra.setdefault("detail_cache", {})
-            if posting.source_url in cache:
-                result = cache[posting.source_url]
-                _apply_detail(posting, result)
-                if result.page and result.page.get("body"):
-                    _enrich_from_page(posting, result.page)
-                return
             if not budget.can_call():
-                snippet_only(posting.source_url).apply(posting)
                 return
             budget.record_detail()
             budget.record_api_call()
@@ -932,12 +927,10 @@ CITY_LABEL = re.compile(
     r"(?:工作地点|工作城市|办公地点|职位地点|上班地点|职位地址|工作地址|上班地址|地点|base)\s*[:：]?\s*([\u4e00-\u9fff]{2,16})",
     re.IGNORECASE,
 )
-SALARY_PATTERN = re.compile(r"(\d{2,6}(?:\.\d+)?\s*[-~至]\s*\d{2,6}(?:\.\d+)?\s*(?:[kK]|千|万|元)?(?:\s*/\s*(?:月|年|天))?)")
 SIZE_PATTERN = re.compile(r"(\d{2,5}\s*[-~至]\s*\d{2,5}\s*人|\d{2,5}\s*人以上|少于\s*\d{2,5}\s*人)")
 EXPERIENCE_PATTERN = re.compile(
     r"((?:\d{1,2}\s*[-~至]\s*\d{1,2}\s*年(?:经验)?)|(?:\d{1,2}\s*年(?:以上|及以上))|应届(?:毕业生)?|经验不限|无经验)"
 )
-EDUCATION_PATTERN = re.compile(r"([^\n。；;]{0,12}(?:本科|硕士|博士|大专|统招|学历不限)[^\n。；;]{0,12})")
 DATE_PATTERN = re.compile(r"(20\d{2}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}\s*日?)")
 
 
@@ -983,17 +976,6 @@ def _in_body(value: str | None, body: str) -> bool:
     return bool(value and compact_text(value) and compact_text(value) in compact_text(body))
 
 
-def _find_salary_text(body: str) -> str | None:
-    for match in SALARY_PATTERN.finditer(body):
-        snippet = " ".join(match.group(1).split())
-        if re.match(r"20\d{2}", snippet):
-            continue
-        if not re.search(r"[kK千万元]|/\s*(?:月|年|天)", snippet):
-            continue
-        return snippet[:200]
-    return None
-
-
 def _find_size_text(body: str) -> str | None:
     match = re.search(r"(?:公司规模|企业规模|人数规模|团队规模)\s*[:：]?\s*" + SIZE_PATTERN.pattern, body)
     return " ".join(match.group(1).split())[:80] if match else None
@@ -1001,11 +983,6 @@ def _find_size_text(body: str) -> str | None:
 
 def _find_experience_text(body: str) -> str | None:
     match = EXPERIENCE_PATTERN.search(body)
-    return " ".join(match.group(1).split())[:120] if match else None
-
-
-def _find_education_text(body: str) -> str | None:
-    match = EDUCATION_PATTERN.search(body)
     return " ".join(match.group(1).split())[:120] if match else None
 
 
@@ -1067,10 +1044,10 @@ def _enrich_from_page(posting: SourcePosting, page: dict) -> None:
             posting.company_name = company
             warnings.append("COMPANY_FROM_DETAIL")
     if not posting.salary_text:
-        salary = _find_salary_text(body)
+        salary, low, high = extract_salary(body)
         if salary:
             posting.salary_text = salary
-            posting.salary_min_monthly_cents, posting.salary_max_monthly_cents = parse_salary(salary)
+            posting.salary_min_monthly_cents, posting.salary_max_monthly_cents = low, high
             warnings.append("SALARY_FROM_DETAIL")
     if not posting.company_size or posting.company_size == "SIZE_UNKNOWN":
         size_text = _find_size_text(body)
@@ -1087,10 +1064,10 @@ def _enrich_from_page(posting: SourcePosting, page: dict) -> None:
             posting.experience_months_min = parse_experience_months(experience)
             warnings.append("EXPERIENCE_FROM_DETAIL")
     if not posting.education_text:
-        education = _find_education_text(body)
+        education, minimum = extract_education(body)
         if education:
             posting.education_text = education
-            posting.education_min = education_from_text(education)
+            posting.education_min = minimum
             warnings.append("EDUCATION_FROM_DETAIL")
     if posting.published_at is None:
         published = _find_published_text(body)
@@ -1165,11 +1142,11 @@ def _to_posting(row: dict, url: str, page: dict) -> tuple[SourcePosting | None, 
             candidate_type, known = ("EXPERIENCED", True) if label[1] == "全职" else infer_candidate_type(label[1])
         elif "/society/" in path or "/social/" in path:
             candidate_type, known = "EXPERIENCED", True
-    salary = _normalize_quote(row.get("salaryText"), 200)
-    if not _in_body(salary, text):
-        salary = _find_salary_text(body)
+    salary_quote = _normalize_quote(row.get("salaryText"), 200)
+    salary, salary_min, salary_max = extract_salary(salary_quote or "") if _in_body(salary_quote, text) else (None, None, None)
+    if not salary:
+        salary, salary_min, salary_max = extract_salary(body)
         flags["salaryFromText"] = bool(salary)
-    salary_min, salary_max = parse_salary(salary)
 
     size_text = _normalize_quote(row.get("companySizeText"), 80)
     if not _in_body(size_text, text):
@@ -1188,11 +1165,11 @@ def _to_posting(row: dict, url: str, page: dict) -> tuple[SourcePosting | None, 
         candidate_type = None
         flags["missingType"] = True
 
-    education_text = _normalize_quote(row.get("educationText"), 120)
-    if not _in_body(education_text, text):
-        education_text = _find_education_text(body)
+    education_quote = _normalize_quote(row.get("educationText"), 120)
+    education_text, education_min = extract_education(education_quote or "") if _in_body(education_quote, text) else (None, None)
+    if not education_text:
+        education_text, education_min = extract_education(body)
         flags["educationFromText"] = bool(education_text)
-    education_min = education_from_text(education_text)
 
     published = _normalize_quote(row.get("publishedDate"), 40)
     if not _in_body(published, text):
@@ -1235,10 +1212,14 @@ def _to_posting(row: dict, url: str, page: dict) -> tuple[SourcePosting | None, 
         warnings=warnings,
     )
     _enrich_from_page(posting, page)
-    snippet_closed = closed_text(text.casefold(), fetched_at)
-    if snippet_closed:
+    detail = page.get("detail")
+    if detail and detail.status == STATUS_CLOSED:
+        _apply_detail(posting, detail)
+    elif closed_text(text, fetched_at):
         closed(url, "OFFICIAL_CLOSED", checked_at=fetched_at,
                detail="搜索结果摘要明确声明岗位已下线或截止").apply(posting)
+    elif detail:
+        _apply_detail(posting, detail)
     else:
         snippet_only(url, checked_at=fetched_at).apply(posting)
     return posting, None, flags

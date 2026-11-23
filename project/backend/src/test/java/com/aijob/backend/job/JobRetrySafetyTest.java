@@ -14,7 +14,7 @@ class JobRetrySafetyTest {
     void retryCannotOverwriteManuallyCorrectedJdWithOldSnapshot() {
         var mapper = mock(JobMapper.class);
         var json = new JsonService(JsonMapper.builder().build());
-        var handler = new JobResultHandler(mapper, null, json, null, null, null, null);
+        var handler = new JobResultHandler(mapper, null, json, null, null, null);
         var task = new AiTask();
         task.setOperation("JD_ANALYZE"); task.setResourceId("job"); task.setUserId("user");
         task.setInputVersionsJson("{\"jobVersion\":1}");

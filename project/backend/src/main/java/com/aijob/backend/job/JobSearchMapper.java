@@ -84,15 +84,30 @@ public interface JobSearchMapper {
     @Select("SELECT COUNT(*) FROM job_search WHERE user_id=#{userId}")
     long count(@Param("userId") String userId);
 
+    String AVAILABLE_SEARCH_ITEM = """
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.recruitmentStatus')), '') != 'CLOSED'
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.verificationStatus')), '') != 'CLOSED'
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.verificationEvidence')), '')
+                NOT IN ('OFFICIAL_CLOSED', 'EXPIRED')
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.recruitmentEvidence')), '')
+                NOT IN ('OFFICIAL_CLOSED', 'EXPIRED')
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.verificationHttpStatus')), '')
+                NOT IN ('404', '410')
+            AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(i.source_snapshot_json, '$.verificationHttpStatus')), '')
+                NOT REGEXP '^3[0-9]{2}$'
+            """;
+
     @Select("""
             <script>
             SELECT i.*,jv.title AS job_title,jv.company_name,jv.city_code AS job_city_code,
               jv.candidate_type AS job_candidate_type,jv.company_size AS job_company_size,
+              LEFT(jv.jd_text, 1000) AS jd_summary,
               jv.published_at,jv.fetched_at,jv.min_monthly_salary_cents,jv.max_monthly_salary_cents
             FROM job_match_item i
             JOIN job j ON j.id=i.job_id
             JOIN job_version jv ON jv.job_id=i.job_id AND jv.version_no=i.job_version
             WHERE i.batch_id=#{searchId}
+            """ + AVAILABLE_SEARCH_ITEM + """
             <if test="keyword != null and keyword != ''">
               AND (jv.title LIKE CONCAT('%',#{keyword},'%') OR jv.company_name LIKE CONCAT('%',#{keyword},'%'))
             </if>
@@ -123,6 +138,7 @@ public interface JobSearchMapper {
             SELECT COUNT(*) FROM job_match_item i
             JOIN job_version jv ON jv.job_id=i.job_id AND jv.version_no=i.job_version
             WHERE i.batch_id=#{searchId}
+            """ + AVAILABLE_SEARCH_ITEM + """
             <if test="keyword != null and keyword != ''">
               AND (jv.title LIKE CONCAT('%',#{keyword},'%') OR jv.company_name LIKE CONCAT('%',#{keyword},'%'))
             </if>

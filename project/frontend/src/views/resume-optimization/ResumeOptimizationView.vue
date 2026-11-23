@@ -13,8 +13,9 @@ import { useTask } from '@/composables/useTask'
 import AsyncState from '@/components/AsyncState.vue'
 import TaskStatus from '@/components/TaskStatus.vue'
 import ResumeDiagnosticReport from './ResumeDiagnosticReport.vue'
+import ResumePaperPreview from './ResumePaperPreview.vue'
 import { addReference } from '@/utils/references'
-import { commonStatusLabels, errorMessage, formatDate } from '@/utils/format'
+import { candidateTypeLabels, cityLabels, commonStatusLabels, errorMessage, formatDate } from '@/utils/format'
 
 interface DraftSection {
   sectionKey: string
@@ -26,7 +27,11 @@ interface OptimizationInput {
   resumeVersionId: string
   jobId?: string
   diagnosisId?: string
+  mode?: 'SECTIONS' | 'FULL_DOCUMENT'
+  jobVersion?: number
 }
+
+type ReviewDecision = 'pending' | 'adopted' | 'original' | 'edited'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,6 +79,11 @@ const optimizationDetailError = ref<unknown>(null)
 const optimizeSubmitting = ref(false)
 const optimizeError = ref<unknown>(null)
 const draftSections = ref<DraftSection[]>([])
+const reviewDecisions = ref<Record<string, ReviewDecision>>({})
+const activeSectionKey = ref('')
+const editOpen = ref(false)
+const editValue = ref('')
+const fullPreviewOpen = ref(false)
 const accepting = ref(false)
 const acceptError = ref<unknown>(null)
 const conflictMessage = ref('')
@@ -114,13 +124,83 @@ const analyzedJobs = computed(() => jobs.value.filter(item => item.status === 'A
 const selectedJob = computed(() => jobs.value.find(item => item.id === selectedJobId.value) || null)
 const canLinkDiagnosis = computed(() => !!currentDiagnosis.value && currentDiagnosis.value.status === 'READY' && currentDiagnosis.value.resumeVersionId === selectedResumeVersionId.value)
 const taskRunning = computed(() => !!task.value && ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED'].includes(task.value.status))
+const currentSections = computed(() => currentOptimization.value?.sections || [])
+const reviewSections = computed(() => currentSections.value.filter(hasRewrite))
+const isFullDocument = computed(() => currentOptimization.value?.mode === 'FULL_DOCUMENT')
+const previewSourceText = computed(() => currentOptimization.value?.sourceText || '')
+const activeSection = computed(() => reviewSections.value.find(section => section.sectionKey === activeSectionKey.value) || null)
+const activeDraft = computed(() => draftSections.value.find(section => section.sectionKey === activeSectionKey.value))
+const displayedSuggestion = computed(() => {
+  const section = activeSection.value
+  if (!section) return ''
+  return sectionDecision(section.sectionKey) === 'edited' ? activeDraft.value?.content ?? section.suggestedText : section.suggestedText
+})
+const reviewedCount = computed(() =>
+  reviewSections.value.filter(section => sectionDecision(section.sectionKey) !== 'pending').length,
+)
+const targetCompany = computed(() => currentOptimization.value?.companyName || selectedJob.value?.companyName || '')
+const targetTitle = computed(() => currentOptimization.value?.jobTitle || selectedJob.value?.title || '')
+const missingRequirements = computed(() => currentOptimization.value?.missingRequirements || [])
+const reviewNotes = computed(() => currentOptimization.value?.notes || [])
+const targetJobInfo = computed(() => {
+  const job = selectedJob.value
+  if (!job) return ''
+  const city = cityLabels[job.cityCode || ''] || job.cityCode || '城市未明确'
+  const type = candidateTypeLabels[job.candidateType] || job.candidateType || '类型未明确'
+  return `${job.companyName} · ${city} · ${type}`
+})
 const optimizationDirty = computed(() => {
   if (!currentOptimization.value) return false
-  return currentOptimization.value.sections.some((section, index) => (draftSections.value[index]?.content ?? section.content ?? section.suggestedText) !== (section.content ?? section.suggestedText))
+  return currentOptimization.value.sections.some((section, index) =>
+    sectionContent(section, index) !== sectionBaseline(section))
 })
 const canEditOptimization = computed(() => !!currentOptimization.value && ['READY', 'ACCEPTED'].includes(currentOptimization.value.status))
 const canExport = computed(() => currentOptimization.value?.status === 'ACCEPTED'
   && currentOptimization.value.resumeVersionId === selectedResumeVersionId.value && !optimizationDirty.value && !exporting.value)
+
+function hasRewrite(section: { suggestedText: string; originalText: string }) {
+  const normalize = (text: string) => text.replace(/\r\n?/g, '\n').trim()
+  const suggestion = normalize(section.suggestedText)
+  return !!suggestion && suggestion !== normalize(section.originalText)
+}
+
+function sectionBaseline(section: { content?: string; suggestedText: string; originalText: string }) {
+  return section.content ?? (isFullDocument.value || !hasRewrite(section) ? section.originalText : section.suggestedText)
+}
+
+function sectionContent(section: { content?: string; suggestedText: string; originalText: string }, index: number) {
+  const draft = draftSections.value[index]
+  return draft ? draft.content : sectionBaseline(section)
+}
+
+const previewBlocks = computed<{ text: string; changed: boolean }[]>(() => {
+  const source = previewSourceText.value
+  const sections = currentSections.value
+  if (!source) return []
+  if (!sections.length) return [{ text: source, changed: false }]
+  const spans: { start: number; end: number; content: string }[] = []
+  sections.forEach((section, index) => {
+    const content = sectionContent(section, index)
+    if (!section.originalText || content === section.originalText) return
+    const start = source.indexOf(section.originalText)
+    if (start < 0 || source.indexOf(section.originalText, start + 1) >= 0) return
+    const end = start + section.originalText.length
+    if (spans.some(span => start < span.end && span.start < end)) return
+    spans.push({ start, end, content })
+  })
+  spans.sort((left, right) => left.start - right.start)
+  const blocks: { text: string; changed: boolean }[] = []
+  let cursor = 0
+  for (const span of spans) {
+    if (span.start < cursor) continue
+    if (span.start > cursor) blocks.push({ text: source.slice(cursor, span.start), changed: false })
+    blocks.push({ text: span.content, changed: true })
+    cursor = span.end
+  }
+  if (cursor < source.length) blocks.push({ text: source.slice(cursor), changed: false })
+  if (!blocks.length) blocks.push({ text: source, changed: false })
+  return blocks
+})
 
 const { task, deltaText, reasoningText, error: taskError, loading: taskLoading, refreshing: taskRefreshing, refresh: refreshTask, restart: restartTask } = useTask(activeTaskId, {
   onDone: async currentTask => {
@@ -152,6 +232,16 @@ function queryValue(value: unknown) {
 
 function statusLabel(status?: string) {
   return status ? commonStatusLabels[status] || status : '未知'
+}
+
+function decisionLabel(decision: ReviewDecision) {
+  const labels: Record<ReviewDecision, string> = {
+    pending: '待核对',
+    adopted: '已采纳',
+    original: '已保留原文',
+    edited: '已编辑',
+  }
+  return labels[decision]
 }
 
 function statusTagType(status?: string): 'primary' | 'success' | 'info' | 'warning' | 'danger' {
@@ -295,7 +385,7 @@ async function startDiagnosis() {
   }
 }
 
-async function submitOptimization(input: Required<Pick<OptimizationInput, 'resumeVersionId' | 'jobId'>> & { diagnosisId?: string }) {
+async function submitOptimization(input: OptimizationInput & { resumeVersionId: string; jobId: string }) {
   const submitted = await optimizationApi.create(input)
   await bindTask(submitted.id, 'optimization', input)
   await loadOptimizations()
@@ -313,7 +403,13 @@ async function startOptimization() {
     if (version.status !== 'CONFIRMED') throw new Error('只有已确认的简历版本才能发起定向优化')
     if (job.status !== 'ACTIVE' || !job.requirements) throw new Error('请选择可见且已完成分析的岗位')
     const diagnosisId = linkDiagnosis.value && canLinkDiagnosis.value ? currentDiagnosis.value?.id : undefined
-    await submitOptimization({ resumeVersionId, jobId, ...(diagnosisId ? { diagnosisId } : {}) })
+    const personal = job.source.type === 'USER_INPUT'
+    await submitOptimization({
+      resumeVersionId,
+      jobId,
+      ...(diagnosisId ? { diagnosisId } : {}),
+      ...(personal ? { mode: 'FULL_DOCUMENT' as const, jobVersion: job.jobVersion } : {}),
+    })
   } catch (reason) {
     optimizeError.value = reason
   } finally {
@@ -437,6 +533,7 @@ async function loadOptimizations() {
 
 function applyOptimization(detail: ResumeOptimizationVO, preserveDraft = false) {
   const previous = draftSections.value
+  const previousDecisions = reviewDecisions.value
   currentOptimization.value = detail
   selectedOptimizationId.value = detail.id
   selectedResumeVersionId.value = detail.resumeVersionId
@@ -444,11 +541,31 @@ function applyOptimization(detail: ResumeOptimizationVO, preserveDraft = false) 
   baselineAcceptedAt.value = detail.acceptedAt
   acceptError.value = null
   exportError.value = null
-  draftSections.value = detail.sections.map((section, index) => {
-    if (preserveDraft && previous[index]?.sectionKey === section.sectionKey) return { ...previous[index], title: section.title }
+  const fullDocument = detail.mode === 'FULL_DOCUMENT'
+  draftSections.value = detail.sections.map(section => {
     const existing = preserveDraft ? previous.find(item => item.sectionKey === section.sectionKey) : null
-    return { sectionKey: section.sectionKey, title: section.title, content: existing?.content ?? section.content ?? section.suggestedText }
+    return { sectionKey: section.sectionKey, title: section.title, content: existing?.content ?? sectionBaseline(section) }
   })
+  const decisions: Record<string, ReviewDecision> = {}
+  detail.sections.forEach(section => {
+    if (preserveDraft && previousDecisions[section.sectionKey]) {
+      decisions[section.sectionKey] = previousDecisions[section.sectionKey]
+    } else if (section.content == null) {
+      decisions[section.sectionKey] = hasRewrite(section) ? (fullDocument ? 'pending' : 'adopted') : 'original'
+    } else if (section.content === section.originalText) {
+      decisions[section.sectionKey] = 'original'
+    } else if (section.content === section.suggestedText) {
+      decisions[section.sectionKey] = 'adopted'
+    } else {
+      decisions[section.sectionKey] = 'edited'
+    }
+  })
+  reviewDecisions.value = decisions
+  if (!reviewSections.value.some(section => section.sectionKey === activeSectionKey.value)) {
+    activeSectionKey.value = reviewSections.value[0]?.sectionKey || ''
+  }
+  editOpen.value = false
+  fullPreviewOpen.value = false
   syncQuery({ optimizationId: detail.id, resumeVersionId: detail.resumeVersionId, jobId: detail.jobId })
 }
 
@@ -477,16 +594,56 @@ async function loadOptimization(optimizationId: string, options: { preserveDraft
   }
 }
 
+function selectSection(sectionKey: string) {
+  activeSectionKey.value = sectionKey
+  editOpen.value = false
+}
+
+function sectionDecision(sectionKey: string): ReviewDecision {
+  return reviewDecisions.value[sectionKey] || 'pending'
+}
+
+function decideSection(decision: Exclude<ReviewDecision, 'pending'>, content?: string) {
+  const section = activeSection.value
+  const draft = activeDraft.value
+  if (!section || !draft || !canEditOptimization.value) return
+  const next = content ?? (decision === 'adopted' ? section.suggestedText : section.originalText)
+  draft.content = next
+  reviewDecisions.value = { ...reviewDecisions.value, [section.sectionKey]: decision }
+  editOpen.value = false
+}
+
+function openSectionEditor() {
+  if (!activeSection.value || !canEditOptimization.value) return
+  editValue.value = displayedSuggestion.value
+  editOpen.value = true
+}
+
+function saveSectionEdit() {
+  const value = editValue.value.trim()
+  if (!value) return
+  decideSection('edited', value)
+}
+
 function acceptSection(index: number) {
   const section = currentOptimization.value?.sections[index]
   const draft = draftSections.value[index]
-  if (section && draft && canEditOptimization.value) draft.content = section.suggestedText
+  if (!section || !draft || !canEditOptimization.value) return
+  draft.content = section.suggestedText
+  reviewDecisions.value = { ...reviewDecisions.value, [section.sectionKey]: 'adopted' }
 }
 
 function fillAllSuggestions() {
-  if (!currentOptimization.value || !canEditOptimization.value) return
-  draftSections.value = currentOptimization.value.sections.map(section => ({ sectionKey: section.sectionKey, title: section.title, content: section.suggestedText }))
-  ElMessage.success('已将全部建议填入最终文本，请继续核对')
+  if (!canEditOptimization.value || !reviewSections.value.length) return
+  const decisions = { ...reviewDecisions.value }
+  currentSections.value.forEach((section, index) => {
+    const draft = draftSections.value[index]
+    if (!draft || !hasRewrite(section)) return
+    draft.content = section.suggestedText
+    decisions[section.sectionKey] = 'adopted'
+  })
+  reviewDecisions.value = decisions
+  ElMessage.success('已将全部建议填入，请继续核对')
 }
 
 async function acceptAllAndSubmit() {
@@ -500,7 +657,11 @@ async function submitAcceptance() {
   if (!optimization || !canEditOptimization.value || accepting.value) return
   if (optimization.status === 'ACCEPTED' && !optimizationDirty.value) return
   try {
-    await ElMessageBox.confirm('AI 建议不代表真实经历。请确认已逐段核对最终文本，且没有写入未经本人确认的事实。', '提交最终采纳文本', { type: 'warning', confirmButtonText: '已核对并提交', cancelButtonText: '继续编辑' })
+    const pending = reviewSections.value.filter(section => sectionDecision(section.sectionKey) === 'pending').length
+    const prompt = pending
+      ? `AI 建议不代表真实经历。还有 ${pending} 条建议待核对，确认时会保留这些段落的原文。`
+      : 'AI 建议不代表真实经历。将把当前核对结果保存为该岗位的定向简历。'
+    await ElMessageBox.confirm(prompt, '确认定向稿', { type: 'warning', confirmButtonText: '确认稿件', cancelButtonText: '继续核对' })
   } catch {
     return
   }
@@ -508,11 +669,17 @@ async function submitAcceptance() {
   acceptError.value = null
   conflictMessage.value = ''
   const submittedBase = baselineAcceptedAt.value
-  const sections = optimization.sections.map((section, index) => ({
-    sectionKey: section.sectionKey,
-    title: section.title,
-    content: draftSections.value[index]?.content ?? section.content ?? section.suggestedText,
-  }))
+  const sections = optimization.sections.map((section, index) => {
+    const decision = sectionDecision(section.sectionKey)
+    const content = decision === 'pending'
+      ? section.originalText
+      : (draftSections.value[index]?.content || section.originalText)
+    return {
+      sectionKey: section.sectionKey,
+      title: section.title,
+      content,
+    }
+  })
   try {
     const accepted = await optimizationApi.accept(optimization.id, sections)
     applyOptimization(accepted)
@@ -801,24 +968,17 @@ onMounted(() => {
 
       <section class="panel optimization-detail">
         <div class="panel__heading">
-          <div><h2>优化稿核对与预览</h2><p v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ formatDate(currentOptimization.createdAt) }}</p><details v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId"><summary>优化稿记录编号</summary>{{ currentOptimization.id }}</details></div>
+          <div><h2>定向稿核对与预览</h2><p v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId" class="muted optimization-subtitle">{{ currentOptimization.title }} · {{ formatDate(currentOptimization.createdAt) }}</p><details v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId"><summary>优化稿记录编号</summary>{{ currentOptimization.id }}</details></div>
           <div class="actions">
             <el-button v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId" :loading="optimizationDetailLoading" @click="refreshCurrentOptimization">刷新详情</el-button>
             <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">导出 PDF</el-button>
             <el-button :disabled="!canExport" :loading="exporting === 'DOCX'" @click="exportOptimization('DOCX')">导出 DOCX</el-button>
           </div>
         </div>
-        <el-alert v-if="currentOptimization?.status === 'ACCEPTED' && optimizationDirty" class="inline-alert" type="warning" title="当前编辑尚未提交，导出按钮已禁用；请先采纳保存最终文本。" :closable="false" show-icon />
+        <el-alert v-if="currentOptimization?.status === 'ACCEPTED' && optimizationDirty" class="inline-alert" type="warning" title="当前编辑尚未提交，导出按钮已禁用；请先确认定向稿保存最终文本。" :closable="false" show-icon />
         <el-alert v-if="exportError" class="inline-alert" type="error" :title="`导出失败：${errorMessage(exportError)}`" :description="exportErrorHint" :closable="false" show-icon />
         <AsyncState :loading="optimizationDetailLoading" :error="optimizationDetailError" :empty="!currentOptimization || currentOptimization.resumeVersionId !== selectedResumeVersionId" empty-text="选择历史优化稿或发起定向优化" @retry="loadOptimization(selectedOptimizationId)">
           <template v-if="currentOptimization && currentOptimization.resumeVersionId === selectedResumeVersionId">
-            <div class="detail-summary">
-              <div>
-                <el-tag :type="statusTagType(currentOptimization.status)">{{ statusLabel(currentOptimization.status) }}</el-tag>
-                <span class="muted detail-dates">创建于 {{ formatDate(currentOptimization.createdAt) }}<template v-if="currentOptimization.acceptedAt"> · 采纳于 {{ formatDate(currentOptimization.acceptedAt) }}</template></span>
-              </div>
-              <span class="muted">岗位：{{ selectedJob ? jobLabel(selectedJob) : currentOptimization.jobId }}</span>
-            </div>
             <WaitStatus v-if="currentOptimization.status === 'GENERATING' && !taskRunning && !taskLoading && !taskError" title="正在生成优化稿" />
             <el-alert v-if="currentOptimization.status === 'FAILED'" class="inline-alert" type="error" title="优化稿生成失败，请使用原简历版本和岗位重新发起。" :closable="false" show-icon />
             <el-alert v-if="conflictMessage" class="inline-alert" type="error" title="优化稿版本冲突" :description="conflictMessage" :closable="false" show-icon>
@@ -829,52 +989,143 @@ onMounted(() => {
                 </div>
               </template>
             </el-alert>
-            <el-alert v-if="acceptError" class="inline-alert" type="error" :title="`采纳失败：${errorMessage(acceptError)}`" :closable="false" show-icon />
+            <el-alert v-if="acceptError" class="inline-alert" type="error" :title="`确认失败：${errorMessage(acceptError)}`" :closable="false" show-icon />
 
-            <template v-if="currentOptimization.sections.length">
-              <div class="review-toolbar">
-                <el-alert title="左侧为原文，右侧为 AI 建议；最终文本必须由本人核对。接受单段只会复制建议，提交采纳后才保存。" type="info" :closable="false" show-icon />
-                <div class="actions" v-if="canEditOptimization">
-                  <el-button @click="fillAllSuggestions">将全部建议填入最终文本</el-button>
-                  <el-button type="primary" :loading="accepting" @click="acceptAllAndSubmit">全部采纳并提交</el-button>
-                  <el-button type="success" :disabled="currentOptimization.status === 'ACCEPTED' && !optimizationDirty" :loading="accepting" @click="submitAcceptance">提交最终文本</el-button>
-                </div>
-              </div>
-              <el-tabs type="border-card" class="review-tabs">
-                <el-tab-pane label="逐段对比与编辑">
-                  <div class="section-list">
-                    <article v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey" class="section-card">
-                      <div class="section-card__heading"><h3>{{ section.title }}</h3><el-button v-if="canEditOptimization" size="small" @click="acceptSection(index)">接受此段建议</el-button></div>
-                      <div class="section-compare">
-                        <div class="text-column original"><h4>原文 originalText</h4><p class="pre-wrap">{{ section.originalText || '无原文' }}</p></div>
-                        <div class="text-column suggested"><h4>AI 建议 suggestedText · 非事实，待核对</h4><p class="pre-wrap">{{ section.suggestedText || '无建议文本' }}</p></div>
-                      </div>
-                      <div class="source-quotes">
-                        <strong>sourceQuotes 原文依据</strong>
-                        <blockquote v-for="quote in section.sourceQuotes" :key="quote" class="pre-wrap">{{ quote }}</blockquote>
-                        <p v-if="!section.sourceQuotes.length" class="muted">未返回原文引用，请谨慎核对。</p>
-                      </div>
-                      <label class="final-editor">
-                        <span>最终文本 content</span>
-                        <el-input v-if="draftSections[index]" v-model="draftSections[index].content" type="textarea" :rows="7" maxlength="10000" show-word-limit resize="vertical" :disabled="!canEditOptimization" placeholder="请输入本人核对后的最终文本" />
-                      </label>
-                    </article>
+            <template v-if="['READY', 'ACCEPTED'].includes(currentOptimization.status)">
+              <section class="target-bar" aria-label="目标岗位与简历">
+                <div class="target-bar__job">
+                  <span class="company-logo" aria-hidden="true">{{ (targetCompany || '岗').slice(0, 1) }}</span>
+                  <div>
+                    <h2>{{ targetTitle || '目标岗位' }}</h2>
+                    <p>{{ targetJobInfo || targetCompany || '岗位信息未提供' }}</p>
                   </div>
-                </el-tab-pane>
-                <el-tab-pane label="A4 样式预览">
-                  <div class="preview-stage">
-                    <div class="a4-page">
-                      <header><h2>{{ currentOptimization.title }}</h2><p>最终文本预览 · {{ statusLabel(currentOptimization.status) }}</p></header>
-                      <section v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey">
-                        <h3>{{ section.title }}</h3>
-                        <p class="pre-wrap">{{ draftSections[index]?.content ?? section.content ?? section.suggestedText }}</p>
-                      </section>
+                </div>
+                <div class="target-bar__doc">
+                  <span class="caption">简历底稿</span>
+                  <strong>{{ selectedResumeVersion ? versionLabel(selectedResumeVersion) : '未选择' }}</strong>
+                </div>
+              </section>
+
+              <div v-if="!fullPreviewOpen" class="workspace">
+                <section class="panel review-panel">
+                  <header class="review-head">
+                    <div><h2>逐条核对建议</h2><p>核对岗位原句和简历原文，选择要写入定向简历的修改。</p></div>
+                    <span v-if="reviewSections.length" class="review-progress">已核对 {{ reviewedCount }} / {{ reviewSections.length }}</span>
+                  </header>
+                  <div v-if="reviewSections.length" class="review-tabs" aria-label="建议条目">
+                    <button
+                      v-for="section in reviewSections"
+                      :key="section.sectionKey"
+                      type="button"
+                      :aria-pressed="section.sectionKey === activeSectionKey"
+                      :data-reviewed="sectionDecision(section.sectionKey) !== 'pending'"
+                      @click="selectSection(section.sectionKey)"
+                    >{{ section.title }}</button>
+                  </div>
+                  <div v-if="activeSection" class="review-body">
+                    <div class="change-title">
+                      <h3>{{ activeSection.title }}</h3>
+                      <span class="change-status" :data-reviewed="sectionDecision(activeSection.sectionKey) !== 'pending'">{{ decisionLabel(sectionDecision(activeSection.sectionKey)) }}</span>
+                    </div>
+                    <div v-if="activeSection.jdQuote" class="jd-quote">
+                      <strong>岗位要求原句</strong>
+                      <blockquote class="pre-wrap">{{ activeSection.jdQuote }}</blockquote>
+                    </div>
+                    <p v-else class="muted jd-missing">该建议未返回可定位的 JD 原句。</p>
+                    <div class="compare">
+                      <div class="source"><strong>简历原文</strong><p class="pre-wrap">{{ activeSection.originalText }}</p></div>
+                      <div class="suggestion">
+                        <strong>{{ sectionDecision(activeSection.sectionKey) === 'edited' ? '已编辑的建议' : '修改建议' }}</strong>
+                        <p class="pre-wrap">{{ displayedSuggestion }}</p>
+                      </div>
+                    </div>
+                    <p v-if="activeSection.reason" class="reason"><strong>修改理由</strong>{{ activeSection.reason }}</p>
+                    <div class="actions review-actions">
+                      <el-button :disabled="!canEditOptimization" @click="decideSection('original')">保留原文</el-button>
+                      <el-button :disabled="!canEditOptimization" @click="openSectionEditor">编辑建议</el-button>
+                      <el-button type="primary" :disabled="!canEditOptimization" @click="decideSection('adopted')">采纳建议</el-button>
+                    </div>
+                    <div v-if="editOpen" class="edit-area">
+                      <label for="section-editor">修改后的简历表述</label>
+                      <el-input id="section-editor" v-model="editValue" type="textarea" :rows="4" maxlength="10000" show-word-limit />
+                      <div class="actions">
+                        <el-button @click="editOpen = false">取消</el-button>
+                        <el-button type="primary" :disabled="!editValue.trim()" @click="saveSectionEdit">应用编辑</el-button>
+                      </div>
                     </div>
                   </div>
-                </el-tab-pane>
-              </el-tabs>
+                  <div v-else class="review-body">
+                    <el-empty :image-size="60" description="本次没有可采纳的改写建议" />
+                  </div>
+                  <aside v-if="missingRequirements.length" class="gap-card">
+                    <h3>简历暂未找到依据</h3>
+                    <div v-for="gap in missingRequirements" :key="gap.requirement" class="gap-card__item">
+                      <p>「{{ gap.requirement }}」</p>
+                      <p v-if="gap.note" class="caption">{{ gap.note }}</p>
+                    </div>
+                  </aside>
+                  <footer v-if="reviewSections.length" class="review-foot">
+                    <el-button :disabled="!canEditOptimization" @click="fillAllSuggestions">将全部建议填入</el-button>
+                    <span class="muted caption">逐条采纳或编辑后，右侧完整简历会同步更新。</span>
+                  </footer>
+                </section>
+
+                <section class="panel preview-panel">
+                  <header class="review-head">
+                    <div><h2>完整简历预览</h2><p>Markdown 预览 · 已采纳或编辑的段落会在正文中标出。</p></div>
+                    <el-button size="small" :disabled="!previewBlocks.length" @click="fullPreviewOpen = true">展开预览</el-button>
+                  </header>
+                  <div class="preview-stage">
+                    <ResumePaperPreview
+                      v-if="previewBlocks.length"
+                      :title="currentOptimization.title || '定向简历'"
+                      :subtitle="[targetCompany, targetTitle].filter(Boolean).join(' · ')"
+                      :blocks="previewBlocks"
+                    />
+                    <p v-else class="muted preview-empty">该记录未保存完整简历底稿，可在左侧逐条核对后确认，并按原记录导出。</p>
+                  </div>
+                  <footer class="preview-foot">
+                    <p class="caption">{{ currentOptimization.status === 'ACCEPTED' ? '定向稿已确认，可以导出 Word 和 PDF。' : '确认后可导出 Word 和 PDF。' }}</p>
+                    <div class="actions">
+                      <div class="actions">
+                        <el-button :disabled="!canExport" :loading="exporting === 'DOCX'" @click="exportOptimization('DOCX')">Word</el-button>
+                        <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">PDF</el-button>
+                      </div>
+                      <el-button type="primary" :disabled="!canEditOptimization || (currentOptimization.status === 'ACCEPTED' && !optimizationDirty)" :loading="accepting" @click="submitAcceptance">{{ currentOptimization.status === 'ACCEPTED' ? '已确认定向稿' : '确认定向稿' }}</el-button>
+                    </div>
+                  </footer>
+                </section>
+              </div>
+
+              <div v-else class="full-preview">
+                <header class="review-head">
+                  <div><h2>完整简历预览</h2><p>{{ [targetCompany, targetTitle].filter(Boolean).join(' · ') }}</p></div>
+                  <el-button @click="fullPreviewOpen = false">返回逐条核对</el-button>
+                </header>
+                <div class="preview-stage preview-stage--full">
+                  <ResumePaperPreview
+                    v-if="previewBlocks.length"
+                    :title="currentOptimization.title || '定向简历'"
+                    :subtitle="[targetCompany, targetTitle].filter(Boolean).join(' · ')"
+                    :blocks="previewBlocks"
+                    full
+                  />
+                  <p v-else class="muted preview-empty">该记录未保存完整简历底稿。</p>
+                </div>
+                <footer class="preview-foot">
+                  <p class="caption">{{ currentOptimization.status === 'ACCEPTED' ? '定向稿已确认，可以导出 Word 和 PDF。' : '确认后可导出 Word 和 PDF。' }}</p>
+                  <div class="actions">
+                    <div class="actions">
+                      <el-button :disabled="!canExport" :loading="exporting === 'DOCX'" @click="exportOptimization('DOCX')">Word</el-button>
+                      <el-button :disabled="!canExport" :loading="exporting === 'PDF'" @click="exportOptimization('PDF')">PDF</el-button>
+                    </div>
+                    <el-button type="primary" :disabled="!canEditOptimization || (currentOptimization.status === 'ACCEPTED' && !optimizationDirty)" :loading="accepting" @click="submitAcceptance">{{ currentOptimization.status === 'ACCEPTED' ? '已确认定向稿' : '确认定向稿' }}</el-button>
+                  </div>
+                </footer>
+              </div>
+              <el-alert v-if="reviewNotes.length" class="inline-alert" type="warning" title="部分建议已跳过" :description="reviewNotes.join('；')" :closable="false" show-icon />
             </template>
-            <el-empty v-else-if="!['GENERATING', 'FAILED'].includes(currentOptimization.status)" description="优化稿没有段落内容" />
+            <WaitStatus v-else-if="currentOptimization.status === 'GENERATING'" title="正在生成优化稿" />
           </template>
         </AsyncState>
       </section>
@@ -933,7 +1184,7 @@ onMounted(() => {
 .source-quotes { margin-top: 13px; }
 .source-quotes p { margin: 8px 0 0; }
 .final-editor { display: grid; gap: 8px; margin-top: 15px; color: var(--ai-text-secondary, #253c68); font-weight: 600; }
-.preview-stage { padding: 24px; overflow: auto; background: var(--ai-bg-light, #e9edf3); }
+.preview-stage { padding: 20px; overflow: auto; background: var(--ai-bg-light, #e9edf3); border-block: 1px solid var(--ai-border-light, #e3ebf6); }
 .a4-page { width: 794px; max-width: 100%; min-height: 1123px; margin: 0 auto; padding: 64px 68px; box-sizing: border-box; background: var(--ai-bg-card, #fff); box-shadow: 0 5px 24px rgb(29 46 78 / 16%); color: var(--ai-text-primary, #222); font-family: 'Times New Roman', 'SimSun', serif; }
 .a4-page header { margin-bottom: 28px; padding-bottom: 18px; border-bottom: 2px solid var(--ai-accent-border, #26364d); text-align: center; }
 .a4-page header h2 { margin: 0; font-size: 25px; }
@@ -941,6 +1192,61 @@ onMounted(() => {
 .a4-page section { margin-top: 22px; }
 .a4-page section h3 { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--ai-accent-border, #ccd1d8); font-size: 17px; }
 .a4-page section p { margin: 0; font-size: 13px; line-height: 1.85; }
+.target-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 18px; margin-bottom: 16px; border: 1px solid var(--ai-border-light, #e3ebf6); border-radius: 12px; background: var(--ai-bg-card, #fff); }
+.target-bar__job { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.target-bar__job h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.target-bar__job p { margin: 2px 0 0; color: var(--ai-text-secondary, #53647d); font-size: 12px; }
+.target-bar__doc { display: grid; gap: 2px; text-align: right; }
+.target-bar__doc strong { font-size: 13px; overflow-wrap: anywhere; }
+.company-logo { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 9px; color: var(--ai-primary, #235cbe); background: var(--ai-primary-light, #eaf2ff); font-size: 19px; font-weight: 800; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+.review-panel, .preview-panel { overflow: hidden; }
+.review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 15px 17px 12px; }
+.review-head h2 { margin: 0; font-size: 17px; }
+.review-head p { margin: 3px 0 0; color: var(--ai-text-secondary, #53647d); font-size: 12px; }
+.review-progress { flex: 0 0 auto; color: var(--ai-text-secondary, #53647d); font-size: 12px; white-space: nowrap; }
+.review-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0 17px 12px; border-bottom: 1px solid var(--ai-border-light, #edf1f6); }
+.review-tabs button { padding: 6px 10px; border: 1px solid var(--ai-border-light, #dfe7f1); border-radius: 7px; background: var(--ai-bg-card, #fff); color: var(--ai-text-secondary, #53647d); font-size: 12px; font-weight: 600; cursor: pointer; }
+.review-tabs button::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; vertical-align: 2px; background: var(--ai-text-tertiary, #9eacc1); }
+.review-tabs button[data-reviewed='true']::before { background: var(--ai-success, #1b956f); }
+.review-tabs button[aria-pressed='true'] { border-color: var(--ai-accent-border, #aac6fd); background: var(--ai-primary-light, #eaf2ff); color: var(--ai-primary, #235cbe); }
+.review-body { padding: 13px 17px 15px; }
+.change-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.change-title h3 { margin: 0; font-size: 15px; }
+.change-status { padding: 2px 8px; border-radius: 5px; color: var(--ai-text-secondary, #55647b); background: var(--ai-bg-light, #eef2f7); font-size: 11px; white-space: nowrap; }
+.change-status[data-reviewed='true'] { color: var(--ai-success, #14694e); background: var(--ai-success-bg, #e7f7ef); }
+.jd-quote { padding: 8px 11px; border-left: 3px solid var(--ai-accent-border, #5488f4); border-radius: 0 6px 6px 0; background: var(--ai-primary-light, #eff5ff); }
+.jd-quote strong { display: block; color: var(--ai-primary, #235cbe); font-size: 11px; }
+.jd-quote blockquote { margin: 3px 0 0; font-size: 13px; line-height: 1.55; }
+.jd-missing { margin: 0; padding: 8px 11px; border-radius: 6px; background: var(--ai-bg-light, #f5f8fc); font-size: 12px; }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.compare > div { min-width: 0; min-height: 106px; padding: 9px 11px; border: 1px solid var(--ai-border-light, #e9eef5); border-radius: 7px; background: var(--ai-bg-light, #f7f9fc); }
+.compare .suggestion { border-color: var(--ai-accent-border, #dbe9fb); background: var(--ai-primary-light, #f4f8ff); }
+.compare strong { font-size: 12px; }
+.compare .suggestion strong { color: var(--ai-primary, #235cbe); }
+.compare p { margin: 5px 0 0; font-size: 13px; line-height: 1.58; }
+.reason { margin: 8px 0 0; color: var(--ai-text-secondary, #53647d); font-size: 12px; }
+.reason strong { margin-right: 7px; color: var(--ai-text-primary, #14213a); }
+.review-actions { justify-content: flex-end; margin-top: 12px; }
+.edit-area { margin-top: 12px; color: var(--ai-text-secondary, #253c68); font-size: 13px; font-weight: 600; }
+.edit-area label { display: block; margin-bottom: 6px; }
+.edit-area .actions { justify-content: flex-end; margin-top: 8px; }
+.edit-area .el-button { margin: 0 0 0 8px; }
+.gap-card { margin: 0 17px 14px; padding: 11px 13px; border: 1px solid var(--ai-warning-border, #f0dfbb); border-radius: 9px; background: var(--ai-warning-bg, #fffaf0); }
+.gap-card h3 { margin: 0 0 8px; color: var(--ai-warning, #805014); font-size: 13px; }
+.gap-card__item + .gap-card__item { margin-top: 9px; }
+.gap-card__item p { margin: 0; color: var(--ai-text-primary, #14213a); font-size: 12px; }
+.gap-card__item .caption { margin-top: 2px; color: var(--ai-text-secondary, #695d4d); }
+.review-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 17px; border-top: 1px solid var(--ai-border-light, #edf1f6); }
+.preview-empty { margin: 0; padding: 24px 10px; }
+.preview-foot { padding: 11px 16px; }
+.preview-foot .caption { margin: 0 0 7px; color: var(--ai-text-secondary, #53647d); font-size: 12px; }
+.preview-foot .actions { justify-content: space-between; }
+.preview-foot .el-button { margin: 0; }
+.full-preview { display: grid; }
+.preview-stage--full { padding: 24px; }
+@media (max-width: 1000px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) { .compare { grid-template-columns: 1fr; } .target-bar__doc { text-align: left; } }
 @media (max-width: 1000px) { .setup-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .section-compare { grid-template-columns: 1fr; } .detail-summary, .section-card__heading { flex-direction: column; } .review-toolbar > .actions { align-items: stretch; flex-direction: column; } .review-toolbar .actions .el-button { width: 100%; margin: 0; } .optimization-detail .panel__heading { align-items: stretch; flex-direction: column; } .optimization-detail .panel__heading .actions .el-button { flex: 1; margin: 0; } .preview-stage { padding: 10px; } .a4-page { min-height: 900px; padding: 36px 28px; } }
 </style>

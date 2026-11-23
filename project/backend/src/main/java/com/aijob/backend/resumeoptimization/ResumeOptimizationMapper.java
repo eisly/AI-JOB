@@ -54,12 +54,17 @@ public interface ResumeOptimizationMapper {
     int retryDiagnosis(@Param("id") String id, @Param("taskId") String taskId);
 
     @Insert("""
-            INSERT INTO resume_optimization (id,user_id,resume_version_id,job_id,diagnosis_id,task_id)
-            VALUES (#{id},#{userId},#{resumeVersionId},#{jobId},#{diagnosisId},#{taskId})
+            INSERT INTO resume_optimization (id,user_id,resume_version_id,job_id,diagnosis_id,mode,job_version,
+              job_company_name,job_title,source_text,task_id)
+            VALUES (#{id},#{userId},#{resumeVersionId},#{jobId},#{diagnosisId},#{mode},#{jobVersion},
+              #{companyName},#{jobTitle},#{sourceText},#{taskId})
             """)
     int insertOptimization(@Param("id") String id, @Param("userId") String userId,
                            @Param("resumeVersionId") String resumeVersionId, @Param("jobId") String jobId,
-                           @Param("diagnosisId") String diagnosisId, @Param("taskId") String taskId);
+                           @Param("diagnosisId") String diagnosisId, @Param("mode") String mode,
+                           @Param("jobVersion") Integer jobVersion, @Param("companyName") String companyName,
+                           @Param("jobTitle") String jobTitle, @Param("sourceText") String sourceText,
+                           @Param("taskId") String taskId);
 
     @Select("SELECT * FROM resume_optimization WHERE id=#{id} AND user_id=#{userId}")
     Map<String, Object> optimization(@Param("id") String id, @Param("userId") String userId);
@@ -90,16 +95,35 @@ public interface ResumeOptimizationMapper {
     long optimizationCount(@Param("userId") String userId, @Param("resumeVersionId") String resumeVersionId,
                            @Param("jobId") String jobId);
 
-    @Update("UPDATE resume_optimization SET title=#{title},sections_json=#{sectionsJson},status='READY',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'")
+    @Update("""
+            UPDATE resume_optimization SET title=#{title},sections_json=#{sectionsJson},
+              missing_requirements_json=#{missingJson},notes_json=#{notesJson},
+              full_document_text=#{fullText},full_document_json=#{fullJson},
+              status='READY',updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'
+            """)
     int completeOptimization(@Param("id") String id, @Param("taskId") String taskId,
-                             @Param("title") String title, @Param("sectionsJson") String sectionsJson);
+                             @Param("title") String title, @Param("sectionsJson") String sectionsJson,
+                             @Param("missingJson") String missingJson, @Param("notesJson") String notesJson,
+                             @Param("fullText") String fullText, @Param("fullJson") String fullJson);
 
-    @Update("UPDATE resume_optimization SET accepted_sections_json=#{sectionsJson},accepted_at=UTC_TIMESTAMP(3),status='ACCEPTED',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='READY'")
-    int accept(@Param("id") String id, @Param("sectionsJson") String sectionsJson);
+    @Update("""
+            UPDATE resume_optimization SET accepted_sections_json=#{sectionsJson},
+              full_document_text=#{fullText},full_document_json=#{fullJson},
+              accepted_at=UTC_TIMESTAMP(3),status='ACCEPTED',updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status='READY'
+            """)
+    int accept(@Param("id") String id, @Param("sectionsJson") String sectionsJson,
+               @Param("fullText") String fullText, @Param("fullJson") String fullJson);
 
     @Update("UPDATE resume_optimization SET status='FAILED',updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND task_id=#{taskId} AND status='GENERATING'")
     int failOptimization(@Param("id") String id, @Param("taskId") String taskId);
 
-    @Update("UPDATE resume_optimization SET status='GENERATING',task_id=#{taskId},title=NULL,sections_json=NULL,accepted_sections_json=NULL,accepted_at=NULL,updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='FAILED'")
+    @Update("""
+            UPDATE resume_optimization SET status='GENERATING',task_id=#{taskId},title=NULL,sections_json=NULL,
+              missing_requirements_json=NULL,notes_json=NULL,accepted_sections_json=NULL,full_document_text=NULL,
+              full_document_json=NULL,accepted_at=NULL,updated_at=UTC_TIMESTAMP(3)
+            WHERE id=#{id} AND status='FAILED'
+            """)
     int retryOptimization(@Param("id") String id, @Param("taskId") String taskId);
 }

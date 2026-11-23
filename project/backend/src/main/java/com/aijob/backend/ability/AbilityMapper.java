@@ -45,6 +45,41 @@ public interface AbilityMapper {
             """)
     List<Object> last20(@Param("userId") String userId, @Param("skillCode") String skillCode);
 
+    @Select("""
+            SELECT id FROM ability_evidence WHERE user_id=#{userId} AND skill_code=#{skillCode}
+              AND status='VALID' AND score IS NOT NULL AND rubric_version='technical-answer-v1'
+              AND source_type IN ('LEARNING_ANSWER','INTERVIEW_ANSWER')
+            ORDER BY created_at DESC,id DESC LIMIT 20
+            """)
+    List<String> last20EvidenceIds(@Param("userId") String userId, @Param("skillCode") String skillCode);
+
+    @Select("""
+            <script>
+            SELECT id,skill_code,source_type,source_id,score,status,created_at
+            FROM ability_evidence WHERE user_id=#{userId} AND id IN
+            <foreach collection="ids" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </script>
+            """)
+    List<Map<String,Object>> evidenceByIds(@Param("userId") String userId, @Param("ids") List<String> ids);
+
+    @Select("""
+            <script>
+            SELECT a.id,a.content,a.score,a.evaluated_at,q.stem
+            FROM learning_answer a LEFT JOIN question q ON q.id=a.question_id
+            WHERE a.id IN
+            <foreach collection="ids" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </script>
+            """)
+    List<Map<String,Object>> learningAnswerDetails(@Param("ids") List<String> ids);
+
+    @Select("""
+            <script>
+            SELECT id,content,question_message_id FROM interview_message WHERE id IN
+            <foreach collection="ids" item="item" open="(" separator="," close=")">#{item}</foreach>
+            </script>
+            """)
+    List<Map<String,Object>> interviewMessageDetails(@Param("ids") List<String> ids);
+
     @Insert("""
             INSERT INTO user_skill_snapshot (user_id,skill_code,formula_version,score,sample_count,evidence_status,
               last_evidence_at,created_at,updated_at)

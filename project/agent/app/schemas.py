@@ -127,6 +127,16 @@ class Gap(APIModel):
     suggestion: str | None = Field(default=None, max_length=500)
 
 
+SkillSupportLevel = Literal["DIRECT", "PARTIAL", "MISSING"]
+
+
+class RequirementEvidenceItem(APIModel):
+    requirement_quote: str = Field(min_length=1, max_length=2000)
+    skill_code: str | None = Field(default=None, max_length=64)
+    support_level: SkillSupportLevel = "MISSING"
+    resume_quote: str | None = Field(default=None, max_length=2000)
+
+
 class AIMatchItem(APIModel):
     job_id: UUID
     job_version: int = Field(ge=1)
@@ -134,6 +144,7 @@ class AIMatchItem(APIModel):
     semantic_version: str = "semantic-v1"
     reasons: list[str] = Field(default_factory=list, max_length=5)
     gaps: list[Gap] = Field(default_factory=list, max_length=50)
+    requirement_evidence: list[RequirementEvidenceItem] = Field(default_factory=list, max_length=12)
 
 
 class AIMatchResult(APIModel):
@@ -346,17 +357,28 @@ class AIResumeDiagnoseResult(ResumeDiagnosisInput):
         return self
 
 
+ResumeOptimizeMode = Literal["SECTIONS", "FULL_DOCUMENT"]
+
+
 class ResumeOptimizeSection(APIModel):
     section_key: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=200)
     original_text: str = Field(min_length=1, max_length=10000)
     suggested_text: str = Field(min_length=1, max_length=10000)
     source_quotes: list[str] = Field(default_factory=list, max_length=10)
+    jd_quote: str | None = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ResumeOptimizeRequirementGap(APIModel):
+    requirement: str = Field(min_length=1, max_length=2000)
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class AIResumeOptimizeResult(APIModel):
     title: str = Field(min_length=1, max_length=200)
-    sections: list[ResumeOptimizeSection] = Field(min_length=1, max_length=20)
+    sections: list[ResumeOptimizeSection] = Field(max_length=20)
+    missing_requirements: list[ResumeOptimizeRequirementGap] = Field(default_factory=list, max_length=5)
 
 
 RepoPlatform = Literal["GITHUB", "GITEE", "GITCODE"]
@@ -475,6 +497,7 @@ class MatchItemModelOutput(APIModel):
     semantic_score: float | None = Field(default=None, ge=0, le=1)
     reasons: list[str] = Field(default_factory=list, max_length=5)
     gap_suggestions: dict[str, str] = Field(default_factory=dict)
+    requirement_evidence: list[RequirementEvidenceItem] = Field(default_factory=list, max_length=12)
 
 
 class MatchModelOutput(APIModel):
@@ -646,12 +669,14 @@ class JobMatchCandidate(APIModel):
     title: str = Field(min_length=1, max_length=200)
     jd_text: str = Field(default="", max_length=30000)
     requirements: Requirement = Field(default_factory=Requirement)
+    personal_owned: bool = False
 
 
 class JobMatchPayload(APIModel):
     profile: ProfileSnapshot
     skill_snapshot: list[SkillSnapshotItem] = Field(default_factory=list, max_length=100)
     candidates: list[JobMatchCandidate] = Field(min_length=1, max_length=50)
+    resume_quotes: list[str] = Field(default_factory=list, max_length=90)
 
 
 class MatchItemInput(APIModel):
@@ -1105,7 +1130,10 @@ class ResumeOptimizePayload(APIModel):
     job_id: UUID
     job_version: int = Field(ge=1)
     jd_text: str = Field(min_length=1, max_length=30000)
+    company_name: str | None = Field(default=None, max_length=100)
+    job_title: str | None = Field(default=None, max_length=100)
     diagnosis: ResumeDiagnosisInput | None = None
+    mode: ResumeOptimizeMode = "SECTIONS"
 
     @model_validator(mode="after")
     def _requires_authorized_text(self) -> "ResumeOptimizePayload":

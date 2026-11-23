@@ -1104,3 +1104,485 @@
 **遗留问题：** 当前合成 JD v2 存于测试账号；仍需验证历史匹配批次版本过期和真实简历解析回归。
 
 ---
+### [2026-11-23 17:05:00] 阶段一：Agent 生成个人 JD 岗位要求证据卡
+
+**任务目标：** 复用 `JOB_MATCH`，让模型为本人个人 JD 按 JD 顺序输出最多 12 条要求、对应技能、支持程度与简历原句。
+
+**执行行为：**
+
+1. 输入契约新增可选 `resumeText`（本人已确认简历原文）与候选级 `personalOwned`；输出契约新增 `RequirementEvidenceItem`（`requirementQuote`、`skillCode`、`supportLevel`、`resumeQuote`）。
+2. 提示词升级为 `semantic-v3`：证据卡只对 `personalOwned=true` 生成；JD 引文与简历引文必须逐字可定位；`supportLevel` 只按简历原句判定，不得因技能分高改判；JD 输入沿用前 4000 字限制。
+3. Handler 过滤无效 JD 引文，简历引文无法定位时清空并把状态改为 `MISSING`，技能不属于候选要求时置空；非个人 JD 候选不输出证据卡。
+4. 模型输入透传 `personalOwned` 与截断后的 `resumeText`，测试替身补证据卡输出。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/schemas.py` | 新增证据卡类型与输入字段 | 承载要求、技能、支持程度与简历引文 |
+| 修改 | `project/agent/app/handlers.py` | 证据卡引文校验与容错 | 避免虚构引用影响其余匹配结果 |
+| 修改 | `project/agent/app/skills/prompts/job_match.md` | 升级 `semantic-v3` 并新增证据卡规则 | 约束只引用真实原文 |
+| 修改 | `project/agent/app/operations.py` | 版本号改为 `semantic-v3` | 与提示词文件一致 |
+| 修改 | `project/agent/app/skills/tools.py` | 透传 `personalOwned`、`resumeText` | 模型需要简历原文才能生成引文 |
+| 修改 | `project/agent/app/fake_model.py` | 假模型输出证据卡 | 保持结果契约一致 |
+| 修改 | `project/agent/tests/factories.py`、`test_handlers.py` | 补充个人 JD 输入与证据卡校验用例 | 覆盖无效引文、无效简历引用、非个人 JD |
+
+**执行命令与验证：**
+
+- 命令：`& "D:\Anaconda\envs\ai-job\python.exe" -m pytest tests/test_handlers.py -k "match" -q -p no:warnings`
+- 结果：通过 5 项（含新增 `test_match_filters_invalid_requirement_evidence_and_marks_missing`）。
+- 命令：`pytest tests/test_operations.py::test_match_preserves_candidate_set_and_recomputes_gaps -q`
+- 结果：通过 2 项（FakeLLM 端到端契约）。
+- 说明：`test_handlers.py` 全量组合中 2 条语音题用例因本机 `.env` 与 `AI_BAILIAN_API_KEY`/`DASHSCOPE_API_KEY` 冲突抛 `speech_config` 配置错误，与本次匹配改动无关；匹配相关用例单独执行通过。
+
+**影响范围：** 仅 `JOB_MATCH` 输入输出契约；未传新字段的旧请求按无证据卡处理。
+
+**遗留问题：** 真实模型证据卡质量与长 JD 截断效果需联调验证。
+
+---
+### [2026-11-23 17:07:00] 阶段二：Java 校验引文、固化证据 ID 并新增评分依据接口
+
+**任务目标：** 以任务绑定的 JD 与生效简历原文校验证据卡；创建匹配时固化相关技能的评分样本 ID；提供按匹配条目和技能查看评分依据的接口。
+
+**执行行为：**
+
+1. `JobService.match` 读取本人已确认简历原文并写入 Agent payload，候选新增 `personalOwned`；任务快照随 payload 保存，重试沿用同一快照。
+2. `JobResultHandler` 校验 JD 引文与简历引文，按引文有效性重判 `DIRECT/PARTIAL/MISSING`，跳过无效 JD 引文与无效简历引文，最多保留 12 条；证据卡与覆盖范围写入 `source_snapshot_json`，无需数据库迁移。
+3. 个人 JD 条目按“最近 20 条有效训练/面试评分”固化 `gaps[].evidenceIds`；公共岗位仍为空。
+4. 新增 `GET /api/v1/job-matches/{matchId}/items/{itemId}/evidence?skillCode=`：校验批次、条目与证据均归当前用户，按证据 ID 展示来源、时间、单次评分、题目与回答摘录；记录撤销或来源不可读时返回不可用原因。
+5. `matchItemVo` 输出 `requirementEvidence` 与 `requirementEvidenceCoverage`。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobService.java` | 简历原文与个人 JD 标记、证据查询接口、VO 扩展 | 支撑证据卡与评分依据 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobResultHandler.java` | 双侧引文校验、覆盖范围、证据 ID 固化 | 卡片状态只依据简历原句 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobController.java` | 新增证据查询路由 | 前端展开评分依据 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/ability/AbilityMapper.java`、`AbilityService.java` | 最近 20 条证据 ID、批量证据与答题详情查询 | 追溯实际评分样本 |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/job/JobServiceMatchEvidenceTest.java` | 批次/技能校验、空样本、撤销样本用例 | 覆盖查询与越权 |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/job/JobMatchRequirementEvidenceTest.java` | 部分支持、无效引文、覆盖范围、公共岗位 | 覆盖证据卡核心语义 |
+
+**执行命令与验证：**
+
+- 命令：`& mvn -o -q -DskipTests compile`
+- 结果：通过。
+- 命令：`& mvn -o "-Djacoco.skip=true" "-DforkCount=0" "-Dtest=JobServiceMatchEvidenceTest,JobMatchRequirementEvidenceTest" test`
+- 结果：通过 6 项（4 + 2）。
+- 命令：`& mvn -o "-Djacoco.skip=true" "-DforkCount=0" "-Dtest=JobServiceMatchItemTest,MatchScoreServiceTest,JobMapperSqlTest" test`
+- 结果：通过 6 项。
+- 说明：测试验证“简历只写使用 Redis 缓存商品信息”时卡片为 `PARTIAL`，即使该用户存在高分 Redis 证据样本也不改判；越权批次与技能不属于条目时返回错误。
+
+**影响范围：** 仅岗位匹配详情与新增查询接口；旧匹配记录没有证据卡字段，返回空数组。未新增迁移。
+
+**遗留问题：** 未用真实数据库验证 `learning_answer`/`interview_message` 联表查询；历史批次需真实数据回归。
+
+---
+### [2026-11-23 17:09:00] 阶段三：前端展示证据卡与评分依据
+
+**任务目标：** 在匹配结果「能力差距与证据」区域展开 JD 原句、简历原句与状态，并从技能查看本次评分样本。
+
+**执行行为：**
+
+1. 新增 `RequirementEvidenceVO`、`RequirementEvidenceCoverageVO`、`EvidenceSampleVO`、`MatchEvidenceVO`，扩展 `MatchItemVO`。
+2. 新增 `jobApi.matchEvidence(matchId, itemId, skillCode)`。
+3. 匹配详情按状态着色渲染证据卡（有依据/部分支持/待补证）；JD 截断或达到 12 条上限时显示覆盖范围提示；无证据卡时提示个人 JD 重新匹配后可查看。
+4. 技能差距卡新增「查看评分依据」，弹窗展示来源、时间、单次评分、题目与回答摘录，不可用样本显示原因。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/api/types.ts` | 新增证据卡与证据样本类型 | 对接后端字段 |
+| 修改 | `project/frontend/src/api/jobs.ts` | 新增评分依据查询方法 | 展开技能样本 |
+| 修改 | `project/frontend/src/views/job-match/JobMatchView.vue` | 证据卡、覆盖范围提示、评分依据弹窗 | 实现用户流程 |
+
+**执行命令与验证：**
+
+- 命令：`npm run type-check`
+- 结果：通过。首次出现 `types.ts` 旧接口残留与 `sourceTypeLabel` 重名错误，清理后复跑通过。
+- 命令：`npm run build`
+- 结果：通过（仅既有大 chunk 警告）。
+
+**影响范围：** 仅匹配结果展示与新增弹窗；匹配分、资格核验与训练计划入口不变。
+
+**遗留问题：** 登录态浏览器全流程未实测。
+
+---
+### [2026-11-23 17:10:00] 阶段四：验证结果与未验证边界
+
+**任务目标：** 汇总本轮实际执行的验证，明确未完成项。
+
+**执行行为：** 汇总 Agent、Java、前端测试与构建结果，记录环境阻塞。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加四阶段记录 | 按项目规范留痕 |
+
+**执行命令与验证：**
+
+- 已验证：Agent 匹配相关 5 项、FakeLLM 端到端 2 项；Java 新增 6 项与回归 6 项；Java 编译；前端类型检查与构建。
+- 未执行：登录态浏览器「导入个人 JD → 匹配 → 展开证据卡 → 查看答题依据」全链路，本地缺少可用登录账号；真实模型证据卡与真实数据库联表查询。
+- 未验证：历史批次、跨账号访问、匹配后新增答题记录时旧结果保持原样本的数据库级验证（单元测试覆盖了证据 ID 固化与越权分支，未跑真实库）。
+
+**影响范围：** 本轮改动未创建 Git 提交，全部保留在工作区。
+
+**遗留问题：** 需在有可用账号与环境时补做浏览器全链路和真实数据回归。
+
+---
+
+### [2026-11-23 17:20:05] 定位匹配页无候选和证据卡入口问题
+
+**任务目标：** 对照截图排查个人 JD 证据卡未显示的问题。
+
+**执行行为：** 确认空目标岗位只使用默认可信候选，个人 JD 不会自动加入。失败时页面仅提供按原参数重试。核对 5188 对应的 Java 和 Agent 仍是证据卡实现前的运行实例。计划补充个人 JD 到匹配页的明确入口，并在加载新版前修正评分样本与简历引文边界。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加排查结论 | 留存问题根因 |
+
+**执行命令与验证：** `rg`、`Get-NetTCPConnection`、`Get-Process`。确认代码分支和实际进程启动时间。本阶段未提交个人简历或创建任务。
+
+**影响范围：** 个人 JD 匹配入口、定向岗位证据卡及当前本地验收环境。
+
+**遗留问题：** 待修改、验证和加载新版。
+
+---
+
+### [2026-11-23 17:23:22] 增加个人 JD 匹配入口并修正证据边界
+
+**任务目标：** 让无默认候选场景可转到个人 JD，并使证据卡安全地使用版本绑定原文与评分样本。
+
+**执行行为：** 增加空目标和无候选状态的个人 JD 入口，列表及详情支持预选单个已解析 JD，再由用户确认提交。仅本人个人 JD 请求新增已确认且可在生效简历逐字定位的引文；公共岗位请求不传新增简历正文或引文。Java 与 Agent 校验实际 JD 原句和已确认引文。Java 在同一读事务中获取能力分与评分样本 ID，保存入批次快照供回调和重试读取。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/views/job-match/JobMatchView.vue` | 新增个人 JD 入口与无候选引导 | 解决截图中的空目标状态 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobService.java`、`JobResultHandler.java`、`project/backend/src/main/java/com/aijob/backend/ability/AbilityService.java` | 无候选错误分类、按本人个人 JD 授权引文、同时固化分数与样本、精确校验 | 避免错误评分溯源及正文过度传递 |
+| 修改 | `project/agent/app/schemas.py`、`handlers.py`、`operations.py`、`fake_model.py`、`skills/tools.py`、`skills/prompts/job_match.md` | 已确认引文数组契约、严格匹配与提示词版本 | 配合 Java 的输入与校验规则 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/job/JobMatchRequirementEvidenceTest.java`、`JobRetrySafetyTest.java`、`project/backend/src/test/java/com/aijob/backend/ability/AbilityServiceTest.java` 以及 `project/agent/tests/factories.py`、`test_handlers.py`、`test_skills.py` | 更新契约夹具，覆盖旧分数样本、公共岗位与非逐字引用 | 复验本轮增量 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加实现记录 | 留存源码改动范围 |
+
+**执行命令与验证：** 已修改源码，定向测试和类型检查待汇总。
+
+**影响范围：** 岗位匹配与证据卡。未改动数据库结构，不自动提交用户简历或创建匹配。
+
+**遗留问题：** 完成编译，更新本地运行实例并使用合成账号验证实际匹配。
+
+---
+
+### [2026-11-23 17:24:56] 通过匹配定向回归与类型检查
+
+**任务目标：** 确认新增入口和匹配证据契约能够编译并通过回归。
+
+**执行行为：** 运行 Java 匹配及成长快照测试、Agent 匹配用例、前端类型检查和本次变更文件的 diff 空白检查。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加定向测试结果 | 记录实际验证 |
+
+**执行命令与验证：** `mvn -o -B -Dtest=JobMatchRequirementEvidenceTest,JobServiceMatchEvidenceTest,JobRetrySafetyTest,MatchScoreServiceTest,AbilityServiceTest test` 通过 15 项；`python -m pytest tests/test_handlers.py tests/test_operations.py tests/test_skills.py -k match` 通过 13 项；`npm run type-check` 通过。Java 报告已有 JaCoCo 执行数据与其他类不匹配的提示，Agent 有既有插件弃用提示。
+
+**影响范围：** 本地定向验证，未执行真实模型任务。
+
+**遗留问题：** 待验收 5188 新版入口和一条合成账号的实际匹配。
+
+---
+
+### [2026-11-23 17:27:59] 跑通合成账号真实匹配并修正深色证据卡
+
+**任务目标：** 从截图中的无候选状态进入真实匹配，并核对证据卡在深色主题下可读。
+
+**执行行为：** 用 Playwright 在 5188 以已有虚构账号登录。默认候选返回预期 409 且出现「前往个人 JD」。从列表点「用此 JD 匹配」，提交请求只含所选一条合成 JD。真实 DeepSeek 任务完成，结果返回三张证据卡，评分依据接口返回 200。查看深色实测截图发现新证据卡仍使用固定浅色背景，替换为既有主题颜色变量。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/frontend/src/views/job-match/JobMatchView.vue` | 证据卡三态使用主题背景及边框 | 修复深色模式文字对比度 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加浏览器联调记录 | 留存请求与真实结果 |
+
+**执行命令与验证：** Playwright Chromium 登录、匹配、轮询、加载证据卡和评分接口，检查请求体、状态码和页面内容。真实任务成功，三张证据卡均为待补证，与该虚构账号缺少相关已确认引文一致。Java Flyway 已在 V23，Agent readyz 200。主题修复后的截图待复查。
+
+**影响范围：** 本地 5188 页面和虚构测试账号。未触及用户本人账户或简历。
+
+**遗留问题：** 验收账号没有实际答题评分样本，真实联调仅覆盖评分接口可访问。
+
+---
+
+### [2026-11-23 17:28:49] 复查深浅主题并确认实际结果截图
+
+**任务目标：** 验证主题修复生效，并提供来自真实联调结果的截图。
+
+**执行行为：** 在 Chrome 重新打开合成账号已完成的匹配批次，无需重新生成。通过主题开关分别检查证据卡文字和背景，保存深色截图。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 补充主题复查结果 | 对齐最终交付 |
+| 新增 | 系统临时目录 `aijob-personal-jd-match-verified.png` | 真实合成匹配结果截图 | 展示修复后的深色卡片 |
+
+**执行命令与验证：** Playwright 使用真实匹配批次和浏览器计算样式，确认 3 张卡片，受测正文及序号文字的最低对比度深色 7.77∶1、浅色 4.50∶1。Java 和 Agent 新进程均在线，数据库仍为 V23，无迁移。
+
+**影响范围：** 当前本地 5188 页面及测试账号历史。
+
+**遗留问题：** 实测账号无已评分答题，评分弹窗的非空样本仍由单测和前次合成响应验证。
+
+---
+
+### [2026-11-23 17:35:28] 定位个人 JD 匹配完成后详情为空
+
+**任务目标：** 核对任务已完成、历史批次存在但结果为空的实际页面。
+
+**执行行为：** 只读查询截图对应的历史批次状态、资格核验字段和证据卡数量。确认批次已生成，库中存在本人个人 JD 条目和 8 张证据卡。该条目的毕业年份条件未通过，`JobService.batchVo` 过滤了全部资格不符条目，前端也把证据区放在资格通过或待确认的展示分支内。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加排查结论 | 记录现有历史结果为空的原因 |
+
+**执行命令与验证：** 隔离数据库只读 `SELECT`、`rg`、`Get-Content`。确认问题发生在读取和展示层。本阶段未读取简历正文，未重新提交任务。
+
+**影响范围：** 本人个人 JD 匹配历史与失败资格展示。
+
+**遗留问题：** 修改读取与展示层，并确认既有批次可直接重开查看。
+
+---
+
+### [2026-11-23 17:37:21] 显示资格不符的本人个人 JD 历史结果
+
+**任务目标：** 让用户重新打开原匹配批次即可查看已有证据卡与资格未通过原因。
+
+**执行行为：** 后端批次详情保留本人个人 JD 的资格不符条目，沿用可信岗位与资格待确认的原筛选规则。前端证据区对这类条目单独展示，顶部解释未通过的硬性字段，核验表显示中文字段及 JD 原句。该岗位继续保留资格不符状态及原有操作限制。新增历史批次回归用例。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobService.java` | 批次详情返回资格不符的个人 JD 快照 | 避免整个已生成条目被过滤 |
+| 修改 | `project/frontend/src/views/job-match/JobMatchView.vue` | 展示未通过原因和证据卡，修正空态与核验字段 | 让资格结论与证据同时可见 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/job/JobServiceMatchItemTest.java` | 验证旧批次个人条目可见且公共失败、未选待确认项仍过滤 | 防止筛选行为回归 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加修复记录 | 留存实际操作 |
+
+**执行命令与验证：** 已修改代码，定向测试与运行态验证待汇总。
+
+**影响范围：** 本人个人 JD 的匹配详情与显示层。历史数据和资格规则继续使用原记录。
+
+**遗留问题：** 运行测试并更新 5188 对应 Java 进程。
+
+---
+
+### [2026-11-23 17:39:31] 更新本地后端并在原页面验证历史批次
+
+**任务目标：** 确认修复实际覆盖截图所示的既有用户批次。
+
+**执行行为：** 通过定向回归后，仅切换 5188 所连接的 Java 后端，沿用前端、Agent、隔离 MySQL 与 Redis。通过当前 Edge 标签页刷新原历史批次，读取页面中的资格提示及卡片数量。未重跑匹配任务。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加测试、运行切换及实际浏览器验收 | 核对原问题已恢复 |
+| 新增 | 系统临时目录 `aijob-feature-demo-8d70490/v23-acceptance/match-visibility-20261123-173819/` | Java 运行日志 | 记录本次运行实例 |
+
+**执行命令与验证：** `mvn -o -B -Dtest=JobServiceMatchItemTest,JobServiceMatchEvidenceTest,JobMatchRequirementEvidenceTest,JobRetrySafetyTest,MatchScoreServiceTest test` 通过 13 项，`npm run type-check` 通过，变更文件 `git diff --check` 通过。校验 PID 后执行 `Stop-Process` 与 `Start-Process`。Edge 通过原账号正常会话刷新 17:30 批次，实际显示 8 张证据卡及毕业年份条件提示，原空态不存在。
+
+**影响范围：** 本机 5188 岗位匹配历史详情。未写入用户历史批次，未访问简历正文或调用模型。
+
+**遗留问题：** 本次聚焦已有批次显示，未测试任何新的岗位生成。
+
+---
+
+### [2026-11-23 19:45:54] 定位投递计划预填与下线岗位展示
+
+**任务目标：** 复现搜索岗位预填串字段，以及已下线岗位出现在推荐列表的原因。
+
+**执行行为：**
+
+1. 核对截图对应的 Vue 表单、Agent 招聘信息解析、Java 落库及结果分页链路。
+2. 确认学历正则会截取前后各 12 个字符、薪资兜底仅识别区间；投递计划直接复制字段文本，且搜索结果不提供岗位简述。
+3. 确认落库逻辑只把明确关闭的岗位排到末尾；详情预抓结果还可能因额外核验预算耗尽而未应用。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加排查结论 | 记录修复依据 |
+
+**执行命令与验证：**
+
+- 命令：`git status --short --branch`、`rg`、`Get-Content`。
+- 结果：完成静态排查。当前工作区为 `D:/py/AI-JOB`，规范中的旧路径 `D:/vscode/AI-JOB/docs/功能资料` 不存在，本次在实际工作区的现有日志中追加。已检查当前分支及既有未提交修改。
+
+**影响范围：** 岗位搜索结果和投递计划预填。
+
+**遗留问题：** 待实施修复和回归验证。
+
+---
+
+### [2026-11-23 19:48:46] 修复 Agent 字段提取和详情核验传递
+
+**任务目标：** 独立提取学历和薪资，并把搜索时取得的岗位状态带到结果处理阶段。
+
+**执行行为：**
+
+1. 统一文本兜底和 Web 模型引文的解析，按学历词及限定词、薪资金额和计薪周期提取。
+2. 在构造候选岗位时复用已预抓的详情核验结果，保留明确下线判断，避免被超时或额外核验预算覆盖。补充下线文案和投递截止时间识别。
+3. 在去重、候选推送和结果数统计时区分可用与不可用链接，避免跨链接复制在招状态。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/search/text_extract.py`、`project/agent/app/search/models.py` | 规范学历、薪资和不可用状态判定 | 修复串字段、单值和日薪解析 |
+| 修改 | `project/agent/app/search/sources/web.py`、`project/agent/app/search/sources/detail.py` | 复用详情核验、补充下线识别 | 把实际页面状态传入候选记录 |
+| 修改 | `project/agent/app/search/dedupe.py`、`project/agent/app/search/pipeline.py` | 结合链接可用性处理去重与进度 | 避免无效链接覆盖同岗可用链接 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加本阶段记录 | 记录实际变更 |
+
+**执行命令与验证：**
+
+- 命令：`rg`、`Get-Content`，核对调用方和现有测试。
+- 结果：源码已修改，自动化回归待执行。
+
+**影响范围：** Agent 岗位搜索信息提取和在招状态，闭岗信息仍随内部结果供后端统计。
+
+**遗留问题：** 待修复后端入榜和历史分页，同时完善前端投递计划预填。
+
+---
+
+### [2026-11-23 19:50:35] 过滤不可用岗位并修复投递计划预填
+
+**任务目标：** 从新旧推荐结果中排除已知不可用链接，为投递计划提供独立字段。
+
+**执行行为：**
+
+1. 后端在打分和截断前排除明确下线、HTTP 404/410 和详情跳转到其他路径的候选，保留淘汰计数。对历史分页的列表与总数使用同一筛选条件。
+2. 搜索结果接口返回有长度上限的岗位正文摘要及核验字段。
+3. 投递计划按学历、薪资和职位简介预填。兼容历史快照中跟在学历之后的薪资文本，搜索列表也复用相同的薪资显示逻辑。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobSearchResultHandler.java` | 过滤已下线或详情不可达的推荐候选 | 修复榜尾仍显示关闭岗位 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobSearchMapper.java`、`project/backend/src/main/java/com/aijob/backend/job/JobSearchService.java` | 历史分页和计数过滤，返回岗位摘要及核验信息 | 兼容既有结果并补齐预填数据 |
+| 新增 | `project/frontend/src/utils/job-search-fields.ts` | 统一学历和薪资预填，处理历史串字段 | 支持旧搜索记录 |
+| 修改 | `project/frontend/src/api/types.ts`、`project/frontend/src/views/job-match/JobMatchView.vue`、`project/frontend/src/views/job-search/JobSearchView.vue` | 接入摘要、学历和薪资 | 修复投递表单预填和结果显示 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加本阶段记录 | 跟踪变更 |
+
+**执行命令与验证：**
+
+- 命令：`rg`、`Get-Content`，核对列表、表单和搜索结果接口调用方。
+- 结果：源码已修改，自动化回归待执行。
+
+**影响范围：** AI 搜索列表和投递计划表单。历史列表按已有核验信息过滤，既有数据仍保留。
+
+**遗留问题：** 待复现两个截图样式的字段串联和多种关闭证据，并验证分页计数。
+
+---
+
+### [2026-11-23 19:51:35] 执行首轮 Agent、Java 和前端验证
+
+**任务目标：** 检查三端修改及现有测试预期。
+
+**执行行为：**
+
+1. 执行 Agent 搜索和核验相关用例，定位到 2 个动态渲染用例在当前 Python 环境缺少 Playwright。
+2. 执行 Java 搜索落库用例，原有断言仍要求关闭岗位进入榜尾，需要按修复后的行为更新。
+3. 执行前端 Vue/TypeScript 类型检查。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加首轮验证结果 | 如实记录失败与后续动作 |
+
+**执行命令与验证：**
+
+- `python -m pytest tests -k 'job_search or verification or search_providers or search_recovery' -q`：失败。2 个动态渲染用例缺少 Playwright。
+- `mvn -o -B -Dtest=JobSearchResultHandlerTest test`：失败。9 个用例中 1 个旧榜尾断言失败，1 个既有用例跳过。
+- `npm run type-check`：通过。
+
+**影响范围：** 验证生成的产物位于现有构建与缓存目录，无业务数据变更。
+
+**遗留问题：** 更新回归断言并使用可用的浏览器依赖重新验证。
+
+---
+
+### [2026-11-23 19:56:21] 补充回归用例并核对历史分页 SQL
+
+**任务目标：** 覆盖截图格式、预算耗尽和历史失效状态，确认分页不出现数量偏差。
+
+**执行行为：**
+
+1. 更新旧用例中下线岗位排在榜尾的预期，新增截止、下线、404/410、重定向和同链接重复记录用例。
+2. 增加岗位详情预抓有结果但核验预算为 0，以及学历、单值薪资和日薪的提取用例。
+3. 使用独立临时目录启动 MySQL 8.0.42，构造 9 条不含业务数据的快照，验证真实 SQL 的总数、分页和岗位摘要长度。查询断言通过，停止临时实例后的第一次目录清理因文件句柄仍占用未完成。
+4. 在项目外的系统临时目录安装测试用 Playwright Python 包。浏览器首次启动时预期的 Chromium 修订版本与机器已有版本不同，改用显式指定的已有浏览器执行前端验证。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/search/text_extract.py`、`project/agent/app/search/sources/detail.py`、`project/agent/app/search/dedupe.py` | 增补薪资边界、关闭文案和同链接核验优先级 | 回归验证覆盖更多输入 |
+| 修改 | `project/agent/tests/test_job_search_verification_flow.py`、`project/agent/tests/test_job_search_dedupe.py` | 增加提取和详情核验回归 | 防止重复出现 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/job/JobSearchResultHandlerTest.java`、`project/backend/src/test/java/com/aijob/backend/job/JobMapperSqlTest.java` | 断言入榜前过滤及历史分页共用条件 | 验证后端行为 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 记录测试及临时环境行为 | 跟踪回归 |
+
+**执行命令与验证：**
+
+- `python -m pytest tests/test_job_search_verification_flow.py tests/test_job_search_dedupe.py tests/test_job_search_official_priority.py -q`：30 个通过。
+- `mvn -o -B -Dtest=JobSearchResultHandlerTest,JobMapperSqlTest test`：构建成功，11 个通过，1 个已有外部样本用例跳过。
+- `mysqld --initialize-insecure`、`mysql --batch`：MySQL 8.0.42 实际 SQL 查询断言通过。总数为 3，第一页 2 条，第二页 1 条，并核对摘要为 1000 字符。首次清理存在文件占用，待复核。
+- `npm run dev -- --host 127.0.0.1 --port 5189 --strictPort`：临时前端启动成功。
+
+**影响范围：** 搜索和投递计划回归测试，业务数据库与依赖清单未变更。
+
+**遗留问题：** 待完成浏览器验证、全量相关 Agent 回归及临时资源复核。
+
+---
+
+### [2026-11-23 19:59:37] 完成搜索、历史分页和投递表单验收
+
+**任务目标：** 完成回归，核对两处修复的实际可用性。
+
+**执行行为：**
+
+1. 复跑 Agent 核验、解析、去重、来源恢复和动态渲染用例。使用系统临时目录内与 Playwright 版本对应的 Chromium，不改项目依赖。
+2. 前端在临时 Vite 服务进入 `/jobs?tab=search&searchId=search-qa`，通过 Playwright 和模拟 API 检查两条岗位。确认列表可见且无浏览器异常，点击“加入投递计划”后两组数据分别为“硕士 / 9000-12000元”和“本科及以上 / 12K”，同时核对摘要和第二条的待核验提示。点击保存后检查请求体中的岗位 ID、学历、薪资、简述和待投递状态。
+3. 停止本次启动的临时 Vite 监听并核对 5189 端口已关闭。独立测试 MySQL 实例已退出；其临时目录的递归清理重试被命令审批策略拦截，保留残余临时文件。
+4. 核对工作区涉及的文件及过程记录。实际工作区的既有未提交修改继续保留。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 修改 | `project/agent/app/search/sources/detail.py`、`project/agent/tests/test_job_search_verification_flow.py` | 补充已结束等状态文案，验证过期、当天和未来截止日 | 防止误筛有效岗位 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobSearchResultHandler.java` | 兼容旧核验字段中的关闭证据 | 统一新旧入榜判断 |
+| 修改 | `project/frontend/src/utils/job-search-fields.ts`、`project/frontend/src/views/job-search/JobSearchView.vue` | 清理旧薪资混合文本，显示在招状态待核验 | 兼容旧数据并提示核验状态 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加验收和遗留事项 | 完整记录本次工作 |
+| 新增 | 系统临时目录 `aijob-job-search-ui-qa/` | 浏览器脚本、两张截图、前端构建产物 | 保留独立验收证据 |
+
+**执行命令与验证：**
+
+- `python -m pytest -o addopts= tests -k 'job_search or verification or search_providers or search_recovery' -q`：167 个通过，1 个已有依赖弃用提示。
+- `mvn -o -B -Dtest=Job*Test test`：构建成功，32 个通过，1 个既有外部样本用例跳过。
+- `npm run build -- --outDir <临时目录>`：通过，Vite 提示主包体积超出默认提醒阈值。
+- `python <临时目录>/check_ui.py`：通过。1440×1020 桌面 Chromium 下验证表单预填、在招状态提示及模拟保存请求。
+- `git diff --check`：相关文件通过，Git 提示部分已有文件换行规则为 CRLF。
+
+**影响范围：** 岗位搜索候选和历史搜索分页、投递计划预填。数据库验证使用独立测试数据，无迁移或业务数据写入。
+
+**遗留问题：** 未调用真实招聘平台复查截图中的岗位，历史结果按已有核验信息处理。开发修改位于本地工作区。临时 MySQL 数据目录 `aijob-job-search-mysql-8qfqj7aa` 有残余文件。
+
+---
