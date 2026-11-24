@@ -17,3 +17,20 @@ htmlcov/
 /docs/AITO-apiKey-*.csv
 /project/backend/data/private-files/
 /project/agent/data/*.db*
+# Local integration fixtures with real resume content (never commit)
+/project/backend/.local-fixtures/
+
+# Root debug/evidence artifacts (contain resume snippets, local-only)
+/dbg-*.json
+/dbg-*.log
+/dbg-*.hex
+/dbg-*.b64
+# Browser closed-loop verification artifacts (local-only, review evidence)
+/closed-loop-downloads/
+/edge-loop-profile/
+/loop-bats/
+/project/frontend/closed-loop-*.log
+/project/frontend/closed-loop.cjs
+/project/backend/java-loop.log
+/project/frontend/vite-loop.log
+/project/agent/agent-loop.log

@@ -610,6 +610,18 @@ const exportErrorHint = computed(() => {
   return '请确认优化稿已采纳且服务端文件生成可用后重试。'
 })
 
+/** 失败提示区分原因（引用校验失败/模型服务不可用/内容超限），与当前任务 error 一致 */
+const optimizationFailureTitle = computed(() => {
+  const taskErrorInfo = activeTaskId.value && task.value?.resourceId === currentOptimization.value?.taskId ? task.value?.error : null
+  const code = taskErrorInfo?.code
+  if (code === 'MODEL_OUTPUT_INVALID') return '优化稿生成失败：模型输出的原文引用未通过校验'
+  if (code === 'MODEL_PROVIDER_ERROR') return '优化稿生成失败：模型服务暂时不可用'
+  if (code === 'MODEL_CONTENT_TOO_LARGE') return '优化稿生成失败：内容超出模型处理上限'
+  return '优化稿生成失败'
+})
+const optimizationFailureHint = computed(() =>
+  '可使用原简历版本和岗位重新发起定向优化；若多次失败，请先在简历中心确认该版本文本内容完整。')
+
 async function refreshHistories(openLatest = false) {
   await Promise.all([loadDiagnoses(openLatest), loadOptimizations()])
 }
@@ -733,7 +745,10 @@ onMounted(() => {
           <el-button v-if="(task?.status === 'FAILED' || task?.status === 'EXPIRED') && task.error?.retryable" type="primary" :loading="taskActionLoading" @click="retryFailedTask">按原参数重试任务</el-button>
         </template>
       </TaskStatus>
-      <pre v-if="deltaText" class="task-delta pre-wrap">{{ deltaText }}</pre>
+      <details v-if="deltaText" class="task-delta-details">
+        <summary>查看任务过程输出（模型修复重试的过程说明较长，默认折叠）</summary>
+        <pre class="task-delta pre-wrap">{{ deltaText }}</pre>
+      </details>
       <el-alert v-if="taskRetryError" class="inline-alert" type="error" :title="`重试失败：${errorMessage(taskRetryError)}`" description="可使用上方业务按钮按当前选择重新提交。" :closable="false" show-icon />
       <el-alert v-if="taskAuthorityError" class="inline-alert" type="error" :title="`任务完成，但业务详情加载失败：${errorMessage(taskAuthorityError)}`" :closable="false" show-icon>
         <template #default><el-button text type="primary" @click="retryTaskAuthority">重新加载权威详情</el-button></template>
@@ -819,8 +834,8 @@ onMounted(() => {
               </div>
               <span class="muted">岗位：{{ selectedJob ? jobLabel(selectedJob) : currentOptimization.jobId }}</span>
             </div>
-            <WaitStatus v-if="currentOptimization.status === 'GENERATING' && !taskRunning && !taskLoading && !taskError" title="正在生成优化稿" />
-            <el-alert v-if="currentOptimization.status === 'FAILED'" class="inline-alert" type="error" title="优化稿生成失败，请使用原简历版本和岗位重新发起。" :closable="false" show-icon />
+            <WaitStatus v-if="currentOptimization.status === 'GENERATING' && !taskRunning && !taskLoading && !taskError" title="正在生成优化稿" :description="currentOptimization.taskId === activeTaskId ? '当前任务正在生成，完成后自动更新。' : '该优化稿由另一次任务生成中（可能是重试任务），完成或失败后会更新状态。'" />
+            <el-alert v-if="currentOptimization.status === 'FAILED'" class="inline-alert" type="error" :title="optimizationFailureTitle" :description="optimizationFailureHint" :closable="false" show-icon />
             <el-alert v-if="conflictMessage" class="inline-alert" type="error" title="优化稿版本冲突" :description="conflictMessage" :closable="false" show-icon>
               <template #default>
                 <div class="actions conflict-actions">
@@ -846,16 +861,16 @@ onMounted(() => {
                     <article v-for="(section, index) in currentOptimization.sections" :key="section.sectionKey" class="section-card">
                       <div class="section-card__heading"><h3>{{ section.title }}</h3><el-button v-if="canEditOptimization" size="small" @click="acceptSection(index)">接受此段建议</el-button></div>
                       <div class="section-compare">
-                        <div class="text-column original"><h4>原文 originalText</h4><p class="pre-wrap">{{ section.originalText || '无原文' }}</p></div>
-                        <div class="text-column suggested"><h4>AI 建议 suggestedText · 非事实，待核对</h4><p class="pre-wrap">{{ section.suggestedText || '无建议文本' }}</p></div>
+                        <div class="text-column original"><h4>简历原文（逐字引用自你的简历）</h4><p class="pre-wrap">{{ section.originalText || '无原文' }}</p></div>
+                        <div class="text-column suggested"><h4>AI 建议（候选改写，非事实，待本人核对）</h4><p class="pre-wrap">{{ section.suggestedText || '无建议文本' }}</p></div>
                       </div>
                       <div class="source-quotes">
-                        <strong>sourceQuotes 原文依据</strong>
+                        <strong>原文依据（来自你简历的原句）</strong>
                         <blockquote v-for="quote in section.sourceQuotes" :key="quote" class="pre-wrap">{{ quote }}</blockquote>
                         <p v-if="!section.sourceQuotes.length" class="muted">未返回原文引用，请谨慎核对。</p>
                       </div>
                       <label class="final-editor">
-                        <span>最终文本 content</span>
+                        <span>最终文本（本人核对后提交，仅此文本会被采纳与导出）</span>
                         <el-input v-if="draftSections[index]" v-model="draftSections[index].content" type="textarea" :rows="7" maxlength="10000" show-word-limit resize="vertical" :disabled="!canEditOptimization" placeholder="请输入本人核对后的最终文本" />
                       </label>
                     </article>
