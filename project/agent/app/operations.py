@@ -123,7 +123,7 @@ PROMPT_VERSIONS: dict[str, str] = {
     RESUME_PARSE: "resume-parse-v3",
     RESUME_OCR: "resume-ocr-v1",
     RESUME_DIAGNOSE: "resume-diagnose-v5",
-    RESUME_OPTIMIZE: "resume-optimize-v1",
+    RESUME_OPTIMIZE: "resume-optimize-v2",
     JD_ANALYZE: "jd-analyze-v3",
     JOB_MATCH: "semantic-v2",
     JOB_SEARCH: "job-search-v1",

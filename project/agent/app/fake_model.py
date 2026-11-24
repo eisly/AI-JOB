@@ -626,25 +626,24 @@ def _resume_diagnose(request: LLMRequest) -> dict[str, Any]:
 
 
 def _resume_optimize(request: LLMRequest) -> dict[str, Any]:
-    lines = _lines(_text(request))
-    quote = next(
-        (
-            line
-            for line in lines
-            if any(keyword in line for keyword in ("经历", "项目", "实习", "工作"))
-        ),
-        lines[0] if lines else "",
-    )[:10000]
-    suggested = quote if quote.endswith(("。", "！", "？", ".", "!", "?")) else quote + "。"
+    # 行号引用协议（resume-optimize-v2）：documentText 每行带 [L数字] 标记，
+    # fake 模型同样以行号区间引用原文（与真实模型输出结构一致）。
+    marked_lines = _lines(_text(request))
+    target = 1
+    for index, marked in enumerate(marked_lines, 1):
+        content = re.sub(r"^\[L\d+\]\s*", "", marked)
+        if content and any(keyword in content for keyword in ("经历", "项目", "实习", "工作")):
+            target = index
+            break
     return {
         "title": "定向优化候选建议",
         "sections": [
             {
                 "sectionKey": "experience",
                 "title": "经历表述候选调整",
-                "originalText": quote,
-                "suggestedText": suggested,
-                "sourceQuotes": [quote[:1000]],
+                "originalSpan": {"start": target, "end": target},
+                "suggestedText": "在保留原有事实的基础上，补充本人可核实的成果说明；缺少量化数据时提示本人补充。",
+                "sourceSpans": [{"start": target, "end": target}],
             }
         ],
     }

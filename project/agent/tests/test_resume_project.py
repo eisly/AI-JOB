@@ -123,16 +123,39 @@ def _diagnosis_output(quote="使用Redis实现缓存", assessment=True, extra_qu
     )
 
 
+def _optimize_prepared(text: str = RESUME_TEXT) -> dict:
+    """按 ResumeOptimizeHandler.prepare 的行级片段契约构造 prepared（与生产同构）。"""
+    source = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = source.split("\n")
+    offsets: list[int] = []
+    pos = 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line) + 1
+    marked = "\n".join(f"[L{index + 1}] {line}" for index, line in enumerate(lines))
+    return {
+        "document_text": marked,
+        "document_source_text": source,
+        "document_lines": lines,
+        "document_line_offsets": offsets,
+    }
+
+
 def _optimize_output():
-    return AIResumeOptimizeResult(
+    # 行号引用草稿（resume-optimize-v2）：RESUME_TEXT 第 2 行为实习经历行
+    from app.schemas import LineSpan, ResumeOptimizeSectionDraft
+
+    from app.schemas import AIResumeOptimizeDraft
+
+    return AIResumeOptimizeDraft(
         title="候选优化",
         sections=[
-            ResumeOptimizeSection(
+            ResumeOptimizeSectionDraft(
                 sectionKey="experience",
                 title="经历",
-                originalText="使用Redis实现缓存",
-                suggestedText="使用Redis实现缓存。",
-                sourceQuotes=["参与Java接口开发"],
+                originalSpan=LineSpan(start=2, end=2),
+                suggestedText="在保留原有事实的基础上补充本人可核实的成果说明。",
+                sourceSpans=[LineSpan(start=2, end=2)],
             )
         ],
     )
@@ -401,25 +424,29 @@ async def test_resume_diagnose_disables_thinking_and_restores_original_quote():
 def test_resume_optimize_validates_references_and_unique_section_keys():
     payload = ResumeOptimizePayload.model_validate(resume_optimize_envelope(uuid4())["payload"])
     handler = ResumeOptimizeHandler()
-    result = handler.validate_business(
-        _ctx(payload), _optimize_output(), {"document_text": RESUME_TEXT}, {}
-    )
+    prepared = _optimize_prepared()
+    result = handler.validate_business(_ctx(payload), _optimize_output(), prepared, {})
     assert result.sections[0].section_key == "experience"
+    # 行号引用回填：originalText 为第 2 行原文的逐字切取（Java requireSource 严格子串）
+    assert result.sections[0].original_text == "实习经历：使用Redis实现缓存，参与Java接口开发。"
+    assert prepared["document_source_text"].find(result.sections[0].original_text) >= 0
+    assert result.sections[0].source_quotes == ["实习经历：使用Redis实现缓存，参与Java接口开发。"]
 
     output = _optimize_output()
     output.sections.append(output.sections[0].model_copy(deep=True))
     with pytest.raises(HandlerValidationError, match="sectionKey 必须唯一"):
-        handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
+        handler.validate_business(_ctx(payload), output, prepared, {})
 
     output = _optimize_output()
-    output.sections[0].original_text = "虚构项目经历"
-    with pytest.raises(HandlerValidationError, match="originalText 必须来自"):
-        handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
+    output.sections[0].original_span.end = 99
+    with pytest.raises(HandlerValidationError, match="originalSpan 引用了未知行号"):
+        handler.validate_business(_ctx(payload), output, prepared, {})
 
     output = _optimize_output()
-    output.sections[0].source_quotes = ["虚构技能"]
-    with pytest.raises(HandlerValidationError, match="sourceQuotes 必须来自"):
-        handler.validate_business(_ctx(payload), output, {"document_text": RESUME_TEXT}, {})
+    output.sections[0].source_spans[0].start = 0
+    # 属性赋值绕过 pydantic 构造校验，行号非法由业务校验（_slice_span）拒绝
+    with pytest.raises(HandlerValidationError, match="sourceSpans\\[0\\] 引用了未知行号"):
+        handler.validate_business(_ctx(payload), output, prepared, {})
 
 
 def test_project_plan_checks_sequence_and_hour_budget():
@@ -556,5 +583,12 @@ def test_new_prompts_load_and_fake_outputs_share_result_contract(operation, fact
     first = fake_llm_from_payload(request)
     second = fake_llm_from_payload(request)
     assert first == second
-    validated = validate_result_contract(operation, first)
+    if operation == RESUME_OPTIMIZE:
+        # v2 行号引用：fake 输出为模型原始草稿，与 handler.output_model（Draft）共享契约；
+        # 对外 AIResumeOptimizeResult 由 validate_business 回填后产生（Java 端契约不变）
+        from app.schemas import AIResumeOptimizeDraft
+
+        validated = AIResumeOptimizeDraft.model_validate(first).model_dump(by_alias=True)
+    else:
+        validated = validate_result_contract(operation, first)
     assert isinstance(validated, dict)

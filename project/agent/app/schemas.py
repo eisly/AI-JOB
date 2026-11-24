@@ -359,6 +359,27 @@ class AIResumeOptimizeResult(APIModel):
     sections: list[ResumeOptimizeSection] = Field(min_length=1, max_length=20)
 
 
+class LineSpan(APIModel):
+    """原文行号区间（闭区间，1 起始）。服务端按原文偏移逐字切取，模型不得抄写原文。"""
+    start: int = Field(ge=1)
+    end: int = Field(ge=1)
+
+
+class ResumeOptimizeSectionDraft(APIModel):
+    """模型输出的优化段落草稿：以行号区间引用原文，由服务端回填为最终结构。"""
+    section_key: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=200)
+    original_span: LineSpan
+    suggested_text: str = Field(min_length=1, max_length=10000)
+    source_spans: list[LineSpan] = Field(default_factory=list, max_length=10)
+
+
+class AIResumeOptimizeDraft(APIModel):
+    """定向优化内部输出模型（Agent 内部实现，对外仍输出 AIResumeOptimizeResult）。"""
+    title: str = Field(min_length=1, max_length=200)
+    sections: list[ResumeOptimizeSectionDraft] = Field(min_length=1, max_length=20)
+
+
 RepoPlatform = Literal["GITHUB", "GITEE", "GITCODE"]
 RepoSourceStatus = Literal["SUCCEEDED", "FAILED"]
 

@@ -69,6 +69,7 @@ def build_model_input(
             "jobVersion": payload.get("jobVersion"),
             "jdText": str(payload.get("jdText", ""))[:30000],
             "diagnosis": payload.get("diagnosis"),
+            # 行号标记文本（与 prepare 的行级片段方案配套）：模型按 [L行号] 引用原文行
             "documentText": context.get("document_text", ""),
         }
     if operation == "JD_ANALYZE":

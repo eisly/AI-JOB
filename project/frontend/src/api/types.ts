@@ -246,6 +246,7 @@ export interface ResumeOptimizationVO {
   resumeVersionId: string
   jobId: string
   diagnosisId: string | null
+  taskId: string
   status: 'GENERATING' | 'READY' | 'ACCEPTED' | 'FAILED'
   title: string | null
   sections: OptimizationSection[]

@@ -60,7 +60,10 @@ from .schemas import (
     AIQuestionResult,
     AIGrowthResult,
     AIResumeDiagnoseResult,
+    AIResumeOptimizeDraft,
     AIResumeOptimizeResult,
+    LineSpan,
+    ResumeOptimizeSection,
     AIResumeOcrResult,
     Citation,
     GitHubLookup,
@@ -264,8 +267,12 @@ class BaseHandler:
                 user_prompt=user_prompt + repair_note,
                 schema_hint=schema_hint,
                 context=context,
+                # thinking=False 名单（仅名单内操作关闭推理模式）：RESUME_OPTIMIZE 因
+                # ①行号引用协议降低对推理的依赖 ②历史 finish_reason=length（thinking
+                # 消耗 16K 输出预算）而加入；不影响其他 Agent 功能。
                 thinking=False if self.operation in {
                     RESUME_PARSE, RESUME_DIAGNOSE, PROJECT_RECOMMEND, PROJECT_PLAN, INTERVIEW_TURN,
+                    RESUME_OPTIMIZE,
                 } else None,
             )
             logger.info("model call attempt=%s user_chars=%s thinking=%s",
@@ -733,32 +740,98 @@ class ResumeDiagnoseHandler(BaseHandler):
 class ResumeOptimizeHandler(BaseHandler):
     operation = RESUME_OPTIMIZE
     payload_model = ResumeOptimizePayload
-    output_model = AIResumeOptimizeResult
+    # 模型输出为行号引用草稿（Agent 内部实现）；validate_business 回填后仍产出
+    # AIResumeOptimizeResult —— 对外接口（Agent→Java）零变更。
+    output_model = AIResumeOptimizeDraft
     prompt_version = PROMPT_VERSIONS[RESUME_OPTIMIZE]
 
     async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
         document = await ctx.files.extract(ctx.payload.document)
-        return {"document_text": document.text}
+        # 行级片段方案（服务端生成、绑定当前任务快照）：
+        # - lines/offsets 由本任务 documentText 派生，模型只能引用已有行号；
+        # - 模型收到的 documentText 为带 [L行号] 内联标记的文本，所见即所选；
+        # - 回填时按 offset 从原文逐字切取（不改标点、不补文字、不跨段拼接）。
+        text = document.text
+        lines = text.split("\n")
+        offsets: list[int] = []
+        pos = 0
+        for line in lines:
+            offsets.append(pos)
+            pos += len(line) + 1
+        marked = "\n".join(f"[L{index + 1}] {line}" for index, line in enumerate(lines))
+        return {
+            "document_text": marked,
+            "document_source_text": text,
+            "document_lines": lines,
+            "document_line_offsets": offsets,
+        }
+
+    def _slice_span(self, text: str, offsets: list[int], lines: list[str], span: LineSpan,
+                    label: str) -> str:
+        if span.end < span.start:
+            raise HandlerValidationError(
+                f"{label} 行号区间非法: start={span.start} end={span.end}（end 不得小于 start）")
+        if span.start < 1 or span.end > len(lines):
+            raise HandlerValidationError(
+                f"{label} 引用了未知行号: start={span.start} end={span.end}"
+                f"（合法范围 1..{len(lines)}，请从 documentText 的 [L行号] 标记中选择）")
+        start_off = offsets[span.start - 1]
+        end_off = offsets[span.end - 1] + len(lines[span.end - 1])
+        return text[start_off:end_off]
 
     def validate_business(
         self,
         ctx: ExecutionContext,
-        output: AIResumeOptimizeResult,
+        output: AIResumeOptimizeDraft,
         prepared: dict[str, Any],
         meta: dict[str, Any],
     ) -> AIResumeOptimizeResult:
-        text = prepared["document_text"]
+        text = prepared["document_source_text"]
+        offsets = prepared["document_line_offsets"]
+        lines = prepared["document_lines"]
         section_keys: set[str] = set()
+        sections: list[ResumeOptimizeSection] = []
         for section in output.sections:
             if section.section_key in section_keys:
                 raise HandlerValidationError(f"sectionKey 必须唯一: {section.section_key}")
             section_keys.add(section.section_key)
+            original = self._slice_span(
+                text, offsets, lines, section.original_span,
+                f"段落 {section.section_key} 的 originalSpan")
+            if not original.strip():
+                raise HandlerValidationError(
+                    f"段落 {section.section_key} 的 originalSpan 指向空行区间，请选择包含内容的行")
+            if len(original) > 10000:
+                raise HandlerValidationError(
+                    f"段落 {section.section_key} 的 originalSpan 切取长度 {len(original)}"
+                    " 超过 10000 字符上限，请缩小行区间")
+            quotes: list[str] = []
+            for index, span in enumerate(section.source_spans):
+                quote = self._slice_span(
+                    text, offsets, lines, span,
+                    f"段落 {section.section_key} 的 sourceSpans[{index}]")
+                if not quote.strip():
+                    raise HandlerValidationError(
+                        f"段落 {section.section_key} 的 sourceSpans[{index}] 指向空行区间")
+                quotes.append(quote)
+            sections.append(ResumeOptimizeSection(
+                section_key=section.section_key,
+                title=section.title,
+                original_text=original,
+                suggested_text=section.suggested_text,
+                source_quotes=quotes,
+            ))
+        result = AIResumeOptimizeResult(title=output.title, sections=sections)
+        # 红线兜底：回填内容必须仍是原文子串（正常必过；防御性保留宽松校验）
+        for section in result.sections:
             if not quote_in_text(section.original_text, text):
-                raise HandlerValidationError(f"段落 {section.section_key} 的 originalText 必须来自简历授权原文")
+                raise HandlerValidationError(
+                    f"段落 {section.section_key} 回填后的 originalText 不属于授权原文（内部错误）")
             for quote in section.source_quotes:
                 if not quote_in_text(quote, text):
-                    raise HandlerValidationError(f"段落 {section.section_key} 的 sourceQuotes 必须来自简历授权原文")
-        return AIResumeOptimizeResult(title=output.title, sections=output.sections)
+                    raise HandlerValidationError(
+                        f"段落 {section.section_key} 回填后的 sourceQuotes 不属于授权原文（内部错误）")
+        return result
 
 
 class JDAnalyzeHandler(BaseHandler):
