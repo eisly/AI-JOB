@@ -102,3 +102,16 @@ app:
     max-total: ${JOB_SEARCH_MAX_TOTAL:60}
     concurrency: ${JOB_SEARCH_CONCURRENCY:4}
     source-timeout-seconds: ${JOB_SEARCH_SOURCE_TIMEOUT_SECONDS:12}
+  account:
+    sms-code:
+      ttl-seconds: ${APP_ACCOUNT_SMS_CODE_TTL_SECONDS:600}
+      max-attempts: ${APP_ACCOUNT_SMS_CODE_MAX_ATTEMPTS:5}
+      cooldown-seconds: ${APP_ACCOUNT_SMS_CODE_COOLDOWN_SECONDS:60}
+    password:
+      max-failures: ${APP_ACCOUNT_PASSWORD_MAX_FAILURES:5}
+      lock-seconds: ${APP_ACCOUNT_PASSWORD_LOCK_SECONDS:900}
+    avatar:
+      max-bytes: ${APP_ACCOUNT_AVATAR_MAX_BYTES:2097152}
+  sms:
+    enabled: ${APP_SMS_ENABLED:false}
+    expose-code-in-response: ${APP_SMS_EXPOSE_CODE_IN_RESPONSE:false}

@@ -33,4 +33,20 @@ class JobMapperSqlTest {
             assertTrue(sql.contains(JobSearchMapper.AVAILABLE_SEARCH_ITEM.strip()), sql);
         }
     }
+
+    @Test
+    void privatePageOnlyReturnsPersonalSources() {
+        Configuration config = new Configuration();
+        config.addMapper(JobMapper.class);
+        Map<String, Object> params = new HashMap<>(Map.of("size", 6, "offset", 0, "userId", "user"));
+        String page = config.getMappedStatement(JobMapper.class.getName() + ".privatePage")
+                .getBoundSql(params).getSql();
+        assertTrue(page.contains("s.type IN ('USER_INPUT','SAVED_SEARCH')"), page);
+        String count = config.getMappedStatement(JobMapper.class.getName() + ".privateCount")
+                .getBoundSql(params).getSql();
+        assertTrue(count.contains("s.type IN ('USER_INPUT','SAVED_SEARCH')"), count);
+        String saved = config.getMappedStatement(JobMapper.class.getName() + ".savedPersonalJobId")
+                .getBoundSql(Map.of("userId", "user", "sourceJobId", "job")).getSql();
+        assertTrue(saved.contains("savedFromJobId"), saved);
+    }
 }

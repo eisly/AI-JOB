@@ -284,7 +284,7 @@ onMounted(async () => {
               </template>
             </div>
             <div class="session-actions">
-              <el-button v-if="currentInterview.status === 'WAITING_ANSWER'" type="danger" plain :loading="ending" :disabled="!!activeTask && !isTerminalTask(activeTask.status)" @click="endInterview">结束面试并生成报告</el-button>
+              <el-button v-if="currentInterview.status === 'WAITING_ANSWER'" type="danger" plain :loading="ending" :disabled="!!activeTask && !isTerminalTask(activeTask.status)" @click="endInterview()">结束面试并生成报告</el-button>
               <el-button v-if="currentInterview.status === 'COMPLETED'" type="primary" plain :loading="reportLoading" @click="loadReport(currentInterview.id)">查看 / 刷新报告</el-button>
             </div>
           </template>
@@ -296,8 +296,10 @@ onMounted(async () => {
         v-if="currentInterview?.status === 'COMPLETED' || report || reportLoading || reportError"
         :report="report"
         :loading="reportLoading"
+        :reevaluating="ending || (!!activeTask && !isTerminalTask(activeTask.status))"
         :error="reportError"
         @retry="loadReport(selectedInterviewId)"
+        @reevaluate="endInterview(true)"
       />
     </template>
 
@@ -314,8 +316,8 @@ onMounted(async () => {
               <el-tag size="small" :type="item.mode === 'VOICE' ? 'primary' : 'info'">{{ item.mode === 'VOICE' ? '语音' : '文字' }}</el-tag>
               <el-tag size="small" :type="item.status === 'COMPLETED' ? 'success' : item.status === 'FAILED' ? 'danger' : 'primary'">{{ commonStatusLabels[item.status] || item.status }}</el-tag>
               <el-tag v-if="item.completionType === 'EARLY_END'" size="small" type="warning">提前结束</el-tag>
-              <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER'" size="small" type="info">无有效回答</el-tag>
-              <span class="muted">有效回答 {{ item.answeredCount ?? 0 }} 次（含追问） · 计划 {{ item.questionLimit }} 个主问题</span>
+              <el-tag v-else-if="item.completionType === 'NO_VALID_ANSWER' && !item.answeredCount" size="small" type="info">未作答</el-tag>
+              <span class="muted">已回答 {{ item.answeredCount ?? 0 }} 次（含追问） · 计划 {{ item.questionLimit }} 个主问题</span>
               <time class="muted">{{ formatDate(item.createdAt) }}</time>
             </button>
             <div class="history-item__actions">

@@ -2,6 +2,7 @@ package com.aijob.backend.task;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -122,6 +123,38 @@ class SevenCaseIntegrationTest {
         assertEquals("SUCCEEDED", tasks.cancel(user, succeeded.getId()).get("status"));
     }
 
+    @Test
+    void savedComparisonUsesTheSelectedParsedResume() {
+        String requirement = "能排查 Redis 缓存一致性问题";
+        String quote = "为商品详情接口加入 Redis 缓存";
+        jdbc.update("UPDATE job SET status='ACTIVE' WHERE id=?", job);
+        jdbc.update("UPDATE job_version SET jd_text=?,requirements_json='{}' WHERE job_id=?", requirement, job);
+        jdbc.update("UPDATE resume_version SET status='PARSED',extracted_text=? WHERE id=?", "项目：" + quote, resume);
+        Object profileVersion = profiles.get(user).get("profileVersion");
+        String route = "/api/v1/job-matches";
+        assertThrows(BusinessException.class, () -> jobService.match(user, route, id(),
+                Map.of("expectedProfileVersion", profileVersion, "resumeVersionId", id(), "jobIds", List.of(job))));
+
+        String key = id();
+        jobService.match(user, route, key,
+                Map.of("expectedProfileVersion", profileVersion, "resumeVersionId", resume, "jobIds", List.of(job)));
+        String taskId = jdbc.queryForObject("SELECT id FROM ai_task WHERE user_id=? AND idempotency_key=?",
+                String.class, user, key);
+        AiTask comparison = taskMapper.find(taskId);
+        assertEquals("项目：" + quote, json.map(comparison.getInputSnapshotJson()).get("resumeText"));
+        jobs.success(comparison, json.tree(Map.of("items", List.of(Map.of("jobId", job, "jobVersion", 1,
+                "requirementEvidence", List.of(Map.of("requirementQuote", requirement, "resumeQuote", quote,
+                        "supportLevel", "PARTIAL", "gapTitle", "缺少一致性排查经验", "gapSummary", "简历未体现如何处理缓存失效。")))))));
+
+        var saved = json.tree(jobService.match(user, comparison.getResourceId()));
+        assertEquals(resume, saved.path("resumeVersionId").asText());
+        assertEquals("隔离测试简历", saved.path("resumeName").asText());
+        assertEquals("Java", saved.path("targetTitle").asText());
+        var gap = saved.path("items").get(0).path("requirementEvidence").get(0);
+        assertEquals(quote, gap.path("resumeQuote").asText());
+        assertEquals("简历未体现如何处理缓存失效。", gap.path("gapSummary").asText());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"SKILLS", "NO_SKILLS", "INVALID"})
     void actualInterviewPersistenceNeverInventsSkillScores(String mode) {
@@ -155,13 +188,45 @@ class SevenCaseIntegrationTest {
         }
         AiTask report = task("INTERVIEW_REPORT", "INTERVIEW_REPORT", session, Map.of(), Map.of("completionType", "NORMAL"));
         interviewMapper.updateTaskStatus(session, "ENDING", report.getId());
-        interviews.success(report, json.tree(Map.of("evaluation", evaluation)));
+        Map<String, Object> reportEvaluation = new LinkedHashMap<>(evaluation);
+        if (mode.equals("INVALID")) {
+            interviewMapper.insertReport(id(), session, report.getId(),
+                    json.stringify(Map.of("evaluation", evaluation)), null, "NO_VALID_ANSWER");
+            interviewMapper.complete(session, report.getId());
+            taskMapper.succeed(turn.getId(), "{}", json.digest(Map.of()));
+            taskMapper.succeed(report.getId(), "{}", json.digest(Map.of()));
+            assertEquals(true, interviewService.report(user, session).get("canReevaluate"));
+            AiTask failed = startInterviewReevaluation(session);
+            new TaskResultService(taskMapper, tasks, json, mock(AgentEventSyncService.class), List.of(interviews))
+                    .transportFailure(failed.getId(), "模拟报告重评失败");
+            assertEquals(1, ((Number) interviewService.report(user, session).get("reportVersion")).intValue());
+            report = startInterviewReevaluation(session);
+            reportEvaluation.put("evidenceStatus", "VALID");
+            reportEvaluation.put("dimensions", List.of(Map.of("key", "correctness", "score", 0, "weight", 0.5),
+                    Map.of("key", "completeness", "score", 0, "weight", 0.3),
+                    Map.of("key", "expression", "score", 0, "weight", 0.2)));
+        }
+        assertEquals(mode.equals("INVALID") ? 2 : 1,
+                interviews.success(report, json.tree(Map.of("evaluation", reportEvaluation, "reviewedAnswerCount", 1))));
         Map<String, Object> saved = interviewService.report(user, session);
-        assertEquals(mode.equals("SKILLS") ? "AVAILABLE" : mode.equals("INVALID") ? "NO_VALID_ANSWER" : "NO_SKILL_SCORES", saved.get("skillEvidenceStatus"));
+        assertEquals(mode.equals("INVALID") ? 2 : 1, ((Number) saved.get("reportVersion")).intValue());
+        assertEquals(false, saved.get("canReevaluate"));
+        assertEquals("NORMAL", saved.get("completionType"));
+        assertEquals(mode.equals("SKILLS") ? "AVAILABLE" : "NO_SKILL_SCORES", saved.get("skillEvidenceStatus"));
         var result = (Map<?, ?>) saved.get("evaluation");
-        if (mode.equals("INVALID")) assertNull(result.get("overallScore"));
-        else assertEquals(76.0, ((Number) result.get("overallScore")).doubleValue());
+        assertEquals(mode.equals("INVALID") ? 0.0 : 76.0, ((Number) result.get("overallScore")).doubleValue());
         assertEquals(mode.equals("SKILLS") ? 1 : 0, evidence.evidenceCount(user, null, "INTERVIEW_ANSWER"));
+    }
+
+    private AiTask startInterviewReevaluation(String session) {
+        Map<String, Object> current = interviewMapper.session(session, user);
+        interviewService.end(user, session, "/api/v1/interviews/" + session + "/end", id(),
+                Map.of("reevaluate", true, "expectedVersion", current.get("version")));
+        Map<String, Object> ending = interviewMapper.session(session, user);
+        assertEquals("ENDING", ending.get("status"));
+        AiTask task = taskMapper.find(String.valueOf(ending.get("pending_task_id")));
+        assertEquals(true, json.map(task.getInputSnapshotJson()).get("reevaluate"));
+        return task;
     }
 
     @Test

@@ -273,29 +273,46 @@ async def test_interview_report_no_valid_answer(client, fake_llm, headers_for):
     task_id = uuid4()
     from tests.factories import interview_report_envelope
 
+    body = interview_report_envelope(task_id, valid=False)
+    body["payload"]["messages"].pop()
     response = await client.post(
         "/internal/ai/v1/interviews/report",
-        json=interview_report_envelope(task_id, valid=False),
+        json=body,
         headers={**headers_for(str(task_id)), "Idempotency-Key": str(uuid4())},
     )
     data = await wait_for_run(client, headers_for, response.json()["data"]["runId"], str(task_id))
     result = data["result"]
     assert result["completionType"] == "NO_VALID_ANSWER"
     assert result["answeredQuestionCount"] == 0
+    assert result["reviewedAnswerCount"] == 0
     assert result["evaluation"]["overallScore"] is None
     assert result["evaluation"]["dimensions"] == []
     assert fake_llm.calls == []
 
 
-async def test_interview_report_averages_turn_scores(client, fake_llm, headers_for):
+async def test_interview_report_includes_unscored_followup(client, fake_llm, headers_for):
     task_id = uuid4()
     from tests.factories import interview_report_envelope
 
     body = interview_report_envelope(task_id)
     payload = body["payload"]
-    second = dict(payload["turnEvaluations"][0])
-    second["overallScore"] = 81
-    payload["turnEvaluations"].append(second)
+    question, answer = payload["messages"]
+    followup_id = str(uuid4())
+    payload["messages"].extend([
+        {**question, "id": str(uuid4()), "seq": 3, "followUpNo": 1, "content": "说说缓存如何失效。"},
+        {**answer, "id": followup_id, "seq": 4, "followUpNo": 1, "content": "不知道"},
+        {**question, "id": str(uuid4()), "seq": 5, "questionNo": 2, "content": "如何应对缓存穿透？"},
+    ])
+    payload["turnEvaluations"].append({"messageId": followup_id, "evidenceStatus": "INVALID"})
+    def respond(_request):
+        if len(fake_llm.calls) == 1:
+            return {"improvements": ["补充缓存失效策略"]}
+        return {
+            "unscoredAnswerScores": {followup_id: {"correctness": 0, "completeness": 0, "expression": 0}},
+            "improvements": ["可从 TTL 与主动失效两种策略回答。"],
+        }
+
+    fake_llm.responder = respond
 
     response = await client.post(
         "/internal/ai/v1/interviews/report",
@@ -304,5 +321,30 @@ async def test_interview_report_averages_turn_scores(client, fake_llm, headers_f
     )
     data = await wait_for_run(client, headers_for, response.json()["data"]["runId"], str(task_id))
     result = data["result"]
-    assert result["evaluation"]["overallScore"] == 75.5
-    assert result["answeredQuestionCount"] == 2
+    assert result["evaluation"]["overallScore"] == 35.5
+    assert [entry["score"] for entry in result["evaluation"]["dimensions"]] == [37.5, 32.5, 35]
+    assert result["answeredQuestionCount"] == 1
+    assert result["reviewedAnswerCount"] == 2
+    assert result["completionType"] == "EARLY_END"
+    assert len(fake_llm.calls) == 2
+
+
+async def test_interview_report_scores_a_single_unscored_answer(client, fake_llm, headers_for):
+    from tests.factories import interview_report_envelope
+
+    task_id = uuid4()
+    body = interview_report_envelope(task_id, valid=False)
+    body["payload"]["messages"][-1]["content"] = "不知道"
+    response = await client.post(
+        "/internal/ai/v1/interviews/report",
+        json=body,
+        headers={**headers_for(str(task_id)), "Idempotency-Key": str(uuid4())},
+    )
+    data = await wait_for_run(client, headers_for, response.json()["data"]["runId"], str(task_id))
+    result = data["result"]
+    assert result["evaluation"]["overallScore"] == 0
+    assert result["evaluation"]["evidenceStatus"] == "VALID"
+    assert len(result["evaluation"]["dimensions"]) == 3
+    assert result["evaluation"]["improvements"]
+    assert result["answeredQuestionCount"] == result["reviewedAnswerCount"] == 1
+    assert result["completionType"] == "EARLY_END"

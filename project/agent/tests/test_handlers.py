@@ -433,6 +433,24 @@ def test_match_validate_recomputes_gaps():
     assert result.items[0].semantic_version == "semantic-v1"
 
 
+def test_match_uses_selected_resume_text_for_a_public_job():
+    body = match_envelope(uuid4())["payload"]
+    body["candidates"][0]["personalOwned"] = False
+    body["resumeText"] = "电商项目：使用Redis实现缓存。"
+    payload = JobMatchPayload.model_validate(body)
+    output = _match_output()
+    row = output.items[0].requirement_evidence[0]
+    row.gap_title = "数据库实践未体现"
+    row.gap_summary = "简历体现了 Redis 缓存，尚未体现 MySQL 项目实践。"
+    result = JobMatchHandler().validate_business(_ctx(payload), output, {}, {})
+    saved = result.items[0].requirement_evidence[0]
+    assert saved.resume_quote == "使用Redis实现缓存"
+    assert saved.gap_summary == row.gap_summary
+    row.resume_quote = "曾用 MySQL 做数据库"
+    with pytest.raises(HandlerValidationError, match="resumeQuote"):
+        JobMatchHandler().validate_business(_ctx(payload), output, {}, {})
+
+
 def test_match_rejects_duplicate_missing_and_unknown_suggestions():
     payload = JobMatchPayload.model_validate(match_envelope(uuid4())["payload"])
     output = _match_output()

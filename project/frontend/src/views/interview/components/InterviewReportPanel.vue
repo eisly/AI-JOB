@@ -6,14 +6,15 @@ import type { InterviewReportVO } from '@/api/types'
 const props = defineProps<{
   report: InterviewReportVO | null
   loading: boolean
+  reevaluating: boolean
   error: unknown
 }>()
-const emit = defineEmits<{ retry: [] }>()
+const emit = defineEmits<{ retry: []; reevaluate: [] }>()
 
 const completionTypeLabels: Record<InterviewReportVO['completionType'], string> = {
   NORMAL: '正常完成',
   EARLY_END: '提前结束',
-  NO_VALID_ANSWER: '无有效回答',
+  NO_VALID_ANSWER: '未作答',
 }
 const dimensionLabels: Record<string, string> = {
   correctness: '正确性',
@@ -40,24 +41,28 @@ function nullableScore(value: number | null | undefined) {
   <section class="panel report-panel">
     <div class="panel__heading">
       <h2>面试复盘报告</h2>
-      <el-tag v-if="report" type="info">报告 v{{ reportVersion }}</el-tag>
+      <div v-if="report" class="report-actions">
+        <el-tag type="info">报告 v{{ reportVersion }}</el-tag>
+        <el-button v-if="report.canReevaluate" type="primary" plain :loading="reevaluating" @click="emit('reevaluate')">重新评估回答</el-button>
+      </div>
     </div>
     <AsyncState :loading="loading" :retain="!!report" :error="error" @retry="emit('retry')">
       <template v-if="report">
         <div class="report-summary">
           <div class="score-card" :class="{ 'score-card--empty': report.evaluation.overallScore === null }">
             <span>综合评分</span>
-            <strong>{{ report.evaluation.overallScore === null ? '无有效评分' : report.evaluation.overallScore }}</strong>
+            <strong>{{ report.evaluation.overallScore ?? (report.canReevaluate ? '待重新评估' : '未作答') }}</strong>
             <small v-if="report.evaluation.overallScore !== null">满分 100</small>
           </div>
           <div class="report-facts">
-            <div><span>完成方式</span><strong>{{ completionTypeLabels[report.completionType] }}</strong></div>
-            <div><span>有效回答主问题数</span><strong>{{ report.answeredQuestionCount }}</strong></div>
+            <div><span>完成方式</span><strong>{{ report.canReevaluate && report.completionType === 'NO_VALID_ANSWER' ? '已结束' : completionTypeLabels[report.completionType] }}</strong></div>
+            <div><span>{{ report.canReevaluate ? '已评分主问题数' : '已作答主问题数' }}</span><strong>{{ report.answeredQuestionCount }}</strong></div>
             <div><span>证据状态</span><strong>{{ evidenceStatusLabels[report.evaluation.evidenceStatus] || report.evaluation.evidenceStatus }}</strong></div>
           </div>
         </div>
-        <el-alert v-if="report.completionType === 'NO_VALID_ANSWER'" class="report-notice" title="本次没有有效回答，因此不生成有效评分，也不新增能力证据。" type="info" :closable="false" show-icon />
-        <el-alert v-else-if="!report.evidenceIds.length" class="report-notice" :title="report.skillEvidenceMessage || '本次有有效总评，但没有有效的逐技能评分，因此不新增技能证据或有效样本；总分不会复制为技能分。'" type="info" :closable="false" show-icon />
+        <el-alert v-if="report.canReevaluate" class="report-notice" title="这份历史报告有回答尚未评分。点击「重新评估回答」可补全评分和复盘建议。" type="info" :closable="false" show-icon />
+        <el-alert v-else-if="report.completionType === 'NO_VALID_ANSWER'" class="report-notice" title="本次面试未提交回答，暂无评分。" type="info" :closable="false" show-icon />
+        <el-alert v-else-if="!report.evidenceIds.length" class="report-notice" :title="report.skillEvidenceMessage || '暂无可计入成长记录的逐技能评分。'" type="info" :closable="false" show-icon />
 
         <div class="report-section">
           <h3>能力维度</h3>
@@ -115,6 +120,7 @@ function nullableScore(value: number | null | undefined) {
 </template>
 
 <style scoped lang="scss">
+.report-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .report-summary { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
 .score-card { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 150px; padding: 18px; border-radius: $ai-radius-lg; color: #fff; background: linear-gradient(145deg, var(--ai-primary-solid, $ai-primary), var(--ai-primary-solid, #668fec)); }
 .score-card strong { margin: 8px 0; font-size: 44px; line-height: 1.1; }

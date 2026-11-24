@@ -399,28 +399,32 @@ export function useInterviewSession(options: InterviewSessionOptions) {
     await submitAnswer(attempt.content, attempt.answerSource, attempt.voiceTranscriptionId)
   }
 
-  async function endInterview() {
+  async function endInterview(reevaluate = false) {
     const interview = currentInterview.value
-    if (!interview || interview.status !== 'WAITING_ANSWER') return false
-    try {
-      await ElMessageBox.confirm('结束后将生成面试报告，不能继续回答。确认结束本次面试吗？', '结束面试', {
-        confirmButtonText: '确认结束',
-        cancelButtonText: '继续面试',
-        type: 'warning',
-      })
-    } catch {
-      return false
+    if (!interview || ending.value || (activeTask.value && !isTerminalTask(activeTask.value.status))) return false
+    const expectedStatus = reevaluate ? 'COMPLETED' : 'WAITING_ANSWER'
+    if (interview.status !== expectedStatus || (reevaluate && !report.value?.canReevaluate)) return false
+    if (!reevaluate) {
+      try {
+        await ElMessageBox.confirm('结束后将生成面试报告，不能继续回答。确认结束本次面试吗？', '结束面试', {
+          confirmButtonText: '确认结束',
+          cancelButtonText: '继续面试',
+          type: 'warning',
+        })
+      } catch {
+        return false
+      }
     }
     ending.value = true
     actionError.value = null
     try {
-      const task = await interviewApi.end(interview.id, interview.version)
+      const task = await interviewApi.end(interview.id, interview.version, reevaluate, options.basePath)
       taskSnapshot.value = task
       activeTaskId.value = task.id
-      report.value = null
+      if (!reevaluate) report.value = null
       reportError.value = null
       await router.replace({ path: options.basePath, query: queryFor(interview.id, true) })
-      ElMessage.success('已结束面试，正在生成报告')
+      ElMessage.success(reevaluate ? '正在重新评估历史回答' : '已结束面试，正在生成报告')
       return true
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) {
@@ -445,7 +449,7 @@ export function useInterviewSession(options: InterviewSessionOptions) {
         const interviewId = taskInterviewId(task)
         const refreshed = await loadInterview(interviewId, true)
         if (!refreshed) throw new Error('无法刷新面试状态，请稍后重试')
-        if (refreshed.status === 'COMPLETED') {
+        if (refreshed.status === 'COMPLETED' && !report.value?.canReevaluate) {
           ElMessage.success('报告已经生成，无需重试')
           return
         }
@@ -457,7 +461,6 @@ export function useInterviewSession(options: InterviewSessionOptions) {
         answerAttempt.value = { ...answerAttempt.value, taskId: retried.id }
       }
       if (retried.type === 'INTERVIEW_REPORT') {
-        report.value = null
         reportError.value = null
       }
       ElMessage.success('已按原提交参数创建重试任务')

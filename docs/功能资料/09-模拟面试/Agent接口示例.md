@@ -241,7 +241,7 @@
 }
 ```
 
-**业务规则**：输入为完整已保存会话和逐轮评价。不再重复评价/插入能力证据。无有效回答时NO_VALID_ANSWER、overallScore=null、维度空数组。report score=有效逐轮overallScore平均值；Java重算。
+**业务规则**：输入为完整会话和已保存的逐轮评价。报告沿用已有评分，并按原题为所有尚未评分的回答补评。补评分参与本次报告汇总，成长技能证据仍由逐轮评价生成。未提交回答时返回 `NO_VALID_ANSWER`、`overallScore=null` 和空维度数组。总分和维度按已提交回答汇总，由 Java 校验。
 
 ## INTERVIEW_TURN / AIInterviewTurnResult
 
@@ -296,7 +296,7 @@
     "referenceAnswer": "结合参数校验、布隆过滤器和短期空值缓存。",
     "rubricVersion": "technical-answer-v1",
     "modelVersion": "configured-qwen-model",
-    "promptVersion": "answer-evaluate-v1",
+    "promptVersion": "interview-report-v3",
     "evidenceStatus": "VALID"
   },
   "gaps": [
@@ -311,6 +311,7 @@
     }
   ],
   "answeredQuestionCount": 3,
+  "reviewedAnswerCount": 4,
   "completionType": "EARLY_END"
 }
 ```

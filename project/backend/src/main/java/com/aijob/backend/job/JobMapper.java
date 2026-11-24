@@ -16,6 +16,38 @@ public interface JobMapper {
     @Insert("INSERT INTO job_source (id,name,type,verification_status) VALUES (#{id},'个人 JD','USER_INPUT','UNVERIFIED')")
     int insertPrivateSource(@Param("id") String id);
 
+    @Insert("INSERT INTO job_source (id,name,type,verification_status) VALUES (#{id},#{name},'SAVED_SEARCH','UNVERIFIED')")
+    int insertSavedSource(@Param("id") String id, @Param("name") String name);
+
+    @Insert("""
+            INSERT INTO job (id,source_id,owner_user_id,visibility,current_version,status,source_url)
+            VALUES (#{id},#{sourceId},#{ownerUserId},'PRIVATE',1,'ACTIVE',#{sourceUrl})
+            """)
+    int insertSavedJob(@Param("id") String id, @Param("sourceId") String sourceId,
+                       @Param("ownerUserId") String ownerUserId, @Param("sourceUrl") String sourceUrl);
+
+    @Insert("""
+            INSERT INTO job_version (id,job_id,version_no,title,company_name,city_code,role_code,candidate_type,
+              company_size,published_at,fetched_at,min_monthly_salary_cents,max_monthly_salary_cents,currency,jd_text,
+              content_hash,requirements_json,analysis_meta_json)
+            SELECT #{id},#{newJobId},1,title,company_name,city_code,role_code,candidate_type,
+              company_size,published_at,fetched_at,min_monthly_salary_cents,max_monthly_salary_cents,currency,jd_text,
+              content_hash,requirements_json,
+              JSON_SET(COALESCE(analysis_meta_json, JSON_OBJECT()), '$.savedFromJobId', #{sourceJobId})
+            FROM job_version WHERE job_id=#{sourceJobId} AND version_no=#{sourceVersion}
+            """)
+    int copyJobVersion(@Param("id") String id, @Param("newJobId") String newJobId,
+                       @Param("sourceJobId") String sourceJobId, @Param("sourceVersion") int sourceVersion);
+
+    @Select("""
+            SELECT j.id FROM job j
+            JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version
+            WHERE j.owner_user_id=#{userId} AND j.visibility='PRIVATE'
+              AND JSON_UNQUOTE(JSON_EXTRACT(jv.analysis_meta_json, '$.savedFromJobId'))=#{sourceJobId}
+            ORDER BY j.created_at DESC,j.id DESC LIMIT 1
+            """)
+    String savedPersonalJobId(@Param("userId") String userId, @Param("sourceJobId") String sourceJobId);
+
     @Insert("""
             INSERT INTO job (id,source_id,owner_user_id,visibility,current_version,status,source_url)
             VALUES (#{id},#{sourceId},#{ownerUserId},'PRIVATE',1,'ANALYZING',#{sourceUrl})
@@ -88,10 +120,10 @@ public interface JobMapper {
     long publicCount(@Param("q") String q, @Param("cityCode") String cityCode,
                      @Param("candidateType") String candidateType);
 
-    @Select("SELECT " + COLUMNS + " FROM job j JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version JOIN job_source s ON s.id=j.source_id WHERE j.owner_user_id=#{userId} ORDER BY j.created_at DESC,j.id DESC LIMIT #{size} OFFSET #{offset}")
+    @Select("SELECT " + COLUMNS + " FROM job j JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version JOIN job_source s ON s.id=j.source_id WHERE j.owner_user_id=#{userId} AND s.type IN ('USER_INPUT','SAVED_SEARCH') ORDER BY j.created_at DESC,j.id DESC LIMIT #{size} OFFSET #{offset}")
     List<Map<String,Object>> privatePage(@Param("userId") String userId, @Param("size") int size, @Param("offset") long offset);
 
-    @Select("SELECT COUNT(*) FROM job WHERE owner_user_id=#{userId}")
+    @Select("SELECT COUNT(*) FROM job j JOIN job_source s ON s.id=j.source_id WHERE j.owner_user_id=#{userId} AND s.type IN ('USER_INPUT','SAVED_SEARCH')")
     long privateCount(@Param("userId") String userId);
 
     @Select("SELECT " + COLUMNS + " FROM job j JOIN job_version jv ON jv.job_id=j.id AND jv.version_no=j.current_version JOIN job_source s ON s.id=j.source_id WHERE j.visibility='PUBLIC' AND j.status='ACTIVE' AND s.verification_status='VERIFIED' AND j.verified_at>=UTC_TIMESTAMP(3)-INTERVAL 30 DAY AND jv.requirements_json IS NOT NULL ORDER BY j.created_at DESC,j.id DESC LIMIT 50")

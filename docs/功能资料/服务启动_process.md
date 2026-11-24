@@ -1183,3 +1183,276 @@ etstat -ano；通过 Start-Process 启动 Vite、mvn -o -B -DskipTests spring-bo
 **遗留问题：** 复测使用合成账号，不提交个人账号的简历。
 
 ---
+
+### [2026-11-23 20:56:28] 启动三端并检查依赖
+
+**任务目标：** 启动当前工作区的前端、Java 后端及 Agent。
+
+**执行行为：** 检查常用与此前隔离环境端口，均未监听；Docker 引擎未运行，已启动 Docker Desktop。当前工作区含 V24 迁移，启动后端可能触发数据库迁移，待核对目标库。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加启动过程。
+
+**执行命令与验证：** Get-NetTCPConnection、docker ps -a、Start-Process；Docker 启动中，服务尚未验证。
+
+**影响范围：** 本机 Docker Desktop；未修改业务源码或数据库。
+
+**遗留问题：** 等待 Docker 就绪并检查依赖和数据库。
+
+---
+
+### [2026-11-23 20:57:57] 恢复 Docker 依赖
+
+**任务目标：** 恢复三端所需数据库与缓存。
+
+**执行行为：** Docker Desktop 在提升权限后启动，已有语音环境 MySQL 和 Redis 容器自动恢复。尝试启动 i-job-mysql-1 因 3307 已被语音环境 MySQL 占用而失败，未更改任何容器数据；计划沿用此前后端使用的 career_business_feature_bug 库。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加依赖检查记录。
+
+**执行命令与验证：** docker ps、docker inspect、docker start ai-job-mysql-1、Get-NetTCPConnection。语音环境 MySQL 3307 和 Redis 6380 健康；另一个 MySQL 容器因端口冲突未启动。
+
+**影响范围：** Docker Desktop 及已有自动恢复容器；尚未启动业务后端或执行迁移。
+
+**遗留问题：** 启动三端并检查数据库迁移与访问状态。
+
+---
+
+### [2026-11-23 20:58:32] 启动当前工作区三端
+
+**任务目标：** 恢复前端、Java 后端和 Agent。
+
+**执行行为：** 后台启动 Vite、Python Agent 和 Maven Spring Boot；后端沿用 3307 的 career_business_feature_bug 库和 6380 Redis，使用 JDK 21。启动命令已提交，运行状态待核验。
+
+**文件变更：** 新增 project/backend/target/local-restarts/start-20261123/ 下三端运行日志；修改 docs/功能资料/服务启动_process.md 追加本记录。
+
+**执行命令与验证：** mvn -o -B -DskipTests spring-boot:run、python run.py、
+ode node_modules/vite/bin/vite.js --host 127.0.0.1；待检查启动和迁移日志。
+
+**影响范围：** 本机三端服务及所连接的既有数据库；Flyway 可能自动迁移。
+
+**遗留问题：** 核实端口、接口和迁移结果。
+
+---
+
+### [2026-11-23 20:58:51] 核对三端启动与迁移
+
+**任务目标：** 核验三端启动过程。
+
+**执行行为：** 前端和后端启动；Flyway 对 career_business_feature_bug 应用 V23、V24。Agent 因环境变量与 .env 中的语音密钥配置冲突而退出，未输出密钥。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md；三端日志写入 project/backend/target/local-restarts/start-20261123/。
+
+**执行命令与验证：** Get-NetTCPConnection、查看启动日志。5173 和 8080 正在监听；Flyway 校验 24 个迁移并成功应用 2 个，当前 V24；Agent 未就绪。
+
+**影响范围：** 已更新既有 career_business_feature_bug 数据库结构；前后端运行中。
+
+**遗留问题：** 清除冲突的继承环境变量后重启 Agent，并检查 HTTP。
+
+---
+
+### [2026-11-23 20:59:21] 重启 Agent 并验证三端
+
+**任务目标：** 解决 Agent 配置冲突并验证三端可访问。
+
+**执行行为：** 从 Agent 子进程继承环境中移除冲突的两个语音密钥变量，保留项目配置，重新启动 Agent；检查三端端口与 HTTP。
+
+**文件变更：** 新增 project/backend/target/local-restarts/start-20261123/agent-restart.out.log 和 gent-restart.err.log；修改 docs/功能资料/服务启动_process.md 追加验证记录。
+
+**执行命令与验证：** Start-Process、Get-NetTCPConnection、Invoke-WebRequest。5173、8080、8100 均监听；前端首页 HTTP 200，后端根路径与前端代理受保护接口匿名访问返回 401；Agent healthz、readyz 均返回 200。
+
+**影响范围：** 当前本机三端；未修改项目配置或业务源码。
+
+**遗留问题：** 未登录账号或调用模型、语音功能进行业务验收。
+
+---
+
+### [2026-11-23 21:19:33] 核对本地数据库及缓存
+
+**任务目标：** 使用本机依赖重启当前工作区三端。
+
+**执行行为：** 核对本机进程和容器。原生 MySQL 3306 正在监听，使用项目配置与既有客户端连接方式只读探测均返回 1045。保留现有数据，沿用本机 Docker 的 MySQL 3307 和 Redis 6380。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加本记录。
+
+**执行命令与验证：** Get-NetTCPConnection、docker ps、mysql 只读查询。当前 Docker MySQL 和 Redis 均健康。
+
+**影响范围：** 仅本机项目环境。数据库与缓存继续使用原实例。
+
+**遗留问题：** 待重启和验证三端。
+
+---
+
+### [2026-11-23 21:20:15] 重启当前项目三端
+
+**任务目标：** 使用现有本机 MySQL 与 Redis 重启项目。
+
+**执行行为：** 核对监听进程与项目日志后，停止旧 Vite、Java 与 Agent 进程。重新启动三端，Java 使用本机 3307 的 career_business_feature_bug 和 6380 Redis，Agent 启动时清除与项目语音配置冲突的继承变量。
+
+**文件变更：** 新增 project/backend/target/local-restarts/restart-local-20261123-212002/ 下的三端启动日志。追加本过程记录。
+
+**执行命令与验证：** Get-NetTCPConnection、Stop-Process、Start-Process、mvn -o -B -DskipTests spring-boot:run、python run.py 与 Vite。启动命令已返回，待执行健康检查。
+
+**影响范围：** 前端、后端和 Agent 短时重启。复用原数据库、缓存与项目配置。
+
+**遗留问题：** 核对 HTTP、Flyway 与 Redis 状态。
+
+---
+
+### [2026-11-23 21:20:38] 验证重启后的本机服务
+
+**任务目标：** 确认三端和本地依赖可用。
+
+**执行行为：** 核对三端新监听进程、前端首页、后端及其前端代理、Agent 健康与就绪接口、Redis 认证及数据库版本。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加验证结果。
+
+**执行命令与验证：** Invoke-WebRequest、Get-NetTCPConnection、docker exec redis-cli ping、Flyway 启动日志。首页和 Agent 两个检查均为 200，直连和代理的匿名受保护接口均为预期 401，Redis 认证后返回 PONG。MySQL 使用现有 V24 库，无需执行迁移。
+
+**影响范围：** 本地 5173、8080、8100 三端均已重新启动，继续使用之前的本机 Docker 数据库与缓存。
+
+**遗留问题：** 未登录个人账号或调用模型进行业务验证。
+
+---
+
+### [2026-11-24 09:59:32] 检查并恢复服务依赖
+
+**任务目标：** 启动本地前端、后端和 Agent 供用户测试。
+
+**执行行为：** 检查常用三端及依赖端口，均未发现监听；Docker API 当前不可连接，准备启动 Docker Desktop 并复用既有数据环境。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加本记录。
+
+**执行命令与验证：** Get-NetTCPConnection、docker ps；Docker API 返回无法连接。
+
+**影响范围：** 本地服务启动环境。
+
+**遗留问题：** 等待 Docker 就绪并启动三端。
+
+---
+
+### [2026-11-24 10:01:12] 恢复本地依赖
+
+**任务目标：** 恢复三端服务所需数据库和缓存。
+
+**执行行为：** 启动 Docker Desktop；检查已有容器，复用监听 3307 的 MySQL 和 6380 的 Redis，二者健康。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加记录。
+
+**执行命令与验证：** docker ps -a；两个依赖容器状态 healthy。
+
+**影响范围：** Docker Desktop 和现有容器；未修改数据库内容。
+
+**遗留问题：** 启动并验证三端服务。
+
+---
+
+### [2026-11-24 10:01:13] 启动项目三端
+
+**任务目标：** 启动前端、Java 后端和 Agent。
+
+**执行行为：** 后台启动 Vite、Python Agent 和 Spring Boot；沿用现有 3307 数据库及 6380 Redis，使用 JDK 21，并清除 Agent 子进程中冲突的语音密钥环境变量。
+
+**文件变更：** 新增 project/backend/target/local-restarts/start-20261124/ 三端运行日志；修改本过程记录。
+
+**执行命令与验证：** node Vite、python run.py、mvn -o -B -DskipTests spring-boot:run；启动命令已执行，健康状态待检查。
+
+**影响范围：** 本机三端及既有数据库；启动时可能执行 Flyway 迁移。
+
+**遗留问题：** 核对端口、HTTP 和数据库迁移状态。
+
+---
+
+### [2026-11-24 10:02:52] 验证三端并清理重复实例
+
+**任务目标：** 确认三端可供用户测试。
+
+**执行行为：** 首次启动的三端实际已成功运行；因普通权限进程查询未显示，误以为未启动而再次尝试。第二次 Agent 和后端因端口占用退出，第二个 Vite 自动切换到 5174，已关闭该重复实例。保留原有 5173、8080、8100 服务。
+
+**文件变更：** 新增 project/backend/target/local-restarts/start-20261124/ 下第二次启动日志；修改本过程记录。
+
+**执行命令与验证：** Get-NetTCPConnection、Invoke-WebRequest；前端首页、Agent healthz 和 readyz 均为 HTTP 200；后端及前端代理的匿名受保护接口均返回预期 401。后端日志显示 Flyway 校验 24 项、数据库为 V24 且无需迁移。
+
+**影响范围：** 本地三端、现有 MySQL 和 Redis；未修改业务源码及数据库结构。
+
+**遗留问题：** 未登录用户账号或实际调用模型验证业务流程。
+
+---
+
+### [2026-11-24 11:12:05] 更新模型密钥配置
+
+**任务目标：** 更新简历优化使用的 DeepSeek 模型密钥。
+
+**执行行为：** 在本地项目 .env 设置 DeepSeek 密钥；不在日志中记录密钥。由于已有进程继承了旧的环境变量，准备重启 Agent 并清除该继承值，让其读取项目配置。
+
+**文件变更：** 修改 .env（本地密钥配置）；追加 docs/功能资料/服务启动_process.md。
+
+**执行命令与验证：** 使用 PowerShell 更新配置；新密钥可用性尚未验证。
+
+**影响范围：** 使用该项目 DeepSeek 配置的 Agent 模型调用。
+
+**遗留问题：** 重启 Agent、检查健康状态；不重新提交用户简历。
+
+---
+
+### [2026-11-24 11:12:22] 重启 Agent 以加载模型密钥
+
+**任务目标：** 使更新的 DeepSeek 配置生效。
+
+**执行行为：** 停止本机 8100 监听的 Agent；清除子进程继承的旧 DeepSeek 密钥及冲突的语音密钥环境变量，后台重启 Agent。
+
+**文件变更：** 新增 project/backend/target/local-restarts/start-20261124/agent-key-update 运行日志；追加服务启动过程记录。
+
+**执行命令与验证：** Stop-Process、Start-Process python run.py；健康检查待执行。
+
+**影响范围：** Agent 短时重启；进行中的 Agent 任务可能中断。
+
+**遗留问题：** 检查 Agent 健康及模型配置加载情况。
+
+---
+
+### [2026-11-24 11:12:59] 验证模型密钥与 Agent
+
+**任务目标：** 核验新密钥及 Agent 可用性。
+
+**执行行为：** 检查 Agent 的 healthz、readyz，并使用不含用户简历的简短文本向配置的 DeepSeek 模型发送测试请求。
+
+**文件变更：** 追加 docs/功能资料/服务启动_process.md。
+
+**执行命令与验证：** Invoke-WebRequest 检查 healthz 和 readyz 均为 HTTP 200；Python httpx 调用 deepseek-v4-pro 返回 HTTP 200。
+
+**影响范围：** 产生一次简短模型测试请求；未重新提交个人简历。
+
+**遗留问题：** 后续手动启动 Agent 时应清除继承的旧 DEEPSEEK_API_KEY 环境变量，否则会覆盖项目 .env 的配置；原有失败任务需用户自行重试。
+
+---
+
+### [2026-11-24 15:40:49] 重启本地三端服务
+
+**任务目标：** 重启前端、后端和 Agent。
+
+**执行行为：** 停止原三端进程，复用既有 MySQL 3307 和 Redis 6380，后台启动 Vite、Spring Boot 和 Agent；清除可能覆盖项目配置的模型密钥环境变量。
+
+**文件变更：** 新增 project/backend/target/local-restarts/restart-20261124-current/ 三端运行日志；修改本过程记录。
+
+**执行命令与验证：** Stop-Process、Start-Process；启动命令已执行，健康状态待核对。
+
+**影响范围：** 本机三端短时中断；后端启动可能执行 Flyway 迁移。
+
+**遗留问题：** 检查接口和数据库迁移状态。
+
+---
+
+### [2026-11-24 15:41:41] 验证三端服务及数据库迁移
+
+**任务目标：** 确认重启后的服务状态。
+
+**执行行为：** 检查前端、Agent 健康接口、后端及前端代理接口，核对 Flyway 日志。后端启动时将既有数据库从 V24 自动迁移至 V25（add saved search job source）。
+
+**文件变更：** 修改 docs/功能资料/服务启动_process.md，追加验证记录；数据库执行既有 V25 迁移。
+
+**执行命令与验证：** Invoke-WebRequest：前端首页、Agent healthz 和 readyz 均为 HTTP 200；后端及前端代理的匿名受保护岗位接口均返回预期 401。后端日志显示 25 项迁移校验通过、V25 执行成功。
+
+**影响范围：** 本地三端及 career_business_feature_bug 数据库结构；沿用原有 MySQL 和 Redis。
+
+**遗留问题：** 未登录账号或调用模型验证具体业务。
+
+---

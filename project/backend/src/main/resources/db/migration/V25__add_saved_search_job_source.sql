@@ -1,0 +1,4 @@
+ALTER TABLE job_source DROP CHECK ck_job_source_1;
+
+ALTER TABLE job_source
+    ADD CONSTRAINT ck_job_source_1 CHECK (type IN ('OFFICIAL','AUTHORIZED','PUBLIC_SEARCH','USER_INPUT','SAVED_SEARCH'));

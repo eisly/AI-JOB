@@ -11,6 +11,8 @@ public class AppUserAuth {
     private String role;
     private String status;
     private int tokenVersion;
+    private int passwordFailedAttempts;
+    private Instant passwordLockedUntil;
     private Instant createdAt;
     private Instant deletedAt;
 
@@ -68,6 +70,22 @@ public class AppUserAuth {
 
     public void setTokenVersion(int tokenVersion) {
         this.tokenVersion = tokenVersion;
+    }
+
+    public int getPasswordFailedAttempts() {
+        return passwordFailedAttempts;
+    }
+
+    public void setPasswordFailedAttempts(int passwordFailedAttempts) {
+        this.passwordFailedAttempts = passwordFailedAttempts;
+    }
+
+    public Instant getPasswordLockedUntil() {
+        return passwordLockedUntil;
+    }
+
+    public void setPasswordLockedUntil(Instant passwordLockedUntil) {
+        this.passwordLockedUntil = passwordLockedUntil;
     }
 
     public Instant getCreatedAt() {

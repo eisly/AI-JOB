@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Bell, ArrowDown, ArrowRight, User } from '@element-plus/icons-vue'
+import { Bell, ArrowDown, ArrowRight } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import UserAvatar from '@/components/UserAvatar.vue'
 import { errorMessage } from '@/utils/format'
 
 const router = useRouter()
@@ -13,7 +14,7 @@ defineProps<{ section?: string }>()
 async function logout() {
   try {
     await userStore.logout()
-    await router.push('/login')
+    await router.replace('/login')
   } catch (reason) {
     ElMessage.error(errorMessage(reason))
   }
@@ -29,7 +30,7 @@ async function logout() {
     </el-button>
     <el-dropdown trigger="click">
       <div class="header__user">
-        <el-avatar :size="38" class="header__avatar"><el-icon><User /></el-icon></el-avatar>
+        <UserAvatar :size="38" class="header__avatar" />
         <span class="header__name">{{ userStore.userInfo?.nickname || '用户' }}</span>
         <el-icon><ArrowDown /></el-icon>
       </div>
@@ -37,6 +38,7 @@ async function logout() {
         <el-dropdown-menu>
           <!-- U04：入口语义与实际页面一致——该页面是求职画像（目标岗位/城市/求职类型偏好），不是账号设置 -->
           <el-dropdown-item @click="router.push('/profile')">求职画像</el-dropdown-item>
+          <el-dropdown-item @click="router.push('/account')">账号设置</el-dropdown-item>
           <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
         </el-dropdown-menu>
       </template>

@@ -33,11 +33,14 @@ public interface ApplicationMapper {
     int insert(Application application);
 
     @Select("""
-            SELECT id, user_id, job_id, company_name, job_title, city_code, education,
-                   salary_text, description, status, planned_date, applied_date,
-                   interview_date, closed_date, note, version, created_at, updated_at
-            FROM application_record
-            WHERE id = #{id} AND user_id = #{userId}
+            SELECT ar.id, ar.user_id, ar.job_id, ar.company_name, ar.job_title, ar.city_code, ar.education,
+                   ar.salary_text, ar.description, ar.status, ar.planned_date, ar.applied_date,
+                   ar.interview_date, ar.closed_date, ar.note, ar.version, ar.created_at, ar.updated_at,
+                   s.type AS source_type, s.name AS source_name
+            FROM application_record ar
+            LEFT JOIN job j ON j.id = ar.job_id
+            LEFT JOIN job_source s ON s.id = j.source_id
+            WHERE ar.id = #{id} AND ar.user_id = #{userId}
             """)
     Application selectByIdAndUserId(@Param("id") String id, @Param("userId") String userId);
 
@@ -72,13 +75,16 @@ public interface ApplicationMapper {
 
     @Select("""
             <script>
-            SELECT id, user_id, job_id, company_name, job_title, city_code, education,
-                   salary_text, description, status, planned_date, applied_date,
-                   interview_date, closed_date, note, version, created_at, updated_at
-            FROM application_record
-            WHERE user_id = #{userId}
-            <if test="status != null">AND status = #{status}</if>
-            ORDER BY created_at DESC, id DESC
+            SELECT ar.id, ar.user_id, ar.job_id, ar.company_name, ar.job_title, ar.city_code, ar.education,
+                   ar.salary_text, ar.description, ar.status, ar.planned_date, ar.applied_date,
+                   ar.interview_date, ar.closed_date, ar.note, ar.version, ar.created_at, ar.updated_at,
+                   s.type AS source_type, s.name AS source_name
+            FROM application_record ar
+            LEFT JOIN job j ON j.id = ar.job_id
+            LEFT JOIN job_source s ON s.id = j.source_id
+            WHERE ar.user_id = #{userId}
+            <if test="status != null">AND ar.status = #{status}</if>
+            ORDER BY ar.created_at DESC, ar.id DESC
             LIMIT #{offset}, #{size}
             </script>
             """)

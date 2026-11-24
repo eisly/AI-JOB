@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { User } from '@element-plus/icons-vue'
 import { menuItems } from '@/config/menu'
 import { useUserStore } from '@/stores/user'
+import UserAvatar from '@/components/UserAvatar.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -22,7 +22,7 @@ const activeMenu = computed(() => '/' + (route.path.split('/')[1] || 'dashboard'
       </el-menu-item>
     </el-menu>
     <div class="sidebar__user">
-      <el-avatar :size="42" class="sidebar__avatar"><el-icon><User /></el-icon></el-avatar>
+      <UserAvatar :size="42" class="sidebar__avatar" />
       <div>
         <div class="sidebar__user-name">{{ userStore.userInfo?.nickname || '用户' }}</div>
         <div class="sidebar__user-major">{{ userStore.userInfo?.email || '求职信息尚未完善' }}</div>

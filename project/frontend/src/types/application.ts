@@ -35,6 +35,8 @@ export interface ApplicationVO {
   jobId: string | null
   companyName: string
   jobTitle: string
+  sourceType?: 'OFFICIAL' | 'AUTHORIZED' | 'PUBLIC_SEARCH' | 'USER_INPUT' | 'SAVED_SEARCH' | null
+  sourceName?: string | null
   cityCode: string | null
   education: string | null
   salaryText: string | null

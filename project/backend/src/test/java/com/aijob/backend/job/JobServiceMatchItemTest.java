@@ -62,5 +62,14 @@ class JobServiceMatchItemTest {
         assertEquals("personal", result.get(0).path("id").asText());
         assertEquals("FAIL", result.get(0).path("eligibility").path("status").asText());
         assertEquals("具备 Java 开发经验", result.get(0).path("requirementEvidence").get(0).path("requirementQuote").asText());
+
+        when(jobs.batch("match", "user")).thenReturn(Map.of("id", "match", "user_id", "user", "profile_version", 3,
+                "resume_version_id", "selected-resume", "status", "READY", "input_snapshot_json",
+                "{\"includeUnknown\":false,\"resumeName\":\"后端简历\",\"resumeVersionNo\":2,\"jobs\":[{\"title\":\"Java 后端开发\"}]}"));
+        when(jobs.items("match")).thenReturn(List.of(failedPublic));
+        var comparison = json.tree(service.match("user", "match"));
+        assertEquals("selected-resume", comparison.path("resumeVersionId").asText());
+        assertEquals("Java 后端开发", comparison.path("targetTitle").asText());
+        assertEquals("public", comparison.path("items").get(0).path("id").asText());
     }
 }

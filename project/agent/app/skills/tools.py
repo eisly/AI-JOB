@@ -86,7 +86,7 @@ def build_model_input(
                     "jobId": item.get("jobId"),
                     "jobVersion": item.get("jobVersion"),
                     "title": item.get("title"),
-                    "jdText": str(item.get("jdText", ""))[:4000],
+                    "jdText": str(item.get("jdText", ""))[:30000 if payload.get("resumeText") else 4000],
                     "requirements": item.get("requirements") or {},
                     "personalOwned": bool(item.get("personalOwned")),
                 }
@@ -96,7 +96,9 @@ def build_model_input(
             "skillSnapshot": payload.get("skillSnapshot") or [],
             "candidates": candidates,
         }
-        if any(candidate["personalOwned"] for candidate in candidates):
+        if payload.get("resumeText"):
+            model_input["resumeText"] = payload["resumeText"]
+        elif any(candidate["personalOwned"] for candidate in candidates):
             model_input["resumeQuotes"] = payload.get("resumeQuotes") or []
         return model_input
     if operation == "LEARNING_PLAN":
@@ -187,8 +189,9 @@ def build_model_input(
     if operation == "INTERVIEW_REPORT":
         return {
             "completionType": payload.get("completionType"),
-            "messages": _compact_messages(payload.get("messages") or []),
+            "messages": payload.get("messages") or [],
             "turnEvaluations": payload.get("turnEvaluations") or [],
+            "unscoredAnswerIds": context.get("unscored_answer_ids") or [],
             "skillSnapshot": payload.get("skillSnapshot") or [],
         }
     if operation == "PROJECT_RECOMMEND":

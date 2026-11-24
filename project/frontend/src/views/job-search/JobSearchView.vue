@@ -54,6 +54,8 @@ const actionError = ref('')
 const canceling = ref(false)
 const retrying = ref(false)
 const favoritePendingIds = ref<string[]>([])
+const savingJobIds = ref<string[]>([])
+const savedPersonalIds = ref<Record<string, string>>({})
 const filtersOpen = ref(false)
 
 const createForm = reactive({
@@ -315,13 +317,21 @@ function changeSize(size: number) {
   void loadItems()
 }
 
+function verificationText(item: JobSearchItemVO) {
+  const status = item.verificationStatus ?? item.recruitmentStatus
+  if (status === 'ACTIVE_CONFIRMED') return '在招状态已核验'
+  if (status === 'ACTIVE_PROBABLE') return '在招状态待确认'
+  if (status === 'UNKNOWN' || !status) return '在招状态待核验'
+  return ''
+}
+
 function jobMetadata(item: JobSearchItemVO) {
   const warnings = item.warnings || []
   const company = warnings.includes('COMPANY_FROM_DOMAIN') ? '' : item.companyName?.trim()
   const city = (item.cityCode && cityLabels[item.cityCode]) || item.cityName
   const type = warnings.includes('CANDIDATE_TYPE_UNKNOWN') ? '' : candidateTypeLabels[item.candidateType]
-  const verification = (item.verificationStatus ?? item.recruitmentStatus) === 'UNKNOWN' ? '在招状态待核验' : ''
-  return [company, city, type, jobSalary(item), verification].filter(Boolean).join(' · ')
+  const source = item.source?.name
+  return [company, city, type, jobSalary(item), source, verificationText(item)].filter(Boolean).join(' · ')
 }
 
 function safeUrl(url?: string | null) {
@@ -346,6 +356,24 @@ async function toggleFavorite(item: JobSearchItemVO) {
   } finally {
     favoritePendingIds.value = favoritePendingIds.value.filter(id => id !== item.jobId)
   }
+}
+
+async function saveToPersonal(item: JobSearchItemVO) {
+  if (savingJobIds.value.includes(item.jobId) || savedPersonalIds.value[item.jobId]) return
+  savingJobIds.value = [...savingJobIds.value, item.jobId]
+  try {
+    const result = await jobApi.saveToPersonal(item.jobId)
+    savedPersonalIds.value = { ...savedPersonalIds.value, [item.jobId]: result.jobId }
+    ElMessage.success(result.created ? '已保存到个人 JD' : '该岗位已在个人 JD 中')
+  } catch {
+    ElMessage.error('保存失败，请重试。')
+  } finally {
+    savingJobIds.value = savingJobIds.value.filter(id => id !== item.jobId)
+  }
+}
+
+function openPersonal(jobId: string) {
+  void router.push({ name: 'jobs', query: { tab: 'personal', jobId } })
 }
 
 onMounted(() => {
@@ -441,6 +469,8 @@ onMounted(() => {
                 :title="item.isFavorite ? '取消收藏' : '收藏'"
                 @click="toggleFavorite(item)"
               />
+              <el-button v-if="savedPersonalIds[item.jobId]" link type="primary" @click="openPersonal(savedPersonalIds[item.jobId])">已保存到个人 JD</el-button>
+              <el-button v-else link :loading="savingJobIds.includes(item.jobId)" @click="saveToPersonal(item)">保存到个人 JD</el-button>
               <el-button link @click="emit('plan', item)">加入投递计划</el-button>
               <a v-if="safeUrl(item.sourceUrl)" class="search-row__source" :href="safeUrl(item.sourceUrl)" target="_blank" rel="noopener noreferrer">
                 查看原页 <el-icon><TopRight /></el-icon>
@@ -546,7 +576,7 @@ onMounted(() => {
 .search-row__content { min-width: 0; overflow-wrap: anywhere; }
 .search-row h3 { margin: 0; color: $ai-text-primary; font-size: 20px; font-weight: 650; line-height: 1.4; }
 .search-row p { margin: 5px 0 0; color: $ai-text-secondary; font-size: 14px; line-height: 1.5; }
-.search-row__actions { display: grid; grid-template-columns: 34px auto 83px; align-items: center; flex-shrink: 0; gap: 8px 20px; }
+.search-row__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex-shrink: 0; gap: 8px 12px; }
 .search-row__actions :deep(.el-button) { min-height: 34px; margin-left: 0; }
 .search-row__favorite { width: 34px; font-size: 19px; }
 .search-row__source { display: inline-flex; align-items: center; justify-self: end; gap: 5px; min-height: 34px; color: $ai-primary; font-size: 14px; text-decoration: none; white-space: nowrap; }

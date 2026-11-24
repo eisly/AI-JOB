@@ -928,6 +928,7 @@ class JobMatchHandler(BaseHandler):
 
         snapshots = {item.skill_code: item for item in payload.skill_snapshot}
         resume_quotes = set(payload.resume_quotes)
+        resume_text = payload.resume_text
         result_items = []
         for candidate in payload.candidates:
             item = actual[(str(candidate.job_id), candidate.job_version)]
@@ -943,21 +944,35 @@ class JobMatchHandler(BaseHandler):
                 if text and text.strip()
             }
             evidence: list[RequirementEvidenceItem] = []
-            if candidate.personal_owned:
+            if candidate.personal_owned or resume_text is not None:
+                seen_requirements: set[str] = set()
+                jd_text = candidate.jd_text if resume_text is not None else candidate.jd_text[:4000]
                 for entry in item.requirement_evidence:
-                    if entry.requirement_quote not in candidate.jd_text[:4000]:
+                    requirement = entry.requirement_quote.strip()
+                    if not requirement or requirement not in jd_text or (resume_text is not None and requirement in seen_requirements):
+                        if resume_text is not None:
+                            raise HandlerValidationError("requirementQuote 必须是 JD 中真实且不重复的原文")
                         continue
+                    seen_requirements.add(requirement)
                     quote = entry.resume_quote.strip() if entry.resume_quote else None
-                    if quote not in resume_quotes:
+                    if resume_text is not None:
+                        if (quote and quote not in resume_text) or (entry.support_level == "MISSING") != (quote is None):
+                            raise HandlerValidationError("resumeQuote 必须照抄选中的简历，且与 supportLevel 一致")
+                        if entry.support_level != "DIRECT" and not (entry.gap_title and entry.gap_summary):
+                            raise HandlerValidationError("每项差距须提供 gapTitle 和 gapSummary")
+                    elif quote not in resume_quotes:
                         quote = None
                     level = entry.support_level if quote else "MISSING"
                     skill_code = entry.skill_code if entry.skill_code in allowed_skills else None
                     evidence.append(
                         RequirementEvidenceItem(
-                            requirement_quote=entry.requirement_quote.strip(),
+                            requirement_quote=requirement,
+                            requirement_title=entry.requirement_title if resume_text is not None else None,
                             skill_code=skill_code,
                             support_level=level,
                             resume_quote=quote,
+                            gap_title=entry.gap_title if resume_text is not None and level != "DIRECT" else None,
+                            gap_summary=entry.gap_summary if resume_text is not None and level != "DIRECT" else None,
                         )
                     )
             result_items.append(
@@ -1612,44 +1627,30 @@ class InterviewReportHandler(BaseHandler):
 
     async def prepare(self, ctx: ExecutionContext) -> dict[str, Any]:
         payload: InterviewReportPayload = ctx.payload  # type: ignore[assignment]
-        valid = [
-            item
+        answers = {item.id: item for item in payload.messages if item.role == "USER"}
+        scored = {
+            item.message_id: item
             for item in payload.turn_evaluations
-            if item.evidence_status.upper() == "VALID" and item.overall_score is not None
-        ]
-        average = half_up(sum(item.overall_score for item in valid) / len(valid), 1) if valid else None
-        dimensions: list[EvaluationDimension] = []
-        for key, weight in FIXED_RUBRIC_WEIGHTS.items():
-            scores = []
-            for item in valid:
-                match = next((dim for dim in item.dimensions if dim.key == key), None)
-                if match is not None:
-                    scores.append(match.score)
-            if scores:
-                dimensions.append(
-                    EvaluationDimension(
-                        key=key,
-                        score=half_up(sum(scores) / len(scores), 1),
-                        weight=weight,
-                        comment="综合逐轮评价",
-                    )
-                )
+            if item.message_id in answers and item.evidence_status.upper() == "VALID"
+            and item.overall_score is not None
+            and {dimension.key for dimension in item.dimensions} == FIXED_RUBRIC_WEIGHTS.keys()
+        }
         return {
-            "valid_count": len(valid),
-            "average_score": average,
-            "aggregated_dimensions": dimensions,
+            "answers": answers,
+            "scored": scored,
+            "unscored_answer_ids": [str(message_id) for message_id in answers if message_id not in scored],
         }
 
     async def execute(self, ctx: ExecutionContext) -> tuple[dict[str, Any], dict[str, Any]]:
         payload: InterviewReportPayload = ctx.payload  # type: ignore[assignment]
         prepared = await self.prepare(ctx)
-        if prepared["valid_count"] == 0:
+        if not prepared["answers"]:
             result = AIInterviewReportResult(
                 evaluation=EvaluationVO(
                     overall_score=None,
                     dimensions=[],
                     strengths=[],
-                    improvements=["本次面试没有形成有效回答，建议先完成至少一道主问题"],
+                    improvements=["本次面试未提交回答，建议先完成至少一道主问题"],
                     reference_answer="",
                     rubric_version="technical-answer-v1",
                     model_version="none",
@@ -1658,6 +1659,7 @@ class InterviewReportHandler(BaseHandler):
                 ),
                 gaps=self._build_report_gaps(payload, {}),
                 answered_question_count=0,
+                reviewed_answer_count=0,
                 completion_type="NO_VALID_ANSWER",
             )
             meta = {
@@ -1669,7 +1671,7 @@ class InterviewReportHandler(BaseHandler):
                 "operation": INTERVIEW_REPORT,
             }
             return result.model_dump(by_alias=True, mode="json"), meta
-        return await super().execute(ctx)
+        return await super().execute(ctx, prepared)
 
     @staticmethod
     def _build_report_gaps(payload: InterviewReportPayload, suggestions: dict[str, str]) -> list[Gap]:
@@ -1701,6 +1703,28 @@ class InterviewReportHandler(BaseHandler):
         meta: dict[str, Any],
     ) -> AIInterviewReportResult:
         payload: InterviewReportPayload = ctx.payload  # type: ignore[assignment]
+        expected_ids = set(prepared["unscored_answer_ids"])
+        assessed_ids = {str(message_id) for message_id in output.unscored_answer_scores}
+        if assessed_ids != expected_ids:
+            raise HandlerValidationError("unscoredAnswerScores 必须逐一覆盖 unscoredAnswerIds，不能包含其他消息")
+        improvements = dedupe(output.improvements, limit=10)
+        if expected_ids and not improvements:
+            raise HandlerValidationError("存在补评回答时，improvements 必须包含基于题目和回答的具体建议")
+
+        answers = prepared["answers"]
+        scored = prepared["scored"]
+        dimensions = []
+        for key, weight in FIXED_RUBRIC_WEIGHTS.items():
+            scores = [dimension.score for item in scored.values() for dimension in item.dimensions if dimension.key == key]
+            scores.extend(getattr(item, key) for item in output.unscored_answer_scores.values())
+            dimensions.append(EvaluationDimension(
+                key=key, weight=weight, score=half_up(sum(scores) / len(scores), 1),
+                comment="按已提交回答汇总评分",
+            ))
+        if expected_ids:
+            overall = half_up(sum(item.score * item.weight for item in dimensions), 1)
+        else:
+            overall = half_up(sum(item.overall_score for item in scored.values()) / len(scored), 1)
         snapshot_skills = {item.skill_code for item in payload.skill_snapshot}
         unknown = set(output.gap_suggestions) - snapshot_skills
         if unknown:
@@ -1712,10 +1736,10 @@ class InterviewReportHandler(BaseHandler):
         }
         result = AIInterviewReportResult(
             evaluation=EvaluationVO(
-                overall_score=prepared["average_score"],
-                dimensions=prepared["aggregated_dimensions"],
+                overall_score=overall,
+                dimensions=dimensions,
                 strengths=dedupe(output.strengths, limit=10),
-                improvements=dedupe(output.improvements, limit=10),
+                improvements=improvements,
                 reference_answer=output.reference_answer.strip()[:5000],
                 rubric_version="technical-answer-v1",
                 model_version=str(meta.get("model") or "unknown"),
@@ -1723,7 +1747,8 @@ class InterviewReportHandler(BaseHandler):
                 evidence_status="VALID",
             ),
             gaps=self._build_report_gaps(payload, suggestions),
-            answered_question_count=prepared["valid_count"],
+            answered_question_count=len({item.question_no for item in answers.values() if item.question_no is not None}),
+            reviewed_answer_count=len(answers),
             completion_type=payload.completion_type,
         )
         return result

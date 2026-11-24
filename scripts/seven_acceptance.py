@@ -702,7 +702,7 @@ class Audit:
             route_pattern = '**/api/v1/interviews/' + self.state['interview'] + '/report'
             self.context.route(route_pattern, fixture)
             page.reload()
-            message = '本次没有有效回答' if mode == 'NO_VALID_ANSWER' else '本次有有效总评'
+            message = '本次面试未提交回答' if mode == 'NO_VALID_ANSWER' else '暂无可计入成长记录的逐技能评分'
             page.get_by_text(message, exact=False).wait_for()
             page.get_by_text(message, exact=False).scroll_into_view_if_needed()
             self.capture('29-report-fixture-' + mode)

@@ -1586,3 +1586,68 @@
 **遗留问题：** 未调用真实招聘平台复查截图中的岗位，历史结果按已有核验信息处理。开发修改位于本地工作区。临时 MySQL 数据目录 `aijob-job-search-mysql-8qfqj7aa` 有残余文件。
 
 ---
+
+### [2026-11-24] 按使用目的拆分 AI 搜索与个人 JD，并增加“保存到个人 JD”连接
+
+**任务目标：**
+
+个人 JD 只展示用户主动填写、粘贴或保存的岗位；AI 搜索继续展示搜索发现的岗位并突出来源、原网页与在招核验状态；用户可主动把搜索结果保存为个人 JD；收藏与投递计划保留两种来源并标注来源。
+
+**执行行为：**
+
+1. 定位到混入根因：搜索结果落库时写入 `job(owner_user_id=当前用户, visibility=PRIVATE)`，而个人 JD 分页只按 `owner_user_id` 过滤，导致 `PUBLIC_SEARCH`/`OFFICIAL` 来源岗位也出现在“我导入的岗位”。
+2. 后端新增 `SAVED_SEARCH` 来源类型（迁移 V25 更新 `ck_job_source_1`），个人 JD 分页与计数只返回 `USER_INPUT` 与 `SAVED_SEARCH`；历史已混入的搜索来源岗位仅通过查询隔离，不改写原数据。
+3. 新增 `POST /api/v1/jobs/{jobId}/save-to-personal`：校验岗位对当前用户可见、已完成分析且为 `ACTIVE`；复制当前 `job_version` 为新私有岗位并记录 `savedFromJobId`，同一源岗位重复保存返回已有个人 JD。
+4. 前端搜索结果卡片显示来源名称与“已核验/待确认/待核验”状态，并新增“保存到个人 JD”按钮；保存成功后可点击进入个人 JD。
+5. 个人 JD 页标题改为“我的个人 JD”，来源显示“个人导入/搜索保存”；个人 JD 卡片与详情增加“针对该岗位优化简历”，非个人来源岗位提供“保存到个人 JD”。
+6. 投递记录列表增加“来源”列：后端列表与详情查询左连接岗位来源，返回 `sourceType/sourceName`；手工录入显示“手工记录”。
+
+**文件变更：**
+
+| 操作类型 | 文件路径 | 具体变更 | 修改原因 |
+| --- | --- | --- | --- |
+| 新增 | `project/backend/src/main/resources/db/migration/V25__add_saved_search_job_source.sql` | 允许 `SAVED_SEARCH` 来源类型 | 区分个人填写与主动保存的搜索岗位 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobMapper.java` | 个人分页/计数过滤来源；新增保存来源、复制版本、幂等查询 | 隔离搜索来源并支持保存 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobService.java` | 新增 `saveToPersonal` | 复制搜索岗位为个人 JD |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/job/JobController.java` | 新增保存接口 | 提供主动保存入口 |
+| 修改 | `project/backend/src/main/java/com/aijob/backend/application/*` | 投递列表/详情返回岗位来源 | 投递计划标明来源 |
+| 修改 | `project/frontend/src/api/jobs.ts`、`src/api/types.ts`、`src/types/application.ts` | 保存接口与来源字段类型 | 对接后端 |
+| 修改 | `project/frontend/src/views/job-search/JobSearchView.vue` | 来源与核验状态、保存按钮、跳转个人 JD | AI 搜索按用途展示并连接个人 JD |
+| 修改 | `project/frontend/src/views/job-match/JobMatchView.vue` | 个人 JD 语义、定向简历与保存入口、来源标签 | 拆分两类岗位 |
+| 修改 | `project/frontend/src/views/application/ApplicationView.vue` | 投递列表增加来源列 | 标明两种来源 |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/job/JobServiceSaveToPersonalTest.java` | 保存、幂等、直接返回、未分析拒绝、不可见 5 项 | 覆盖主要分支 |
+| 新增 | `project/backend/src/test/java/com/aijob/backend/job/JobSaveToPersonalIntegrationTest.java` | 在 MySQL 测试库验证复制、JSON 元数据、幂等查询与个人列表隔离 | 验证真实 SQL 行为 |
+| 修改 | `project/backend/src/test/java/com/aijob/backend/job/JobMapperSqlTest.java` | 校验个人分页来源过滤与保存查询 | 防止查询条件回退 |
+| 修改 | `docs/功能资料/岗位推荐与投递_process.md` | 追加本记录 | 跟踪开发与验证 |
+
+**执行命令与验证：**
+
+- 命令：`mvn -o -q -DskipTests compile`
+- 结果：通过。
+- 命令：`mvn -o -q "-Dtest=JobServiceSaveToPersonalTest" test`
+- 结果：通过（5 项）。
+- 命令：`mvn -o -q "-Dtest=ApplicationServiceImplTest,JobServiceSaveToPersonalTest" test`
+- 结果：通过。
+- 命令：`mvn -o -q "-Dtest=JobMapperSqlTest" test`
+- 结果：通过（含新增个人分页来源过滤断言）。
+- 命令：`npm.cmd run type-check`
+- 结果：通过。
+- 命令：`npm.cmd run build -- --outDir "$env:TEMP\aijob-build-check" --emptyOutDir`
+- 结果：通过，产物写入系统临时目录，未覆盖工作区 `dist`。
+- 命令：`mvn -o -B "-Dtest=ApplicationIntegrationTest" test`
+- 结果：通过（26 项）。Flyway 在独立测试库 `career_business_test`（MySQL 8.0）上从 v24 迁移到 v25，V25 实际执行成功。
+- 命令：`mvn -o -B "-Dtest=JobSaveToPersonalIntegrationTest" test`
+- 结果：通过（1 项）。在 MySQL 8.0 测试库实际执行 `INSERT ... SELECT` 复制岗位版本、`JSON_SET` 记录 `savedFromJobId`、`JSON_EXTRACT` 幂等查询；个人分页只返回 `SAVED_SEARCH` 复制件，不返回原 `PUBLIC_SEARCH` 搜索岗位。
+
+**影响范围：**
+
+- 个人 JD 列表、个人 JD 相关的岗位选择（差距对比、定向简历、模拟面试）现在只包含 `USER_INPUT`/`SAVED_SEARCH`；搜索来源岗位需要主动保存后才会出现。
+- 搜索结果自身展示不变，仅新增来源、核验文案与保存入口；收藏仍可收藏搜索来源与个人来源并显示各自来源。
+- 新增迁移 V25，需在后端重启时由 Flyway 自动执行；`job_source` 仅新增允许值，不改既有数据。
+- 投递记录仅新增查询返回字段，未改表结构。
+
+**遗留问题：**
+
+- V25 已在独立测试库 `career_business_test` 实际执行成功；尚未在业务库执行（需重启后端由 Flyway 自动补迁移），也未用登录态浏览器走通“搜索 → 保存到个人 JD → 差距分析/定向简历”完整链路；本地无可用登录账号，需在真实环境确认。
+- 历史搜索来源岗位仍保留在原 `job` 表中，仅从个人 JD 列表隐藏；如需清理历史数据需另行确认。
+- 保存的搜索岗位沿用搜索落库时的 JD 正文与分析结果，若原搜索只有摘要，保存后仍以该正文为准。

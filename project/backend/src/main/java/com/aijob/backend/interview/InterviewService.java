@@ -240,6 +240,18 @@ public class InterviewService {
         if (session == null) throw BusinessException.notFound();
         int actual = ((Number) session.get("version")).intValue();
         if (expected != actual) throw BusinessException.versionConflict(actual);
+        if (Boolean.TRUE.equals(body.get("reevaluate"))) {
+            Map<String, Object> previous = mapper.report(interviewId, userId);
+            if (!"COMPLETED".equals(session.get("status")) || previous == null
+                    || !canReevaluate(interviewId, json.map(String.valueOf(previous.get("report_json"))))) {
+                throw BusinessException.conflict("当前报告无需重新评估", "INVALID_STATE");
+            }
+            AiTask previousTask = taskMapper.find(String.valueOf(previous.get("task_id")));
+            String completionType = previousTask != null
+                    && "NORMAL".equals(json.map(previousTask.getInputSnapshotJson()).get("completionType"))
+                    ? "NORMAL" : "EARLY_END";
+            return reportTask(userId, interviewId, route, key, body, session, completionType, null);
+        }
         if (!"WAITING_ANSWER".equals(String.valueOf(session.get("status")))) {
             throw BusinessException.conflict("仅等待回答状态可以结束面试", "INVALID_STATE");
         }
@@ -259,6 +271,7 @@ public class InterviewService {
             return item;
         }).toList();
         Map<String, Object> payload = Map.of("interviewId", interviewId, "completionType", completionType,
+                "reevaluate", "COMPLETED".equals(session.get("status")),
                 "messages", agentMessages(interviewId), "turnEvaluations", evaluations,
                 "skillSnapshot", skillSnapshots(userId));
         Map<String, Object> versions = Map.of("interviewVersion", session.get("version"));
@@ -276,7 +289,15 @@ public class InterviewService {
         Map<String, Object> result = json.map(String.valueOf(report.get("report_json")));
         result.put("interviewId", interviewId);
         result.put("reportVersion", report.get("report_version"));
+        result.put("canReevaluate", canReevaluate(interviewId, result));
         return result;
+    }
+
+    private boolean canReevaluate(String interviewId, Map<String, Object> report) {
+        if (report.containsKey("reviewedAnswerCount")) return false;
+        long submitted = mapper.messages(interviewId).stream().filter(message -> "USER".equals(message.get("role"))).count();
+        long scored = mapper.evaluations(interviewId).stream().filter(turn -> turn.get("overall_score") != null).count();
+        return submitted > scored;
     }
 
     public Map<String, Object> sessionVo(Map<String, Object> session, boolean withMessages) {
@@ -289,7 +310,6 @@ public class InterviewService {
         result.put("questionLimit", session.get("question_limit"));
         result.put("version", session.get("version"));
         result.put("pendingTaskId", session.get("pending_task_id"));
-        // U09/U11：岗位名、报告完成类型与实际有效回答数（列表查询带出，历史列表据此展示）
         result.put("jobTitle", session.get("job_title"));
         result.put("completionType", session.get("completion_type"));
         result.put("answeredCount", session.get("answered_count"));

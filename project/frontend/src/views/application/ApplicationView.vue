@@ -280,6 +280,19 @@ function statusTagType(status: ApplicationStatus): 'info' | 'primary' | 'warning
   }
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  OFFICIAL: '企业官方',
+  AUTHORIZED: '授权来源',
+  PUBLIC_SEARCH: '公开搜索',
+  USER_INPUT: '个人导入',
+  SAVED_SEARCH: '搜索保存',
+}
+
+function sourceLabel(row: ApplicationVO): string {
+  if (!row.jobId) return '手工记录'
+  return SOURCE_LABELS[row.sourceType || ''] || '未标注'
+}
+
 function formatDate(value: string | null): string {
   return value ?? '—'
 }
@@ -339,6 +352,13 @@ function formatDateTime(value: string): string {
       <el-table :data="records" stripe style="width: 100%">
         <el-table-column prop="companyName" label="公司" min-width="150" show-overflow-tooltip />
         <el-table-column prop="jobTitle" label="岗位" min-width="170" show-overflow-tooltip />
+        <el-table-column label="来源" width="110">
+          <template #default="{ row }">
+            <el-tag :type="asRecord(row).jobId ? 'info' : 'success'" size="small" effect="plain">
+              {{ sourceLabel(asRecord(row)) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" effect="light">

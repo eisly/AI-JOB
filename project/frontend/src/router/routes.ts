@@ -51,6 +51,7 @@ export const routes: RouteRecordRaw[] = [
       { path: 'growth', name: 'growth', component: GrowthView, meta: { title: '成长中心' } },
       { path: 'application', name: 'application', component: ApplicationView, meta: { title: '投递进度' } },
       { path: 'tasks', name: 'tasks', component: TasksView, meta: { title: '任务中心' } },
+      { path: 'account', name: 'account', component: () => import('@/views/account/AccountView.vue'), meta: { title: '账号设置' } },
     ],
   },
   {

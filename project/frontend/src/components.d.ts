@@ -56,6 +56,7 @@ declare module 'vue' {
     TaskStatus: typeof import('./components/TaskStatus.vue')['default']
     ThemeToggle: typeof import('./components/ThemeToggle.vue')['default']
     TrainingFlowHeader: typeof import('./components/training/TrainingFlowHeader.vue')['default']
+    UserAvatar: typeof import('./components/UserAvatar.vue')['default']
     WaitStatus: typeof import('./components/WaitStatus.vue')['default']
   }
 }

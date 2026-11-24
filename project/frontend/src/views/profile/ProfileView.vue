@@ -129,7 +129,6 @@ const graduationText = computed(() => {
 
 const majorText = computed(() => profile.value?.facts.major || '待补充')
 
-const warningsText = computed(() => (profile.value?.facts.warnings ?? []).join('；'))
 
 const displaySkills = computed(() => {
   const facts = profile.value?.facts
@@ -253,7 +252,6 @@ onMounted(load)
 
     <header class="profile-page__header">
       <h1>求职画像</h1>
-      <p>查看并完善你的求职目标，让 AI 为你匹配更合适的岗位和训练建议。</p>
     </header>
 
     <el-alert v-if="error" class="profile-page__alert" type="error" :title="error" show-icon :closable="false">
@@ -339,7 +337,6 @@ onMounted(load)
           </el-form-item>
 
           <div class="preferences-form__footer">
-            <span class="preferences-form__version">当前画像版本：{{ profile.profileVersion }}</span>
             <div class="preferences-form__actions">
               <el-button type="primary" :loading="saving" @click="handleSave">{{ saving ? '保存中…' : '保存求职偏好' }}</el-button>
               <el-button @click="handleReset">重置</el-button>
@@ -362,7 +359,6 @@ onMounted(load)
             <h2>已确认的简历信息</h2>
             <el-tag type="info" effect="plain" size="small">来自已确认简历</el-tag>
           </div>
-          <p class="panel__desc">以下信息来自你已确认的简历，如需修改请前往简历中心更新。</p>
 
           <div class="fact-list">
             <div class="fact-item">
@@ -382,19 +378,6 @@ onMounted(load)
             </div>
           </div>
 
-          <div class="info-box info-box--compact">
-            <el-icon><InfoFilled /></el-icon>
-            <span>这些信息已用于岗位匹配、简历优化和训练建议。如需修改，请前往简历中心更新。</span>
-          </div>
-
-          <el-alert
-            v-if="warningsText"
-            class="fact-warning"
-            type="warning"
-            :title="warningsText"
-            show-icon
-            :closable="false"
-          />
         </section>
 
         <section class="panel">
@@ -402,7 +385,6 @@ onMounted(load)
             <h2>技能掌握情况</h2>
             <el-tag type="info" effect="plain" size="small">来自已确认简历</el-tag>
           </div>
-          <p class="panel__desc">当前仅展示已确认简历中的技能事实，技能名称来自技能目录。</p>
 
           <div v-if="displaySkills.length" class="skill-list">
             <div v-for="skill in displaySkills" :key="skill.skillCode" class="skill-item">
@@ -551,15 +533,10 @@ onMounted(load)
   &__footer {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 16px;
     flex-wrap: wrap;
     margin-top: 28px;
-  }
-
-  &__version {
-    font-size: 12px;
-    color: $ai-text-tertiary;
   }
 
   &__actions {
@@ -633,10 +610,6 @@ onMounted(load)
     font-weight: 500;
     color: $ai-text-primary;
   }
-}
-
-.fact-warning {
-  margin-top: 12px;
 }
 
 .skill-list {

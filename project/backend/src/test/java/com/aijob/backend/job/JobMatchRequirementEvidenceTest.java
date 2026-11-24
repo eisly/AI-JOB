@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.aijob.backend.common.JsonService;
+import com.aijob.backend.common.BusinessException;
 import com.aijob.backend.profile.ProfileService;
 import com.aijob.backend.task.AiTask;
 
@@ -113,6 +115,34 @@ class JobMatchRequirementEvidenceTest {
         JsonNode snapshot = json.parse(sourceJson.getValue());
         assertEquals(0, snapshot.path("requirementEvidence").size());
         assertTrue(snapshot.path("requirementEvidenceCoverage").isNull());
+    }
+
+    @Test
+    void explicitComparisonChecksSelectedResumeAndSavesPublicJobGaps() {
+        String requirement = "熟悉 Redis 缓存一致性方案的实现与排查";
+        String quote = "使用 Redis 缓存商品信息";
+        when(mapper.lockBatch("match", "user")).thenReturn(batch(requirement));
+        when(eligibility.evaluate(any(), any())).thenReturn(Map.of("status", "UNKNOWN"));
+        when(scores.component(anyString(), any(), any(), anyString())).thenReturn(Map.of());
+        AiTask task = task(requirement, "其他简历的引文");
+        var payload = json.map(task.getInputSnapshotJson());
+        payload.put("resumeText", "实习经历：" + quote + "。");
+        payload.put("candidates", List.of(Map.of("jobId", "job", "jobVersion", 1,
+                "personalOwned", false, "requirements", Map.of("skills", List.of("redis")))));
+        task.setInputSnapshotJson(json.stringify(payload));
+        var card = new LinkedHashMap<String, Object>(Map.of("requirementQuote", requirement, "resumeQuote", quote,
+                "supportLevel", "PARTIAL", "gapTitle", "缺少一致性案例", "gapSummary", "尚未说明缓存失效策略。"));
+        var response = Map.of("items", List.of(Map.of("jobId", "job", "jobVersion", 1, "requirementEvidence", List.of(card))));
+        handler.success(task, json.tree(response));
+
+        var snapshot = ArgumentCaptor.forClass(String.class);
+        verify(mapper).insertItem(any(), eq("match"), eq("job"), eq(1), anyInt(), eq("UNKNOWN"), anyString(),
+                any(), anyString(), anyString(), anyString(), snapshot.capture());
+        var saved = json.parse(snapshot.getValue()).path("requirementEvidence").get(0);
+        assertEquals(quote, saved.path("resumeQuote").asText());
+        assertEquals("缺少一致性案例", saved.path("gapTitle").asText());
+        card.put("resumeQuote", "其他简历的引文");
+        assertThrows(BusinessException.class, () -> handler.success(task, json.tree(response)));
     }
 
     private AiTask task(String jdText, String resumeQuote) {

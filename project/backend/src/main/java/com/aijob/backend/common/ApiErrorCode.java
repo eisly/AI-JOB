@@ -23,7 +23,22 @@ public enum ApiErrorCode {
     RATE_LIMITED(429, 42901, "RATE_LIMITED", "请求过于频繁，请稍后再试", true),
     CODE_SEND_TOO_FREQUENT(429, 42902, "CODE_SEND_TOO_FREQUENT", "验证码发送过于频繁，请稍后再试", true),
     INTERNAL_ERROR(500, 50001, "INTERNAL_ERROR", "服务器内部错误", false),
-    DEPENDENCY_UNAVAILABLE(503, 50301, "DEPENDENCY_UNAVAILABLE", "依赖服务暂不可用，请稍后重试", true);
+    DEPENDENCY_UNAVAILABLE(503, 50301, "DEPENDENCY_UNAVAILABLE", "依赖服务暂不可用，请稍后重试", true),
+
+    CURRENT_PASSWORD_INCORRECT(400, 40004, "CURRENT_PASSWORD_INCORRECT", "当前密码不正确", false),
+    NEW_PASSWORD_SAME(400, 40005, "NEW_PASSWORD_SAME", "新密码不能与当前密码相同", false),
+    PASSWORD_CONFIRM_MISMATCH(400, 40006, "PASSWORD_CONFIRM_MISMATCH", "两次输入的密码不一致", false),
+    INVALID_PHONE(400, 40007, "INVALID_PHONE", "请输入正确的 11 位手机号", false),
+    VERIFICATION_CODE_EXPIRED(400, 40008, "VERIFICATION_CODE_EXPIRED", "验证码已过期，请重新获取", false),
+    VERIFICATION_CODE_TOO_MANY(400, 40009, "VERIFICATION_CODE_TOO_MANY", "验证码错误次数过多，请重新获取", false),
+    CSRF_INVALID(403, 40302, "CSRF_INVALID", "请求校验失败，请刷新页面后重试", false),
+    PHONE_ALREADY_BOUND(409, 40908, "PHONE_ALREADY_BOUND", "该手机号已绑定其他账号", false),
+    PHONE_CHANGED(409, 40909, "PHONE_CHANGED", "手机号已变更，请刷新后重试", false),
+    AVATAR_TOO_LARGE(413, 41302, "AVATAR_TOO_LARGE", "图片大小不能超过 2 MB", false),
+    UNSUPPORTED_AVATAR_TYPE(415, 41502, "UNSUPPORTED_AVATAR_TYPE", "仅支持 JPG、PNG、WebP 格式", false),
+    IMAGE_UNREADABLE(415, 41503, "IMAGE_UNREADABLE", "图片无法读取，请更换图片后重试", false),
+    PASSWORD_ATTEMPT_LIMIT(429, 42903, "PASSWORD_ATTEMPT_LIMIT", "尝试次数过多，请 15 分钟后再试", true),
+    PHONE_BINDING_UNAVAILABLE(503, 50302, "PHONE_BINDING_UNAVAILABLE", "暂未开通手机号绑定", true);
 
     private final int httpStatus;
     private final int code;

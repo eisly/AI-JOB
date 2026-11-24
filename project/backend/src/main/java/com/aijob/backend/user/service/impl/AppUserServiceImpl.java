@@ -1,5 +1,6 @@
 package com.aijob.backend.user.service.impl;
 
+import com.aijob.backend.account.NicknameRules;
 import com.aijob.backend.auth.vo.UserVO;
 import com.aijob.backend.common.ApiErrorCode;
 import com.aijob.backend.common.BusinessException;
@@ -40,7 +41,8 @@ public class AppUserServiceImpl implements AppUserService {
 
     @Override
     public UserVO updateNickname(String userId, String nickname) {
-        int updated = appUserMapper.updateNickname(userId, nickname.trim());
+        String normalized = NicknameRules.normalize(nickname);
+        int updated = appUserMapper.updateNicknameAndTouch(userId, normalized);
         if (updated == 0) {
             throw new BusinessException(ApiErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
         }

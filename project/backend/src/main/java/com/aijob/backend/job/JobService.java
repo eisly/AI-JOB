@@ -27,6 +27,7 @@ import com.aijob.backend.task.TaskService;
 @Service
 public class JobService {
 
+    static final int RESUME_COMPARISON_TEXT_LIMIT = 30_000;
     private static final Pattern INTERNSHIP_WORD = Pattern.compile("\\bintern(ship)?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern GRADUATION_YEAR = Pattern.compile("\\d{4}\\s*届");
     private static final Pattern AI_WORD = Pattern.compile("\\bai\\b", Pattern.CASE_INSENSITIVE);
@@ -184,6 +185,43 @@ public class JobService {
                 });
     }
 
+    @Transactional
+    public Map<String, Object> saveToPersonal(String userId, String jobId) {
+        Map<String, Object> row = mapper.job(jobId, userId);
+        if (row == null) {
+            throw BusinessException.notFound();
+        }
+        String sourceType = String.valueOf(row.get("source_type"));
+        if ("USER_INPUT".equals(sourceType) || "SAVED_SEARCH".equals(sourceType)) {
+            return savedPersonalResult(jobId, false);
+        }
+        if (!"ACTIVE".equals(String.valueOf(row.get("status"))) || row.get("requirements_json") == null) {
+            throw BusinessException.conflict("只能保存已完成分析的岗位", "INVALID_STATE");
+        }
+        String existing = mapper.savedPersonalJobId(userId, jobId);
+        if (existing != null) {
+            return savedPersonalResult(existing, false);
+        }
+        String newJobId = UUID.randomUUID().toString();
+        String sourceId = UUID.randomUUID().toString();
+        String sourceName = row.get("source_name") == null ? "AI 搜索" : String.valueOf(row.get("source_name"));
+        mapper.insertSavedSource(sourceId, sourceName);
+        mapper.insertSavedJob(newJobId, sourceId, userId,
+                row.get("source_url") == null ? null : String.valueOf(row.get("source_url")));
+        int version = ((Number) row.get("job_version")).intValue();
+        if (mapper.copyJobVersion(UUID.randomUUID().toString(), newJobId, jobId, version) != 1) {
+            throw BusinessException.conflict("岗位版本已变化，请刷新后重试", "VERSION_CONFLICT");
+        }
+        return savedPersonalResult(newJobId, true);
+    }
+
+    private Map<String, Object> savedPersonalResult(String jobId, boolean created) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("jobId", jobId);
+        result.put("created", created);
+        return result;
+    }
+
     static String cityCodeFromJd(String jdText) {
         Matcher matcher = JD_CITY.matcher(jdText);
         String city = null;
@@ -232,13 +270,22 @@ public class JobService {
         if (expected != actual) {
             throw BusinessException.versionConflict(actual);
         }
-        String resumeId = profile.get("activeResumeVersionId") == null ? null : String.valueOf(profile.get("activeResumeVersionId"));
-        if (resumeId == null || mapperRequirementsMissing(profile)) {
+        String selectedResumeId = Data.uuid(body, "resumeVersionId", false);
+        boolean comparison = selectedResumeId != null;
+        String resumeId = comparison ? selectedResumeId : (String) profile.get("activeResumeVersionId");
+        if (!comparison && (resumeId == null || mapperRequirementsMissing(profile))) {
             throw BusinessException.conflict("请先确认简历并完整保存求职偏好", "INVALID_STATE");
         }
-        Map<String, Object> resume = resumes.version(resumeId, userId);
-        if (resume == null || !"CONFIRMED".equals(String.valueOf(resume.get("status")))) {
+        Map<String, Object> resume = comparison ? resumes.versionWithResume(resumeId, userId) : resumes.version(resumeId, userId);
+        if (comparison && (resume == null || !Set.of("PARSED", "CONFIRMED").contains(String.valueOf(resume.get("status")))
+                || !(resume.get("extracted_text") instanceof String text) || text.isBlank())) {
+            throw BusinessException.conflict("请选择已解析且有原文的简历", "INVALID_STATE");
+        }
+        if (!comparison && (resume == null || !"CONFIRMED".equals(String.valueOf(resume.get("status"))))) {
             throw BusinessException.conflict("当前生效简历未确认", "INVALID_STATE");
+        }
+        if (comparison && Data.list(body, "jobIds", true, 1).size() != 1) {
+            throw BusinessException.validation("jobIds", "请选择一个目标岗位");
         }
         List<Map<String, Object>> jobs = candidates(userId, body);
         boolean includeUnknown = Data.bool(body, "includeUnknown", true);
@@ -254,17 +301,32 @@ public class JobService {
         }
         var snapshot = abilityService.matchSnapshot(userId, personalSkills);
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("profile", profile);
+        Map<String, Object> inputProfile = new LinkedHashMap<>(profile);
+        if (comparison) {
+            inputProfile.put("activeResumeVersionId", resumeId);
+            inputProfile.put("facts", resume.get("confirmed_facts_json") == null
+                    ? Map.of() : json.map(String.valueOf(resume.get("confirmed_facts_json"))));
+            String resumeText = (String) resume.get("extracted_text");
+            int end = Math.min(resumeText.length(), RESUME_COMPARISON_TEXT_LIMIT);
+            if (end < resumeText.length() && Character.isHighSurrogate(resumeText.charAt(end - 1))) end--;
+            payload.put("resumeText", resumeText.substring(0, end));
+        }
+        payload.put("profile", inputProfile);
         payload.put("skillSnapshot", profilesSkillSnapshots(snapshot.skills()));
         payload.put("candidates", candidates);
-        if (hasPersonalJob) payload.put("resumeQuotes", confirmedResumeQuotes(resume));
+        if (!comparison && hasPersonalJob) payload.put("resumeQuotes", confirmedResumeQuotes(resume));
         String matchId = UUID.randomUUID().toString();
         Map<String, Object> versions = new LinkedHashMap<>();
         versions.put("profileVersion", actual);
         versions.put("resumeVersionId", resumeId);
         List<Map<String, Object>> jobSnapshots = jobs.stream().map(row -> jobVo(row, userId)).toList();
-        Map<String, Object> batchSnapshot = Map.of("includeUnknown", includeUnknown, "jobs", jobSnapshots,
-                "scoreEvidenceIds", snapshot.evidenceIds());
+        Map<String, Object> batchSnapshot = new LinkedHashMap<>(Map.of(
+                "includeUnknown", includeUnknown, "jobs", jobSnapshots, "scoreEvidenceIds", snapshot.evidenceIds()));
+        if (comparison) {
+            batchSnapshot.put("resumeName", resume.get("title"));
+            batchSnapshot.put("resumeVersionNo", resume.get("version_no"));
+            batchSnapshot.put("resumeTruncated", ((String) resume.get("extracted_text")).length() > RESUME_COMPARISON_TEXT_LIMIT);
+        }
         return tasks.create(userId, "POST", route, key, body, "JOB_MATCH", "JOB_MATCH", matchId,
                 versions, payload, taskId -> mapper.insertBatch(matchId, userId, taskId, actual, resumeId,
                         json.stringify(batchSnapshot)));
@@ -297,14 +359,26 @@ public class JobService {
                 || mapper.staleItems(String.valueOf(batch.get("id"))) > 0;
         result.put("isStale", stale);
         result.put("createdAt", view.value(batch.get("created_at")));
+        Map<String, Object> snapshot = batch.get("input_snapshot_json") instanceof String input
+                ? json.map(input) : Map.of();
+        boolean comparison = snapshot.get("resumeName") != null;
+        if (comparison) {
+            result.put("resumeVersionId", batch.get("resume_version_id"));
+            result.put("resumeName", snapshot.get("resumeName"));
+            result.put("resumeVersionNo", snapshot.get("resumeVersionNo"));
+            result.put("resumeTruncated", snapshot.get("resumeTruncated"));
+            if (snapshot.get("jobs") instanceof List<?> jobs && !jobs.isEmpty() && jobs.getFirst() instanceof Map<?, ?> job) {
+                result.put("targetTitle", job.get("title"));
+            }
+        }
         List<Map<String, Object>> items = new ArrayList<>();
         if (includeItems && "READY".equals(String.valueOf(batch.get("status")))) {
-            boolean includeUnknown = Boolean.TRUE.equals(json.map(String.valueOf(batch.get("input_snapshot_json"))).get("includeUnknown"));
+            boolean includeUnknown = Boolean.TRUE.equals(snapshot.get("includeUnknown"));
             for (Map<String, Object> item : mapper.items(String.valueOf(batch.get("id")))) {
                 String eligibility = String.valueOf(item.get("eligibility_status"));
-                if (!includeUnknown && "UNKNOWN".equals(eligibility)) continue;
+                if (!comparison && !includeUnknown && "UNKNOWN".equals(eligibility)) continue;
                 Map<String, Object> detail = matchItemVo(item);
-                if ("FAIL".equals(eligibility) && !(detail.get("source") instanceof Map<?, ?> source
+                if (!comparison && "FAIL".equals(eligibility) && !(detail.get("source") instanceof Map<?, ?> source
                         && "USER_INPUT".equals(source.get("type")))) {
                     continue;
                 }

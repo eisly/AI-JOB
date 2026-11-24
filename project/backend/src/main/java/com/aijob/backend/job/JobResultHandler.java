@@ -151,6 +151,7 @@ public class JobResultHandler implements TaskResultHandler {
                 .collect(Collectors.toMap(item -> String.valueOf(item.get("id")), Function.identity()));
         List<Map<String, Object>> fixedSnapshots = (List<Map<String, Object>>) payload.getOrDefault("skillSnapshot", List.of());
         List<String> resumeQuotes = (List<String>) payload.getOrDefault("resumeQuotes", List.of());
+        String resumeText = payload.get("resumeText") instanceof String text ? text : null;
         Map<String, List<String>> scoreEvidenceIds = (Map<String, List<String>>) batchSnapshot.getOrDefault("scoreEvidenceIds", Map.of());
         Map<String, Map<String, Object>> snapshots = fixedSnapshots.stream().map(item -> {
             Map<String, Object> snapshot = new LinkedHashMap<>();
@@ -190,10 +191,12 @@ public class JobResultHandler implements TaskResultHandler {
                     scores.component("preference", preference, BigDecimal.valueOf(0.15), "profile-preferences-v1"));
             List<Map<String, Object>> gaps = gaps((List<Map<String, Object>>) agent.getOrDefault("gaps", List.of()),
                     requiredSkills, requirements, snapshots, personalOwned ? scoreEvidenceIds : Map.of());
-            List<Map<String, Object>> requirementEvidence = personalOwned
-                    ? requirementEvidence(agent.get("requirementEvidence"), jobSnapshot, resumeQuotes, requiredSkills)
+            boolean hasEvidence = personalOwned || resumeText != null;
+            int jdLimit = resumeText == null ? 4000 : 30_000;
+            List<Map<String, Object>> requirementEvidence = hasEvidence
+                    ? requirementEvidence(agent.get("requirementEvidence"), jobSnapshot, resumeQuotes, resumeText, requiredSkills)
                     : List.of();
-            Map<String, Object> coverage = personalOwned ? evidenceCoverage(jobSnapshot, requirementEvidence) : null;
+            Map<String, Object> coverage = hasEvidence ? evidenceCoverage(jobSnapshot, requirementEvidence, jdLimit) : null;
             List<String> reasons = strings((List<Object>) agent.getOrDefault("reasons", List.of()));
             String eligibilityStatus = String.valueOf(eligibilityResult.get("status"));
             prepared.add(new PreparedItem(jobId, jobVersion, eligibilityStatus, eligibilityResult,
@@ -267,7 +270,7 @@ public class JobResultHandler implements TaskResultHandler {
     }
 
     private List<Map<String, Object>> requirementEvidence(Object rawEvidence, Map<String, Object> jobSnapshot,
-                                                           List<String> resumeQuotes, List<String> allowedSkills) {
+                                                           List<String> resumeQuotes, String resumeText, List<String> allowedSkills) {
         if (!(rawEvidence instanceof List<?> entries) || entries.isEmpty()) {
             return List.of();
         }
@@ -282,6 +285,7 @@ public class JobResultHandler implements TaskResultHandler {
             }
             String requirement = textValue(entry.get("requirementQuote"), 2000);
             if (requirement == null || !jdText.contains(requirement)) {
+                if (resumeText != null) throw BusinessException.aiSchema("差距对应的岗位要求不是 JD 原文");
                 continue;
             }
             String skill = textValue(entry.get("skillCode"), 64);
@@ -289,27 +293,38 @@ public class JobResultHandler implements TaskResultHandler {
                 skill = null;
             }
             String quote = textValue(entry.get("resumeQuote"), 2000);
-            if (quote != null && !resumeQuotes.contains(quote)) {
+            if (resumeText != null && quote != null && !resumeText.contains(quote)) {
+                throw BusinessException.aiSchema("差距对应的简历摘录不是所选版本原文");
+            }
+            if (resumeText == null && quote != null && !resumeQuotes.contains(quote)) {
                 quote = null;
             }
             String level = quote == null ? "MISSING"
                     : "DIRECT".equals(String.valueOf(entry.get("supportLevel"))) ? "DIRECT" : "PARTIAL";
             Map<String, Object> card = new LinkedHashMap<>();
             card.put("requirementQuote", requirement);
+            if (resumeText != null) card.put("requirementTitle", textValue(entry.get("requirementTitle"), 60));
             card.put("skillCode", skill);
             card.put("supportLevel", level);
             card.put("resumeQuote", quote);
+            if (resumeText != null && !"DIRECT".equals(level)) {
+                String title = textValue(entry.get("gapTitle"), 60);
+                String summary = textValue(entry.get("gapSummary"), 400);
+                if (title == null || summary == null) throw BusinessException.aiSchema("差距缺少标题或说明");
+                card.put("gapTitle", title);
+                card.put("gapSummary", summary);
+            }
             result.add(card);
         }
         return result;
     }
 
-    private Map<String, Object> evidenceCoverage(Map<String, Object> jobSnapshot, List<Map<String, Object>> evidence) {
+    private Map<String, Object> evidenceCoverage(Map<String, Object> jobSnapshot, List<Map<String, Object>> evidence, int jdLimit) {
         String jdText = jobSnapshot.get("jdText") == null ? "" : String.valueOf(jobSnapshot.get("jdText"));
         Map<String, Object> coverage = new LinkedHashMap<>();
         coverage.put("jdCharacters", jdText.length());
-        coverage.put("jdInputLimit", 4000);
-        coverage.put("jdTruncated", jdText.length() > 4000);
+        coverage.put("jdInputLimit", jdLimit);
+        coverage.put("jdTruncated", jdText.length() > jdLimit);
         coverage.put("requirementLimit", 12);
         coverage.put("returned", evidence.size());
         return coverage;

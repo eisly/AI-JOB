@@ -1,5 +1,5 @@
-import { request } from './request'
-import { getAccessToken, getDevUserId } from './session'
+import { ApiError, request } from './request'
+import { getAccessToken, getDevUserId, setCsrfToken } from './session'
 import type { TokenVO, UserVO } from './types'
 
 export const authApi = {
@@ -15,8 +15,15 @@ export const authApi = {
   refresh() {
     return request<TokenVO>('/api/v1/auth/refresh', { method: 'POST', body: {}, auth: false })
   },
-  logout() {
-    return request<boolean>('/api/v1/auth/logout', { method: 'POST', body: {} })
+  async logout() {
+    try {
+      const csrf = await request<{ csrfToken: string }>('/api/v1/auth/csrf', { auth: false })
+      setCsrfToken(csrf.csrfToken)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return
+      throw error
+    }
+    await request<boolean>('/api/v1/auth/logout', { method: 'POST', body: {} })
   },
   me() {
     const devUserId = getDevUserId()

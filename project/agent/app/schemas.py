@@ -132,9 +132,12 @@ SkillSupportLevel = Literal["DIRECT", "PARTIAL", "MISSING"]
 
 class RequirementEvidenceItem(APIModel):
     requirement_quote: str = Field(min_length=1, max_length=2000)
+    requirement_title: str | None = Field(default=None, max_length=60)
     skill_code: str | None = Field(default=None, max_length=64)
     support_level: SkillSupportLevel = "MISSING"
     resume_quote: str | None = Field(default=None, max_length=2000)
+    gap_title: str | None = Field(default=None, max_length=60)
+    gap_summary: str | None = Field(default=None, max_length=400)
 
 
 class AIMatchItem(APIModel):
@@ -280,6 +283,7 @@ class AIInterviewReportResult(APIModel):
     evaluation: EvaluationVO
     gaps: list[Gap] = Field(default_factory=list, max_length=20)
     answered_question_count: int = Field(ge=0)
+    reviewed_answer_count: int = Field(ge=0)
     completion_type: str
 
 
@@ -547,7 +551,14 @@ class TurnModelOutput(APIModel):
     next_question: TurnQuestionModelOutput | None = None
 
 
+class ReportAnswerScores(APIModel):
+    correctness: float = Field(ge=0, le=100)
+    completeness: float = Field(ge=0, le=100)
+    expression: float = Field(ge=0, le=100)
+
+
 class ReportModelOutput(APIModel):
+    unscored_answer_scores: dict[UUID, ReportAnswerScores] = Field(default_factory=dict)
     strengths: list[str] = Field(default_factory=list, max_length=10)
     improvements: list[str] = Field(default_factory=list, max_length=10)
     reference_answer: str = Field(default="", max_length=5000)
@@ -677,6 +688,7 @@ class JobMatchPayload(APIModel):
     skill_snapshot: list[SkillSnapshotItem] = Field(default_factory=list, max_length=100)
     candidates: list[JobMatchCandidate] = Field(min_length=1, max_length=50)
     resume_quotes: list[str] = Field(default_factory=list, max_length=90)
+    resume_text: str | None = Field(default=None, min_length=1, max_length=30000)
 
 
 class MatchItemInput(APIModel):

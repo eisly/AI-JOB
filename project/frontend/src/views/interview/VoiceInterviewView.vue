@@ -517,8 +517,10 @@ onBeforeUnmount(() => {
         v-if="currentInterview?.status === 'COMPLETED' || report || reportLoading || reportError"
         :report="report"
         :loading="reportLoading"
+        :reevaluating="ending || (!!activeTask && !isTerminalTask(activeTask.status))"
         :error="reportError"
         @retry="loadReport(selectedInterviewId)"
+        @reevaluate="endInterview(true)"
       />
 
       <section class="panel history-panel">

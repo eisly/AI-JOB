@@ -20,6 +20,12 @@ public class ApplicationVO {
 
     private String jobTitle;
 
+    /** 关联岗位来源类型；无关联岗位时为 null */
+    private String sourceType;
+
+    /** 关联岗位来源名称；无关联岗位时为 null */
+    private String sourceName;
+
     private String cityCode;
 
     private String education;
@@ -82,6 +88,22 @@ public class ApplicationVO {
 
     public void setJobTitle(String jobTitle) {
         this.jobTitle = jobTitle;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceName() {
+        return sourceName;
+    }
+
+    public void setSourceName(String sourceName) {
+        this.sourceName = sourceName;
     }
 
     public String getCityCode() {

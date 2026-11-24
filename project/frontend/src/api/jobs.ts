@@ -18,13 +18,16 @@ export const jobApi = {
   correctFields(jobId: string, body: { expectedJobVersion: number; cityCode: string | null; skillCodes: string[]; sourceQuote: string; reason: string }) {
     return request<JobVO>(`/api/v1/jobs/${jobId}/extracted-fields`, { method: 'PUT', body })
   },
+  saveToPersonal(jobId: string) {
+    return request<{ jobId: string; created: boolean }>(`/api/v1/jobs/${jobId}/save-to-personal`, { method: 'POST', body: {} })
+  },
   favorites(query: PageQuery = {}) {
     return request<Page<JobVO>>('/api/v1/favorites', { query })
   },
   setFavorite(jobId: string, favorite: boolean) {
     return request<boolean>(`/api/v1/favorites/${jobId}`, { method: favorite ? 'PUT' : 'DELETE', ...(favorite ? { body: {} } : {}) })
   },
-  createMatch(body: { expectedProfileVersion: number; jobIds?: string[]; includeUnknown: boolean }) {
+  createMatch(body: { expectedProfileVersion: number; jobIds: [string]; resumeVersionId: string }) {
     return submitTrackedTask('/api/v1/job-matches', body, '/jobs?tab=matches')
   },
   getMatch(matchId: string) {

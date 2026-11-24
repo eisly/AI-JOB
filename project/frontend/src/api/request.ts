@@ -8,11 +8,12 @@ export class ApiError extends Error {
   traceId: string
   retryable: boolean
   details?: Record<string, unknown>
+  retryAfterSeconds?: number
 
   get httpStatus() { return this.status }
   get isVersionConflict() { return this.status === 409 && this.key === 'VERSION_CONFLICT' }
 
-  constructor(message: string, options: { status?: number; code?: number | string; key?: string; traceId?: string; retryable?: boolean; details?: Record<string, unknown> } = {}) {
+  constructor(message: string, options: { status?: number; code?: number | string; key?: string; traceId?: string; retryable?: boolean; details?: Record<string, unknown>; retryAfterSeconds?: number } = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = options.status ?? 0
@@ -21,6 +22,7 @@ export class ApiError extends Error {
     this.traceId = options.traceId ?? ''
     this.retryable = options.retryable ?? true
     this.details = options.details
+    this.retryAfterSeconds = options.retryAfterSeconds
   }
 }
 
@@ -80,6 +82,8 @@ async function parsePayload(response: Response) {
 
 async function toApiError(response: Response) {
   const payload = await parsePayload(response)
+  const retryAfterHeader = response.headers.get('retry-after')
+  const retryAfterSeconds = retryAfterHeader && !Number.isNaN(Number(retryAfterHeader)) ? Number(retryAfterHeader) : undefined
   return new ApiError(payload?.msg || `请求失败（HTTP ${response.status}）`, {
     status: response.status,
     code: payload?.code ?? response.status,
@@ -87,6 +91,7 @@ async function toApiError(response: Response) {
     traceId: payload?.traceId || response.headers.get('x-trace-id') || '',
     retryable: payload?.error?.retryable ?? (response.status >= 500 || response.status === 429),
     details: payload?.error?.details,
+    retryAfterSeconds,
   })
 }
 
@@ -127,7 +132,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (auth) {
     Object.entries(createAuthHeaders()).forEach(([key, value]) => headers.set(key, value))
   }
-  if (getCsrfToken() && init.method && init.method !== 'GET') {
+  if (!headers.has('X-CSRF-Token') && getCsrfToken() && init.method && init.method !== 'GET') {
     headers.set('X-CSRF-Token', getCsrfToken())
   }
   if (idempotency) {
@@ -184,7 +189,7 @@ export async function requestBlob(path: string, options: RequestOptions = {}): P
   if (idempotency) {
     headers.set('Idempotency-Key', typeof idempotency === 'string' ? idempotency : newIdempotencyKey())
   }
-  if (getCsrfToken() && init.method && init.method !== 'GET') {
+  if (!headers.has('X-CSRF-Token') && getCsrfToken() && init.method && init.method !== 'GET') {
     headers.set('X-CSRF-Token', getCsrfToken())
   }
   let requestBody: BodyInit | undefined

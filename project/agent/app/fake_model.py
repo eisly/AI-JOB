@@ -186,7 +186,21 @@ def _match(request: LLMRequest) -> dict[str, Any]:
         }
         requirement_evidence = []
         resume_quotes = payload.get("resumeQuotes") or []
-        if candidate.get("personalOwned") and candidate.get("jdText"):
+        resume_text = payload.get("resumeText")
+        if resume_text and candidate.get("jdText"):
+            for line in str(candidate["jdText"]).splitlines()[:12]:
+                requirement = line.strip()[:2000]
+                if not requirement:
+                    continue
+                matched_text = requirement in resume_text
+                requirement_evidence.append({
+                    "requirementQuote": requirement,
+                    "supportLevel": "DIRECT" if matched_text else "MISSING",
+                    "resumeQuote": requirement if matched_text else None,
+                    "gapTitle": None if matched_text else "简历未体现此要求",
+                    "gapSummary": None if matched_text else "模拟结果。请对照岗位要求核对简历中的对应项目或经历。",
+                })
+        elif candidate.get("personalOwned") and candidate.get("jdText"):
             jd_line = next(
                 (line.strip() for line in str(candidate.get("jdText") or "").splitlines() if line.strip()),
                 "",
@@ -535,7 +549,7 @@ def _report(request: LLMRequest) -> dict[str, Any]:
     ]
     average = round(sum(valid_scores) / len(valid_scores), 1) if valid_scores else None
     strengths = ["能够完成基本的技术回答"] if average is not None else []
-    improvements = ["补充边界条件、量化结果和失败时的兜底方案"] if average is not None else ["需要完成有效回答后再生成复盘"]
+    improvements = ["补充边界条件、量化结果和失败时的兜底方案"]
     snapshots = [item for item in payload.get("skillSnapshot") or [] if isinstance(item, dict)]
     gaps = {
         str(item.get("skillCode")): "继续完成该技能的专项训练并积累有效证据"
@@ -543,6 +557,10 @@ def _report(request: LLMRequest) -> dict[str, Any]:
         if item.get("score") is None or float(item.get("score") or 0) < 70
     }
     return {
+        "unscoredAnswerScores": {
+            message_id: {"correctness": 0, "completeness": 0, "expression": 0}
+            for message_id in request.context.get("unscored_answer_ids") or []
+        },
         "strengths": strengths,
         "improvements": improvements,
         "referenceAnswer": "回答应包含场景、方案、取舍、边界和验证方式。",

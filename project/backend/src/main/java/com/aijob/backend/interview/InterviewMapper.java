@@ -33,12 +33,11 @@ public interface InterviewMapper {
     @Select("SELECT * FROM interview_session WHERE id=#{id} AND user_id=#{userId} FOR UPDATE")
     Map<String,Object> lockSession(@Param("id") String id, @Param("userId") String userId);
 
-    /** U09/U11：列表查询带出岗位名（按会话固定的 job_version）、报告完成类型与实际有效回答数，
-     * 历史列表据此优先展示岗位标题，并区分正常完成/提前结束/无有效回答 */
+    /** 历史列表展示固定岗位、报告完成类型以及实际提交的回答次数。 */
     @Select("""
             SELECT i.*, jv.title AS job_title, ir.completion_type,
-              (SELECT COUNT(*) FROM interview_turn_evaluation e
-                WHERE e.interview_id=i.id AND e.overall_score IS NOT NULL) AS answered_count
+              (SELECT COUNT(*) FROM interview_message m
+                WHERE m.interview_id=i.id AND m.role='USER') AS answered_count
             FROM interview_session i
             LEFT JOIN job_version jv ON jv.job_id=i.job_id AND jv.version_no=i.job_version
             LEFT JOIN interview_report ir ON ir.interview_id=i.id
@@ -65,7 +64,7 @@ public interface InterviewMapper {
                    @Param("questionNo") int questionNo, @Param("followUpNo") int followUpNo, @Param("lastSeq") int lastSeq);
 
     @Update("""
-            UPDATE interview_session SET status='COMPLETED',pending_task_id=#{taskId},ended_at=UTC_TIMESTAMP(3),
+            UPDATE interview_session SET status='COMPLETED',pending_task_id=#{taskId},ended_at=COALESCE(ended_at,UTC_TIMESTAMP(3)),
               version=version+1,updated_at=UTC_TIMESTAMP(3) WHERE id=#{id} AND status='ENDING'
             """)
     int complete(@Param("id") String id, @Param("taskId") String taskId);
@@ -121,6 +120,15 @@ public interface InterviewMapper {
             VALUES (#{id},#{interviewId},#{taskId},1,#{reportJson},#{overallScore},#{completionType})
             """)
     int insertReport(@Param("id") String id, @Param("interviewId") String interviewId, @Param("taskId") String taskId,
+                     @Param("reportJson") String reportJson, @Param("overallScore") Object overallScore,
+                     @Param("completionType") String completionType);
+
+    @Update("""
+            UPDATE interview_report SET task_id=#{taskId},report_version=report_version+1,report_json=#{reportJson},
+              overall_score=#{overallScore},completion_type=#{completionType},updated_at=UTC_TIMESTAMP(3)
+            WHERE interview_id=#{interviewId}
+            """)
+    int updateReport(@Param("interviewId") String interviewId, @Param("taskId") String taskId,
                      @Param("reportJson") String reportJson, @Param("overallScore") Object overallScore,
                      @Param("completionType") String completionType);
 

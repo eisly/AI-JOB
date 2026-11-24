@@ -364,6 +364,8 @@ public class ApplicationServiceImpl implements ApplicationService {
         vo.setJobId(record.getJobId());
         vo.setCompanyName(record.getCompanyName());
         vo.setJobTitle(record.getJobTitle());
+        vo.setSourceType(record.getSourceType());
+        vo.setSourceName(record.getSourceName());
         vo.setCityCode(record.getCityCode());
         vo.setEducation(record.getEducation());
         vo.setSalaryText(record.getSalaryText());

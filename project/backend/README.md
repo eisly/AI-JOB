@@ -39,3 +39,45 @@ mvn clean test -Dintegration-tests=true
 ```
 
 Windows 也可使用本目录的 `mvn-run.bat`，在 PowerShell 中执行 `./mvn-run.bat clean test -Dintegration-tests=true`。脚本优先使用已有 `JAVA_HOME` 和 PATH 中的 Maven，可通过 `AIJOB_JAVA_HOME`、`AIJOB_MVN`、`AIJOB_SETTINGS`、`AIJOB_M2_REPO` 显式指定配置；团队验收使用 JDK 21，并确认没有跳过测试。
+
+## 账号管理
+
+账号资料、昵称、密码、手机号与头像统一位于 `/api/v1/account/**`，身份只取自 JWT 主体，写接口必须携带账号级 `X-CSRF-Token`（由 `GET /api/v1/account/csrf` 签发，与 `/api/v1/auth/csrf` 隔离）。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/account/profile` | 账号资料（手机号脱敏、头像地址含版本） |
+| GET | `/api/v1/account/capabilities` | 短信通道与头像上传能力探测 |
+| GET | `/api/v1/account/csrf` | 签发账号写接口 CSRF 令牌 |
+| PATCH | `/api/v1/account/nickname` | 修改昵称（1-30 字符，无变更不写库） |
+| POST | `/api/v1/account/password/change` | 修改密码（校验当前密码，成功后全会话失效） |
+| POST | `/api/v1/account/phone/code` | 发送手机号验证码（BIND/REBIND） |
+| POST | `/api/v1/account/phone/bind` | 绑定手机号 |
+| POST | `/api/v1/account/phone/rebind` | 换绑手机号（需当前密码） |
+| POST | `/api/v1/account/phone/unbind` | 解绑手机号（需当前密码） |
+| POST | `/api/v1/account/avatar` | 上传头像（JPEG/PNG/WebP，≤2 MB） |
+| DELETE | `/api/v1/account/avatar` | 恢复默认头像 |
+| GET | `/api/v1/account/avatars/me?v={version}` | 受控读取本人头像（ETag / 304） |
+
+新增错误码：`CURRENT_PASSWORD_INCORRECT(40004)`、`NEW_PASSWORD_SAME(40005)`、`PASSWORD_CONFIRM_MISMATCH(40006)`、`INVALID_PHONE(40007)`、`VERIFICATION_CODE_EXPIRED(40008)`、`VERIFICATION_CODE_TOO_MANY(40009)`、`CSRF_INVALID(40302)`、`PHONE_ALREADY_BOUND(40908)`、`PHONE_CHANGED(40909)`、`AVATAR_TOO_LARGE(41302)`、`UNSUPPORTED_AVATAR_TYPE(41502)`、`IMAGE_UNREADABLE(41503)`、`PASSWORD_ATTEMPT_LIMIT(42903)`、`PHONE_BINDING_UNAVAILABLE(50302)`。
+
+配置项（均带默认值，可用环境变量覆盖）：
+
+```yaml
+app:
+  account:
+    sms-code: { ttl-seconds: 600, max-attempts: 5, cooldown-seconds: 60 }
+    password: { max-failures: 5, lock-seconds: 900 }
+    avatar: { max-bytes: 2097152 }
+  sms:
+    enabled: false
+    expose-code-in-response: false
+```
+
+迁移在 `V24__add_account_management.sql`。单测命令：
+
+```powershell
+mvn test "-Dtest=PhoneMaskTest,SourceDigestTest,AccountNicknameRulesTest,AccountPasswordRulesTest,AccountErrorCodeTest,AvatarTypeDetectorTest,AvatarStorageServiceTest,PasswordAttemptGuardTest,AccountCsrfServiceTest,PhoneVerificationCodeServiceTest,AccountProfileServiceTest" "-Djacoco.skip=true"
+```
+
+集成测试使用 `career_business_test`（默认 3307）与 Redis；两者任一不可达时相关用例无法验证。

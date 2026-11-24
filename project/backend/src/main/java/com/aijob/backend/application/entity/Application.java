@@ -14,6 +14,10 @@ public class Application {
     private String jobId;
     private String companyName;
     private String jobTitle;
+    /** 关联岗位来源类型（仅查询时填充，非表字段） */
+    private String sourceType;
+    /** 关联岗位来源名称（仅查询时填充，非表字段） */
+    private String sourceName;
     private String cityCode;
     private String education;
     private String salaryText;
@@ -66,6 +70,22 @@ public class Application {
 
     public void setJobTitle(String jobTitle) {
         this.jobTitle = jobTitle;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public String getSourceName() {
+        return sourceName;
+    }
+
+    public void setSourceName(String sourceName) {
+        this.sourceName = sourceName;
     }
 
     public String getCityCode() {

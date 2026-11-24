@@ -67,6 +67,7 @@ public class SecurityConfig {
                         // 简历原件签名下载：owner+expires+signature 均参与 HMAC 校验（Controller 内验签），
                         // 供 Agent 的 RESUME_OCR 任务匿名获取原始 PDF；无有效签名仍会被拒绝。
                         .requestMatchers("/api/v1/resume-versions/*/file").permitAll()
+                        .requestMatchers("/api/v1/account/**").authenticated()
                         .requestMatchers("/api/v1/users/me").authenticated()
                         .requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN")
                         .anyRequest().authenticated())

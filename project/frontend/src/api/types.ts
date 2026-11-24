@@ -28,6 +28,10 @@ export interface UserVO {
   nickname: string
   role: 'USER' | 'ADMIN'
   createdAt: string
+  phoneMasked?: string | null
+  avatarUrl?: string | null
+  avatarVersion?: number
+  profileUpdatedAt?: string | null
 }
 
 export interface TokenVO {
@@ -281,7 +285,7 @@ export interface ResumeOptimizationVO {
 export interface JobSourceVO {
   id: string
   name: string
-  type: 'OFFICIAL' | 'AUTHORIZED' | 'PUBLIC_SEARCH' | 'USER_INPUT'
+  type: 'OFFICIAL' | 'AUTHORIZED' | 'PUBLIC_SEARCH' | 'USER_INPUT' | 'SAVED_SEARCH'
   baseUrl: string | null
   verificationStatus: 'VERIFIED' | 'UNVERIFIED' | 'DISABLED'
   verifiedAt: string | null
@@ -346,9 +350,12 @@ export interface GapVO {
 
 export interface RequirementEvidenceVO {
   requirementQuote: string
+  requirementTitle?: string | null
   skillCode: string | null
   supportLevel: 'DIRECT' | 'PARTIAL' | 'MISSING'
   resumeQuote: string | null
+  gapTitle?: string | null
+  gapSummary?: string | null
 }
 
 export interface RequirementEvidenceCoverageVO {
@@ -382,6 +389,7 @@ export interface MatchItemVO {
   jobId: string
   jobVersion: number
   title: string
+  companyName?: string | null
   eligibility: { status: 'PASS' | 'FAIL' | 'UNKNOWN'; ruleVersion: string; checks: EligibilityCheckVO[] }
   matchScore: number | null
   scoreVersion: string
@@ -402,6 +410,11 @@ export interface MatchBatchVO {
   status: 'GENERATING' | 'READY' | 'FAILED'
   isStale: boolean
   items: MatchItemVO[]
+  resumeVersionId?: string
+  resumeName?: string
+  resumeVersionNo?: number
+  resumeTruncated?: boolean
+  targetTitle?: string
   createdAt: string
 }
 
@@ -1003,6 +1016,8 @@ export interface VoiceConsentVO {
 export interface InterviewReportVO {
   interviewId: string
   reportVersion: number
+  canReevaluate?: boolean
+  reviewedAnswerCount?: number
   evaluation: EvaluationVO
   gaps: GapVO[]
   evidenceIds: string[]
@@ -1051,6 +1066,8 @@ export interface ApplicationVO {
   jobId: string | null
   companyName: string
   jobTitle: string
+  sourceType?: 'OFFICIAL' | 'AUTHORIZED' | 'PUBLIC_SEARCH' | 'USER_INPUT' | 'SAVED_SEARCH' | null
+  sourceName?: string | null
   cityCode: string | null
   education: string | null
   salaryText: string | null
@@ -1088,3 +1105,62 @@ export interface ApplicationCreateInput {
 }
 
 export type ApplicationUpdateInput = Omit<ApplicationCreateInput, 'jobId'> & { expectedVersion: number }
+
+export interface AccountProfileVO {
+  id: string
+  email: string
+  nickname: string
+  phoneMasked: string | null
+  phoneBound: boolean
+  avatarUrl: string | null
+  avatarVersion: number
+  createdAt: string
+  profileUpdatedAt: string | null
+}
+
+export interface AccountCapabilitiesVO {
+  smsBindingAvailable: boolean
+  avatarUploadAvailable: boolean
+  avatarMaxBytes: number
+  avatarAcceptTypes: string[]
+}
+
+export interface CsrfVO {
+  csrfToken: string
+}
+
+export type PhonePurpose = 'BIND' | 'REBIND'
+
+export interface SendPhoneCodeInput {
+  phone: string
+  purpose: PhonePurpose
+}
+
+export interface SendPhoneCodeResponse {
+  retryAfterSeconds: number
+  expiresInSeconds: number
+  devCode?: string
+}
+
+export interface BindPhoneInput {
+  phone: string
+  code: string
+}
+
+export interface RebindPhoneInput extends BindPhoneInput {
+  currentPassword: string
+}
+
+export interface UnbindPhoneInput {
+  currentPassword: string
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}
+
+export interface ChangePasswordResponse {
+  sessionsRevoked: boolean
+}

@@ -27,8 +27,9 @@ export const interviewApi = {
   }) {
     return submitTrackedTask(`/api/v1/interviews/${interviewId}/answers`, body, `/interview?interviewId=${interviewId}`)
   },
-  end(interviewId: string, expectedVersion: number) {
-    return submitTrackedTask(`/api/v1/interviews/${interviewId}/end`, { expectedVersion }, `/interview?interviewId=${interviewId}&report=1`)
+  end(interviewId: string, expectedVersion: number, reevaluate = false, basePath = '/interview') {
+    const body = reevaluate ? { expectedVersion, reevaluate } : { expectedVersion }
+    return submitTrackedTask(`/api/v1/interviews/${interviewId}/end`, body, `${basePath}?interviewId=${interviewId}&report=1`)
   },
   report(interviewId: string) {
     return request<InterviewReportVO>(`/api/v1/interviews/${interviewId}/report`)
